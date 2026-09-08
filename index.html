@@ -1,0 +1,998 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ocean Hub — Fleet Operations</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Space+Mono:wght@400;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --navy-deep:#0B2436;
+    --navy:#123A52;
+    --navy-light:#1C4E6B;
+    --paper:#F1E9D8;
+    --paper-2:#EBE0C9;
+    --paper-line:#D9CBB0;
+    --brass:#B8862E;
+    --brass-light:#D9A94A;
+    --signal-red:#A3372E;
+    --seafoam:#2F6E62;
+    --ink:#1C2B2E;
+    --ink-soft:#5A6B6E;
+    --white-card:#FBF8F1;
+    --shadow: 0 2px 8px rgba(11,36,54,0.12);
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:'Inter',system-ui,sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    background-image:
+      repeating-linear-gradient(var(--paper) 0px, var(--paper) 27px, var(--paper-line) 27px, var(--paper-line) 28px);
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding:0 24px 80px;}
+
+  /* ===== Header ===== */
+  header.top{
+    background: linear-gradient(180deg, var(--navy-deep), var(--navy));
+    color:#EFE7D6;
+    position:relative;
+    overflow:hidden;
+    border-bottom:3px solid var(--brass);
+  }
+  header.top .contour{
+    position:absolute; inset:0; opacity:0.14; pointer-events:none;
+  }
+  header.top .inner{
+    position:relative; max-width:1180px; margin:0 auto; padding:28px 24px 22px;
+    display:flex; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; gap:12px;
+  }
+  .brandmark{display:flex; align-items:center; gap:14px;}
+  .brandmark svg{flex-shrink:0;}
+  .brand-title{
+    font-family:'Libre Baskerville',serif;
+    font-size:30px; letter-spacing:0.5px; margin:0; color:#F6EFDE;
+  }
+  .brand-sub{
+    font-family:'Space Mono',monospace; font-size:11px; letter-spacing:2.5px;
+    text-transform:uppercase; color: var(--brass-light); margin:2px 0 0;
+  }
+  .header-meta{
+    font-family:'Space Mono',monospace; font-size:12px; color:#B9C7CE; text-align:right;
+  }
+  .header-meta .clock{color:var(--brass-light); font-weight:700;}
+
+  nav.tabs{
+    display:flex; gap:2px; background:var(--navy-deep); padding:0 24px;
+    max-width:1180px; margin:0 auto; flex-wrap:wrap;
+  }
+  nav.tabs button{
+    font-family:'Inter',sans-serif; font-size:13.5px; font-weight:600; letter-spacing:0.3px;
+    color:#A9BCC5; background:transparent; border:none; padding:13px 18px;
+    cursor:pointer; border-bottom:3px solid transparent; display:flex; align-items:center; gap:7px;
+  }
+  nav.tabs button:hover{color:#F6EFDE;}
+  nav.tabs button.active{color:#F6EFDE; border-bottom-color:var(--brass);}
+  nav.tabs button svg{width:15px;height:15px;}
+
+  main{padding-top:28px;}
+  h2.section-title{
+    font-family:'Libre Baskerville',serif; font-size:22px; margin:0 0 4px; color:var(--navy-deep);
+  }
+  p.section-sub{ margin:0 0 20px; color:var(--ink-soft); font-size:13.5px; }
+
+  /* ===== Cards / KPIs ===== */
+  .kpi-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px; margin-bottom:28px;}
+  .kpi{
+    background:var(--white-card); border:1px solid var(--paper-line); border-radius:6px;
+    padding:16px 18px; box-shadow:var(--shadow); position:relative;
+  }
+  .kpi .label{font-size:11px; text-transform:uppercase; letter-spacing:1.2px; color:var(--ink-soft); font-weight:600;}
+  .kpi .value{font-family:'Space Mono',monospace; font-size:28px; font-weight:700; margin-top:6px; color:var(--navy-deep);}
+  .kpi.alert .value{color:var(--signal-red);}
+  .kpi.warn .value{color:var(--brass);}
+  .kpi.good .value{color:var(--seafoam);}
+
+  .card-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(270px,1fr)); gap:16px;}
+  .card{
+    background:var(--white-card); border:1px solid var(--paper-line); border-radius:6px;
+    box-shadow:var(--shadow); padding:16px 18px; cursor:pointer; transition:transform .12s;
+  }
+  .card:hover{transform:translateY(-2px);}
+  .card .card-top{display:flex; justify-content:space-between; align-items:flex-start; gap:8px;}
+  .card h3{font-family:'Libre Baskerville',serif; font-size:17px; margin:0 0 2px; color:var(--navy-deep);}
+  .card .meta-line{font-size:12px; color:var(--ink-soft); font-family:'Space Mono',monospace;}
+  .card .card-stats{display:flex; gap:18px; margin-top:12px; padding-top:12px; border-top:1px dashed var(--paper-line);}
+  .card .stat{font-size:11px; color:var(--ink-soft);}
+  .card .stat b{display:block; font-family:'Space Mono',monospace; font-size:15px; color:var(--navy); font-weight:700;}
+
+  /* ===== Status stamps ===== */
+  .stamp{
+    display:inline-block; font-family:'Space Mono',monospace; font-size:10px; font-weight:700;
+    letter-spacing:1.2px; text-transform:uppercase; padding:3px 9px; border-radius:3px;
+    border:1.5px solid currentColor; transform:rotate(-2deg); white-space:nowrap;
+  }
+  .stamp.overdue{color:var(--signal-red); background:rgba(163,55,46,0.07);}
+  .stamp.due-soon{color:var(--brass); background:rgba(184,134,46,0.08);}
+  .stamp.upcoming{color:var(--navy); background:rgba(18,58,82,0.06);}
+  .stamp.completed{color:var(--seafoam); background:rgba(47,110,98,0.08); transform:rotate(0);}
+  .stamp.active{color:var(--seafoam); background:rgba(47,110,98,0.08);}
+  .stamp.docked{color:var(--navy); background:rgba(18,58,82,0.06);}
+  .stamp.in-maintenance{color:var(--brass); background:rgba(184,134,46,0.08);}
+  .stamp.valid{color:var(--seafoam);}
+  .stamp.expiring{color:var(--brass);}
+  .stamp.expired{color:var(--signal-red);}
+
+  /* ===== Table ===== */
+  .table-wrap{background:var(--white-card); border:1px solid var(--paper-line); border-radius:6px; box-shadow:var(--shadow); overflow-x:auto;}
+  table{width:100%; border-collapse:collapse; font-size:13.5px;}
+  thead th{
+    text-align:left; font-size:10.5px; text-transform:uppercase; letter-spacing:1px; color:var(--ink-soft);
+    padding:12px 14px; border-bottom:1.5px solid var(--paper-line); font-weight:700; white-space:nowrap;
+  }
+  tbody td{padding:11px 14px; border-bottom:1px solid var(--paper-line); vertical-align:middle;}
+  tbody tr:last-child td{border-bottom:none;}
+  tbody tr:hover{background:rgba(184,134,46,0.05);}
+  td.num, th.num{font-family:'Space Mono',monospace;}
+
+  /* ===== Buttons ===== */
+  .btn{
+    font-family:'Inter',sans-serif; font-size:13px; font-weight:600; padding:8px 15px; border-radius:5px;
+    border:1.5px solid var(--navy); background:transparent; color:var(--navy); cursor:pointer;
+  }
+  .btn:hover{background:var(--navy); color:#F6EFDE;}
+  .btn.primary{background:var(--brass); border-color:var(--brass); color:#2A1E08;}
+  .btn.primary:hover{background:var(--brass-light); border-color:var(--brass-light);}
+  .btn.danger{border-color:var(--signal-red); color:var(--signal-red);}
+  .btn.danger:hover{background:var(--signal-red); color:#fff;}
+  .btn.small{padding:5px 10px; font-size:12px;}
+  .btn.ghost{border-color:var(--paper-line); color:var(--ink-soft);}
+  .btn.ghost:hover{background:var(--paper-2); color:var(--ink);}
+  .toolbar{display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:16px;}
+  .filters{display:flex; gap:8px; flex-wrap:wrap;}
+  select, input, textarea{
+    font-family:'Inter',sans-serif; font-size:13px; padding:8px 10px; border:1.5px solid var(--paper-line);
+    border-radius:5px; background:#fff; color:var(--ink);
+  }
+  select:focus, input:focus, textarea:focus{outline:2px solid var(--brass-light); border-color:var(--brass);}
+  label.field{display:flex; flex-direction:column; gap:4px; font-size:12px; font-weight:600; color:var(--ink-soft); margin-bottom:12px;}
+  .field-row{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
+
+  /* ===== Timeline (dashboard) ===== */
+  .timeline{background:var(--white-card); border:1px solid var(--paper-line); border-radius:6px; box-shadow:var(--shadow); padding:6px 0;}
+  .tl-item{display:flex; align-items:center; gap:14px; padding:12px 18px; border-bottom:1px solid var(--paper-line);}
+  .tl-item:last-child{border-bottom:none;}
+  .tl-date{font-family:'Space Mono',monospace; font-size:12px; color:var(--navy); width:82px; flex-shrink:0;}
+  .tl-body{flex:1; min-width:0;}
+  .tl-title{font-size:13.5px; font-weight:600; color:var(--ink);}
+  .tl-sub{font-size:11.5px; color:var(--ink-soft); margin-top:1px;}
+  .empty-note{padding:24px; text-align:center; color:var(--ink-soft); font-size:13px;}
+
+  /* ===== Crew ===== */
+  .qual-chip{
+    display:inline-flex; align-items:center; gap:6px; font-size:11.5px; padding:5px 10px; border-radius:14px;
+    border:1px solid var(--paper-line); background:var(--paper-2); margin:3px 5px 3px 0;
+  }
+  .qual-dot{width:7px;height:7px;border-radius:50%; flex-shrink:0;}
+  .qual-dot.valid{background:var(--seafoam);}
+  .qual-dot.expiring{background:var(--brass);}
+  .qual-dot.expired{background:var(--signal-red);}
+
+  /* ===== Modal ===== */
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(11,36,54,0.55); display:flex; align-items:flex-start;
+    justify-content:center; padding:40px 16px; overflow-y:auto; z-index:100;
+  }
+  .modal{
+    background:var(--white-card); border-radius:8px; max-width:560px; width:100%;
+    padding:26px 28px 24px; box-shadow:0 12px 40px rgba(0,0,0,0.3);
+  }
+  .modal h3{font-family:'Libre Baskerville',serif; margin:0 0 18px; color:var(--navy-deep); font-size:19px;}
+  .modal .modal-actions{display:flex; justify-content:flex-end; gap:10px; margin-top:20px; padding-top:16px; border-top:1px dashed var(--paper-line);}
+  .modal .close-x{position:absolute;}
+  .modal-header-row{display:flex; justify-content:space-between; align-items:center;}
+
+  .detail-section{margin-top:16px;}
+  .detail-section h4{font-size:12px; text-transform:uppercase; letter-spacing:1px; color:var(--ink-soft); margin:0 0 8px; border-bottom:1px solid var(--paper-line); padding-bottom:6px;}
+  .mini-row{display:flex; justify-content:space-between; align-items:center; padding:6px 0; font-size:13px;}
+
+  .cost-total-bar{
+    background:var(--navy-deep); color:#F6EFDE; border-radius:6px; padding:16px 20px; margin-bottom:20px;
+    display:flex; gap:32px; flex-wrap:wrap; align-items:center;
+  }
+  .cost-total-bar .ctb-item .label{font-size:10.5px; text-transform:uppercase; letter-spacing:1px; color:var(--brass-light);}
+  .cost-total-bar .ctb-item .value{font-family:'Space Mono',monospace; font-size:22px; font-weight:700;}
+
+  @media (max-width:640px){
+    .field-row{grid-template-columns:1fr;}
+    header.top .inner{flex-direction:column; align-items:flex-start;}
+    .header-meta{text-align:left;}
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <svg class="contour" viewBox="0 0 1180 140" preserveAspectRatio="none" width="100%" height="140">
+    <path d="M0,30 Q150,10 300,30 T600,30 T900,30 T1180,30" fill="none" stroke="#F6EFDE" stroke-width="1"/>
+    <path d="M0,60 Q150,42 300,60 T600,60 T900,60 T1180,60" fill="none" stroke="#F6EFDE" stroke-width="1"/>
+    <path d="M0,90 Q150,74 300,90 T600,90 T900,90 T1180,90" fill="none" stroke="#F6EFDE" stroke-width="1"/>
+    <path d="M0,118 Q150,104 300,118 T600,118 T900,118 T1180,118" fill="none" stroke="#F6EFDE" stroke-width="1"/>
+  </svg>
+  <div class="inner">
+    <div class="brandmark">
+      <svg width="44" height="44" viewBox="0 0 44 44" fill="none">
+        <circle cx="22" cy="22" r="20" stroke="#D9A94A" stroke-width="1.5"/>
+        <path d="M22 6 L22 38 M6 22 L38 22" stroke="#D9A94A" stroke-width="1"/>
+        <path d="M22 10 L26 22 L22 34 L18 22 Z" fill="#D9A94A"/>
+      </svg>
+      <div>
+        <p class="brand-title">Ocean Hub</p>
+        <p class="brand-sub">Fleet Operations Ledger</p>
+      </div>
+    </div>
+    <div class="header-meta" id="headerMeta"></div>
+  </div>
+</header>
+
+<nav class="tabs" id="tabNav"></nav>
+
+<div class="wrap">
+  <main id="mainContent"></main>
+</div>
+
+<div id="modalRoot"></div>
+
+<script>
+/* ============================= STATE ============================= */
+const STORAGE_KEY = 'oceanhub-fleet-v1';
+let state = {
+  vessels: [],
+  maintenance: [],
+  crew: [],
+  marina: [],
+  activeTab: 'dashboard',
+  modal: null,
+  filters: { vessel:'all', category:'all', status:'all' }
+};
+
+function uid(prefix){ return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+
+function seedData(){
+  const v1 = uid('v'), v2 = uid('v'), v3 = uid('v'), v4 = uid('v');
+  state.vessels = [
+    { id:v1, name:'MV Zephyr', type:'Workboat', reg:'ZA-4471-DBN', status:'active', engineHours:4820, notes:'Primary harbour support vessel.', fixedCosts:[
+      { id:uid('fc'), label:'Hull & machinery insurance', amount:3200, frequency:'monthly' },
+      { id:uid('fc'), label:'SAMSA registration & survey', amount:6500, frequency:'annual' },
+      { id:uid('fc'), label:'Satellite comms subscription', amount:450, frequency:'monthly' },
+    ]},
+    { id:v2, name:'Sea Otter II', type:'Crew Tender', reg:'ZA-2290-DBN', status:'active', engineHours:2110, notes:'', fixedCosts:[
+      { id:uid('fc'), label:'Hull & machinery insurance', amount:1800, frequency:'monthly' },
+      { id:uid('fc'), label:'SAMSA registration & survey', amount:4200, frequency:'annual' },
+    ]},
+    { id:v3, name:'MV Kingfisher', type:'Patrol Vessel', reg:'ZA-3187-RBY', status:'in-maintenance', engineHours:9760, notes:'In yard for shaft seal replacement.', fixedCosts:[
+      { id:uid('fc'), label:'Hull & machinery insurance', amount:5100, frequency:'monthly' },
+      { id:uid('fc'), label:'SAMSA registration & survey', amount:8900, frequency:'annual' },
+      { id:uid('fc'), label:'Tracking & security system', amount:320, frequency:'monthly' },
+    ]},
+    { id:v4, name:'Coral Tug', type:'Tugboat', reg:'ZA-5502-DBN', status:'docked', engineHours:15320, notes:'', fixedCosts:[
+      { id:uid('fc'), label:'Hull & machinery insurance', amount:4400, frequency:'monthly' },
+      { id:uid('fc'), label:'SAMSA registration & survey', amount:7200, frequency:'annual' },
+    ]},
+  ];
+  const today = new Date();
+  const d = (offsetDays)=>{ const t = new Date(today); t.setDate(t.getDate()+offsetDays); return t.toISOString().slice(0,10); };
+  state.maintenance = [
+    { id:uid('m'), vesselId:v1, category:'scheduled', title:'150-hour engine service', description:'Oil, filters, impeller check.', dueDate:d(-4), status:'overdue', cost:8200, priority:'high' },
+    { id:uid('m'), vesselId:v1, category:'scheduled', title:'Life raft service & recertification', description:'Annual SOLAS raft inspection.', dueDate:d(11), status:'upcoming', cost:4600, priority:'medium' },
+    { id:uid('m'), vesselId:v2, category:'unscheduled', title:'Bilge pump failure', description:'Pump seized during last outing, needs replacement.', dueDate:d(2), status:'upcoming', cost:2100, priority:'high' },
+    { id:uid('m'), vesselId:v3, category:'unscheduled', title:'Shaft seal replacement', description:'Water ingress detected at shaft gland.', dueDate:d(-1), status:'overdue', cost:34500, priority:'high' },
+    { id:uid('m'), vesselId:v3, category:'scheduled', title:'Hull anti-foul & haul-out', description:'Scheduled 24-month haul-out.', dueDate:d(45), status:'upcoming', cost:52000, priority:'medium' },
+    { id:uid('m'), vesselId:v4, category:'scheduled', title:'Gearbox oil change', description:'', dueDate:d(6), status:'upcoming', cost:3100, priority:'low' },
+    { id:uid('m'), vesselId:v4, category:'unscheduled', title:'Nav light wiring fault', description:'Port side nav light intermittent.', dueDate:d(-20), status:'completed', completedDate:d(-15), cost:850, priority:'low' },
+  ];
+  state.crew = [
+    { id:uid('c'), name:'Sipho Ndlovu', role:'Master', vesselId:v1, quals:[
+      { id:uid('q'), name:'Master <500GT Certificate of Competency', expiry:d(210) },
+      { id:uid('q'), name:'STCW Basic Safety Training', expiry:d(40) },
+      { id:uid('q'), name:'Medical Fitness Certificate (ENG1 equiv.)', expiry:d(-12) },
+    ]},
+    { id:uid('c'), name:'Amelia Botha', role:'Deckhand / Engineer', vesselId:v3, quals:[
+      { id:uid('q'), name:'STCW Basic Safety Training', expiry:d(300) },
+      { id:uid('q'), name:'Marine Engine Room Rating', expiry:d(55) },
+    ]},
+    { id:uid('c'), name:'Thabo Mokoena', role:'Skipper', vesselId:v4, quals:[
+      { id:uid('q'), name:'Skipper Restricted Waters Ticket', expiry:d(140) },
+      { id:uid('q'), name:'First Aid Level 2', expiry:d(20) },
+      { id:uid('q'), name:'GMDSS Restricted Operator Certificate', expiry:d(400) },
+    ]},
+  ];
+  state.marina = [
+    { id:uid('mk'), name:'Durban Point Yacht Marina', berth:'C-14', vesselId:v1, contact:'Marina Office', phone:'031 555 0142', monthlyFee:4200, contractEnd:d(150), extraCosts:[
+      { id:uid('x'), label:'Shore power connection', amount:380, date:d(-10) }
+    ]},
+    { id:uid('mk'), name:'Durban Point Yacht Marina', berth:'C-16', vesselId:v2, contact:'Marina Office', phone:'031 555 0142', monthlyFee:2600, contractEnd:d(150), extraCosts:[]},
+    { id:uid('mk'), name:'Bayhead Ship Repair Yard', berth:'Slipway 2', vesselId:v3, contact:'Yard Manager', phone:'031 555 0288', monthlyFee:6800, contractEnd:d(30), extraCosts:[
+      { id:uid('x'), label:'Crane lift', amount:2200, date:d(-3) },
+      { id:uid('x'), label:'Yard storage - materials', amount:640, date:d(-3) }
+    ]},
+    { id:uid('mk'), name:'Salisbury Island Small Craft Basin', berth:'B-05', vesselId:v4, contact:'Harbour Master', phone:'031 555 0310', monthlyFee:3100, contractEnd:d(280), extraCosts:[]},
+  ];
+}
+
+/* ============================= STORAGE ============================= */
+async function loadState(){
+  try{
+    const res = await window.storage.get(STORAGE_KEY, false);
+    if(res && res.value){
+      const parsed = JSON.parse(res.value);
+      state.vessels = parsed.vessels || [];
+      state.maintenance = parsed.maintenance || [];
+      state.crew = parsed.crew || [];
+      state.marina = parsed.marina || [];
+    } else {
+      seedData();
+      await persist();
+    }
+  } catch(e){
+    seedData();
+    try{ await persist(); }catch(e2){ /* storage unavailable, continue in-memory */ }
+  }
+  render();
+}
+
+async function persist(){
+  try{
+    await window.storage.set(STORAGE_KEY, JSON.stringify({
+      vessels: state.vessels, maintenance: state.maintenance, crew: state.crew, marina: state.marina
+    }), false);
+  } catch(e){ /* best effort */ }
+}
+
+/* ============================= HELPERS ============================= */
+function fmtCurrency(n){
+  n = Number(n)||0;
+  return 'R' + n.toLocaleString('en-ZA', {minimumFractionDigits:0, maximumFractionDigits:0});
+}
+function fmtDate(iso){
+  if(!iso) return '—';
+  const dt = new Date(iso+'T00:00:00');
+  return dt.toLocaleDateString('en-ZA', {day:'2-digit', month:'short', year:'numeric'});
+}
+function daysUntil(iso){
+  const today = new Date(); today.setHours(0,0,0,0);
+  const dt = new Date(iso+'T00:00:00');
+  return Math.round((dt-today)/86400000);
+}
+function vesselName(id){ const v = state.vessels.find(x=>x.id===id); return v ? v.name : '—'; }
+function monthlyEquivalent(amount, frequency){
+  amount = Number(amount)||0;
+  if(frequency==='annual') return amount/12;
+  if(frequency==='quarterly') return amount/3;
+  return amount;
+}
+function vesselMonthlyFixed(v){ return (v.fixedCosts||[]).reduce((s,c)=>s+monthlyEquivalent(c.amount,c.frequency),0); }
+function freqLabel(f){ return { monthly:'/month', quarterly:'/quarter', annual:'/year' }[f] || ''; }
+function maintStatus(m){
+  if(m.status==='completed') return 'completed';
+  const dd = daysUntil(m.dueDate);
+  if(dd < 0) return 'overdue';
+  if(dd <= 14) return 'due-soon';
+  return 'upcoming';
+}
+function qualStatus(expiry){
+  const dd = daysUntil(expiry);
+  if(dd < 0) return 'expired';
+  if(dd <= 60) return 'expiring';
+  return 'valid';
+}
+function stampLabel(s){
+  return { overdue:'Overdue', 'due-soon':'Due soon', upcoming:'Upcoming', completed:'Completed',
+           active:'Active', docked:'Docked', 'in-maintenance':'In maintenance',
+           valid:'Valid', expiring:'Expiring', expired:'Expired' }[s] || s;
+}
+function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* ============================= HEADER CLOCK ============================= */
+function renderHeaderMeta(){
+  const el = document.getElementById('headerMeta');
+  const now = new Date();
+  el.innerHTML = `Log date <span class="clock">${now.toLocaleDateString('en-ZA',{day:'2-digit',month:'short',year:'numeric'})}</span><br>${state.vessels.length} vessels on register`;
+}
+
+/* ============================= NAV ============================= */
+const TABS = [
+  { id:'dashboard', label:'Dashboard', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>' },
+  { id:'vessels', label:'Vessels', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l1.5-6h15L21 17"/><path d="M6 11V6h8l3 5"/><path d="M2 20c2 1.5 4 1.5 6 0s4-1.5 6 0 4 1.5 6 0"/></svg>' },
+  { id:'maintenance', label:'Maintenance', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a4 4 0 1 0-5.4 5.4L2 19v3h3l7.3-7.3a4 4 0 0 0 5.4-5.4l-2.8 2.8-2-2z"/></svg>' },
+  { id:'crew', label:'Crew', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20c0-3.5 3-6 6.5-6s6.5 2.5 6.5 6"/><circle cx="18" cy="8" r="2.6"/><path d="M15.5 14.3c2.9.4 5 2.6 5 5.7"/></svg>' },
+  { id:'marina', label:'Marina & costs', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 10V4h4v3"/><path d="M2 10h20l-2 8H4z"/><path d="M12 4v6"/><path d="M2 20c2 1.2 4 1.2 6 0s4-1.2 6 0 4 1.2 6 0"/></svg>' },
+];
+function renderNav(){
+  const nav = document.getElementById('tabNav');
+  nav.innerHTML = TABS.map(t=>`<button class="${state.activeTab===t.id?'active':''}" data-tab="${t.id}">${t.icon}${t.label}</button>`).join('');
+  nav.querySelectorAll('button').forEach(b=>b.addEventListener('click', ()=>{ state.activeTab = b.dataset.tab; render(); }));
+}
+
+/* ============================= DASHBOARD ============================= */
+function renderDashboard(){
+  const overdue = state.maintenance.filter(m=>maintStatus(m)==='overdue').length;
+  const dueSoon = state.maintenance.filter(m=>maintStatus(m)==='due-soon').length;
+  const expiringQuals = state.crew.flatMap(c=>c.quals).filter(q=>qualStatus(q.expiry)!=='valid').length;
+  const monthlyFixed = state.vessels.reduce((s,v)=>s+vesselMonthlyFixed(v),0);
+
+  const events = [];
+  state.maintenance.filter(m=>m.status!=='completed').forEach(m=>{
+    events.push({ date:m.dueDate, kind:'Maintenance', title:m.title, sub:`${vesselName(m.vesselId)} · ${m.category==='scheduled'?'Scheduled':'Unscheduled'} · ${fmtCurrency(m.cost)}`, status:maintStatus(m) });
+  });
+  state.crew.forEach(c=>c.quals.forEach(q=>{
+    events.push({ date:q.expiry, kind:'Qualification', title:q.name, sub:`${c.name} (${c.role})`, status:qualStatus(q.expiry)==='expired'?'overdue':(qualStatus(q.expiry)==='expiring'?'due-soon':'upcoming') });
+  }));
+  state.marina.forEach(m=>{
+    events.push({ date:m.contractEnd, kind:'Berth contract', title:`${m.name} — berth ${m.berth}`, sub:`${vesselName(m.vesselId)} · renewal`, status: daysUntil(m.contractEnd)<0?'overdue':(daysUntil(m.contractEnd)<=30?'due-soon':'upcoming') });
+  });
+  events.sort((a,b)=> new Date(a.date) - new Date(b.date));
+  const upcoming = events.slice(0,10);
+
+  return `
+    <h2 class="section-title">Fleet dashboard</h2>
+    <p class="section-sub">Overview across the register — maintenance, crew certification and berth commitments.</p>
+    <div class="kpi-grid">
+      <div class="kpi"><div class="label">Vessels on register</div><div class="value">${state.vessels.length}</div></div>
+      <div class="kpi ${overdue>0?'alert':''}"><div class="label">Overdue maintenance</div><div class="value">${overdue}</div></div>
+      <div class="kpi ${dueSoon>0?'warn':''}"><div class="label">Due within 14 days</div><div class="value">${dueSoon}</div></div>
+      <div class="kpi ${expiringQuals>0?'warn':''}"><div class="label">Quals expiring / expired</div><div class="value">${expiringQuals}</div></div>
+      <div class="kpi good"><div class="label">Monthly fixed costs</div><div class="value">${fmtCurrency(monthlyFixed)}</div></div>
+    </div>
+    <h2 class="section-title" style="font-size:18px;">Upcoming events</h2>
+    <p class="section-sub">Merged view of maintenance due dates, certificate expiries and berth renewals.</p>
+    <div class="timeline">
+      ${upcoming.length===0 ? '<div class="empty-note">Nothing on the horizon.</div>' : upcoming.map(e=>`
+        <div class="tl-item">
+          <div class="tl-date">${fmtDate(e.date)}</div>
+          <div class="tl-body">
+            <div class="tl-title">${esc(e.title)}</div>
+            <div class="tl-sub">${e.kind} · ${esc(e.sub)}</div>
+          </div>
+          <span class="stamp ${e.status}">${stampLabel(e.status)}</span>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+/* ============================= VESSELS ============================= */
+function renderVessels(){
+  return `
+    <div class="toolbar">
+      <div>
+        <h2 class="section-title">Vessels</h2>
+        <p class="section-sub" style="margin-bottom:0;">Register of all managed vessels.</p>
+      </div>
+      <button class="btn primary" data-action="add-vessel">+ Add vessel</button>
+    </div>
+    <div class="card-grid">
+      ${state.vessels.map(v=>{
+        const openTasks = state.maintenance.filter(m=>m.vesselId===v.id && m.status!=='completed').length;
+        const overdueTasks = state.maintenance.filter(m=>m.vesselId===v.id && maintStatus(m)==='overdue').length;
+        const crewCount = state.crew.filter(c=>c.vesselId===v.id).length;
+        return `
+        <div class="card" data-action="view-vessel" data-id="${v.id}">
+          <div class="card-top">
+            <div>
+              <h3>${esc(v.name)}</h3>
+              <div class="meta-line">${esc(v.type)} · ${esc(v.reg)}</div>
+            </div>
+            <span class="stamp ${v.status}">${stampLabel(v.status)}</span>
+          </div>
+          <div class="card-stats">
+            <div class="stat"><b>${v.engineHours.toLocaleString()}</b>Engine hrs</div>
+            <div class="stat"><b style="${overdueTasks>0?'color:var(--signal-red)':''}">${openTasks}</b>Open tasks</div>
+            <div class="stat"><b>${crewCount}</b>Crew assigned</div>
+            <div class="stat"><b>${fmtCurrency(vesselMonthlyFixed(v))}</b>Fixed costs/mo</div>
+          </div>
+        </div>
+      `}).join('')}
+    </div>
+  `;
+}
+
+function renderVesselDetail(id){
+  const v = state.vessels.find(x=>x.id===id);
+  if(!v) return '';
+  const tasks = state.maintenance.filter(m=>m.vesselId===id).sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));
+  const crew = state.crew.filter(c=>c.vesselId===id);
+  const berth = state.marina.find(m=>m.vesselId===id);
+  return `
+    <div class="modal-header-row">
+      <h3>${esc(v.name)}</h3>
+      <div style="display:flex; gap:8px;">
+        <button class="btn small" data-action="edit-vessel" data-id="${v.id}">Edit</button>
+        <button class="btn small danger" data-action="delete-vessel" data-id="${v.id}">Delete</button>
+      </div>
+    </div>
+    <div class="mini-row"><span>Type</span><b>${esc(v.type)}</b></div>
+    <div class="mini-row"><span>Registration</span><b>${esc(v.reg)}</b></div>
+    <div class="mini-row"><span>Status</span><span class="stamp ${v.status}">${stampLabel(v.status)}</span></div>
+    <div class="mini-row"><span>Engine hours</span><b>${v.engineHours.toLocaleString()}</b></div>
+    ${v.notes ? `<div class="mini-row"><span>Notes</span><span style="text-align:right; max-width:60%; color:var(--ink-soft);">${esc(v.notes)}</span></div>` : ''}
+
+    <div class="detail-section">
+      <h4>Maintenance history</h4>
+      ${tasks.length===0 ? '<div class="empty-note" style="padding:10px 0;">No maintenance recorded.</div>' : tasks.map(t=>`
+        <div class="mini-row"><span>${esc(t.title)} <span style="color:var(--ink-soft); font-size:11px;">(${fmtDate(t.dueDate)})</span></span><span class="stamp ${maintStatus(t)}">${stampLabel(maintStatus(t))}</span></div>
+      `).join('')}
+    </div>
+
+    <div class="detail-section">
+      <h4>Crew assigned</h4>
+      ${crew.length===0 ? '<div class="empty-note" style="padding:10px 0;">No crew assigned.</div>' : crew.map(c=>`
+        <div class="mini-row"><span>${esc(c.name)}</span><span style="color:var(--ink-soft);">${esc(c.role)}</span></div>
+      `).join('')}
+    </div>
+
+    <div class="detail-section">
+      <h4>Berth / marina</h4>
+      ${!berth ? '<div class="empty-note" style="padding:10px 0;">No berth on record.</div>' : `
+        <div class="mini-row"><span>${esc(berth.name)} — ${esc(berth.berth)}</span><b>${fmtCurrency(berth.monthlyFee)}/mo</b></div>
+      `}
+    </div>
+
+    <div class="detail-section">
+      <h4>Fixed costs <span style="text-transform:none; font-weight:400; letter-spacing:0;">(${fmtCurrency(vesselMonthlyFixed(v))}/mo total)</span></h4>
+      ${(v.fixedCosts||[]).length===0 ? '<div class="empty-note" style="padding:10px 0;">No fixed costs recorded.</div>' : v.fixedCosts.map(c=>`
+        <div class="mini-row">
+          <span>${esc(c.label)}</span>
+          <span style="display:flex; align-items:center; gap:10px;">
+            <b>${fmtCurrency(c.amount)}${freqLabel(c.frequency)}</b>
+            <button class="btn small danger" data-action="delete-vessel-cost" data-id="${v.id}" data-cost-id="${c.id}">Remove</button>
+          </span>
+        </div>
+      `).join('')}
+      <div style="margin-top:8px;"><button class="btn small" data-action="add-vessel-cost" data-id="${v.id}">+ Add fixed cost</button></div>
+    </div>
+    <div class="modal-actions"><button class="btn ghost" data-action="close-modal">Close</button></div>
+  `;
+}
+
+/* ============================= MAINTENANCE ============================= */
+function renderMaintenance(){
+  const f = state.filters;
+  let rows = state.maintenance.slice();
+  if(f.vessel!=='all') rows = rows.filter(m=>m.vesselId===f.vessel);
+  if(f.category!=='all') rows = rows.filter(m=>m.category===f.category);
+  if(f.status!=='all') rows = rows.filter(m=>maintStatus(m)===f.status);
+  rows.sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));
+
+  const totalCost = state.maintenance.reduce((s,m)=>s+Number(m.cost||0),0);
+  const openCost = state.maintenance.filter(m=>m.status!=='completed').reduce((s,m)=>s+Number(m.cost||0),0);
+
+  return `
+    <h2 class="section-title">Maintenance planning</h2>
+    <p class="section-sub">Scheduled upkeep and unscheduled repair events across the fleet.</p>
+    <div class="cost-total-bar">
+      <div class="ctb-item"><div class="label">Open work cost</div><div class="value">${fmtCurrency(openCost)}</div></div>
+      <div class="ctb-item"><div class="label">All-time recorded cost</div><div class="value">${fmtCurrency(totalCost)}</div></div>
+    </div>
+    <div class="toolbar">
+      <div class="filters">
+        <select id="filterVessel">
+          <option value="all">All vessels</option>
+          ${state.vessels.map(v=>`<option value="${v.id}" ${f.vessel===v.id?'selected':''}>${esc(v.name)}</option>`).join('')}
+        </select>
+        <select id="filterCategory">
+          <option value="all" ${f.category==='all'?'selected':''}>All types</option>
+          <option value="scheduled" ${f.category==='scheduled'?'selected':''}>Scheduled</option>
+          <option value="unscheduled" ${f.category==='unscheduled'?'selected':''}>Unscheduled</option>
+        </select>
+        <select id="filterStatus">
+          <option value="all" ${f.status==='all'?'selected':''}>All statuses</option>
+          <option value="overdue" ${f.status==='overdue'?'selected':''}>Overdue</option>
+          <option value="due-soon" ${f.status==='due-soon'?'selected':''}>Due soon</option>
+          <option value="upcoming" ${f.status==='upcoming'?'selected':''}>Upcoming</option>
+          <option value="completed" ${f.status==='completed'?'selected':''}>Completed</option>
+        </select>
+      </div>
+      <button class="btn primary" data-action="add-maintenance">+ Add task</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Task</th><th>Vessel</th><th>Type</th><th>Due</th><th>Priority</th><th class="num">Cost</th><th>Status</th><th></th>
+        </tr></thead>
+        <tbody>
+          ${rows.length===0 ? `<tr><td colspan="8"><div class="empty-note">No tasks match these filters.</div></td></tr>` : rows.map(m=>`
+            <tr>
+              <td><b>${esc(m.title)}</b>${m.description?`<div style="color:var(--ink-soft); font-size:11.5px; margin-top:2px;">${esc(m.description)}</div>`:''}</td>
+              <td>${esc(vesselName(m.vesselId))}</td>
+              <td style="text-transform:capitalize;">${m.category}</td>
+              <td>${fmtDate(m.dueDate)}</td>
+              <td style="text-transform:capitalize;">${m.priority}</td>
+              <td class="num">${fmtCurrency(m.cost)}</td>
+              <td><span class="stamp ${maintStatus(m)}">${stampLabel(maintStatus(m))}</span></td>
+              <td style="white-space:nowrap;">
+                ${m.status!=='completed' ? `<button class="btn small" data-action="complete-task" data-id="${m.id}">Complete</button>` : ''}
+                <button class="btn small ghost" data-action="edit-maintenance" data-id="${m.id}">Edit</button>
+                <button class="btn small danger" data-action="delete-maintenance" data-id="${m.id}">Delete</button>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+/* ============================= CREW ============================= */
+function renderCrew(){
+  return `
+    <div class="toolbar">
+      <div>
+        <h2 class="section-title">Crew qualifications</h2>
+        <p class="section-sub" style="margin-bottom:0;">Certification status for all crew, colour-coded by expiry.</p>
+      </div>
+      <button class="btn primary" data-action="add-crew">+ Add crew member</button>
+    </div>
+    <div class="card-grid">
+      ${state.crew.map(c=>`
+        <div class="card" style="cursor:default;">
+          <div class="card-top">
+            <div>
+              <h3>${esc(c.name)}</h3>
+              <div class="meta-line">${esc(c.role)} · ${esc(vesselName(c.vesselId))}</div>
+            </div>
+            <button class="btn small ghost" data-action="delete-crew" data-id="${c.id}">Remove</button>
+          </div>
+          <div style="margin-top:12px;">
+            ${c.quals.map(q=>`
+              <span class="qual-chip"><span class="qual-dot ${qualStatus(q.expiry)}"></span>${esc(q.name)} · ${fmtDate(q.expiry)}</span>
+            `).join('')}
+          </div>
+          <div style="margin-top:12px; padding-top:10px; border-top:1px dashed var(--paper-line);">
+            <button class="btn small" data-action="add-qual" data-id="${c.id}">+ Add qualification</button>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+/* ============================= MARINA ============================= */
+function renderMarina(){
+  const totalMonthly = state.marina.reduce((s,m)=>s+Number(m.monthlyFee||0),0);
+  const totalExtras = state.marina.reduce((s,m)=>s+m.extraCosts.reduce((s2,x)=>s2+Number(x.amount||0),0),0);
+  return `
+    <div class="toolbar">
+      <div>
+        <h2 class="section-title">Marina & berth costs</h2>
+        <p class="section-sub" style="margin-bottom:0;">Berth assignments, contract renewals and associated costs.</p>
+      </div>
+      <button class="btn primary" data-action="add-marina">+ Add berth</button>
+    </div>
+    <div class="cost-total-bar">
+      <div class="ctb-item"><div class="label">Total monthly berth fees</div><div class="value">${fmtCurrency(totalMonthly)}</div></div>
+      <div class="ctb-item"><div class="label">Additional costs recorded</div><div class="value">${fmtCurrency(totalExtras)}</div></div>
+    </div>
+    <div class="card-grid">
+      ${state.marina.map(m=>{
+        const renewDays = daysUntil(m.contractEnd);
+        const rstatus = renewDays<0?'overdue':(renewDays<=30?'due-soon':'upcoming');
+        return `
+        <div class="card" style="cursor:default;">
+          <div class="card-top">
+            <div>
+              <h3>${esc(m.name)}</h3>
+              <div class="meta-line">Berth ${esc(m.berth)} · ${esc(vesselName(m.vesselId))}</div>
+            </div>
+            <div style="display:flex; gap:6px;">
+              <button class="btn small ghost" data-action="edit-marina" data-id="${m.id}">Edit</button>
+              <button class="btn small danger" data-action="delete-marina" data-id="${m.id}">Delete</button>
+            </div>
+          </div>
+          <div class="card-stats">
+            <div class="stat"><b>${fmtCurrency(m.monthlyFee)}</b>Monthly fee</div>
+            <div class="stat"><b>${fmtDate(m.contractEnd)}</b>Contract ends</div>
+            <div class="stat"><span class="stamp ${rstatus}">${stampLabel(rstatus)}</span></div>
+          </div>
+          <div style="margin-top:12px; padding-top:10px; border-top:1px dashed var(--paper-line); font-size:12px; color:var(--ink-soft);">
+            ${esc(m.contact)} · ${esc(m.phone)}
+          </div>
+          ${m.extraCosts.length>0 ? `
+            <div class="detail-section" style="margin-top:10px;">
+              <h4 style="margin-bottom:4px;">Additional costs</h4>
+              ${m.extraCosts.map(x=>`<div class="mini-row"><span>${esc(x.label)} <span style="color:var(--ink-soft); font-size:11px;">(${fmtDate(x.date)})</span></span><b>${fmtCurrency(x.amount)}</b></div>`).join('')}
+            </div>
+          ` : ''}
+          <div style="margin-top:8px;"><button class="btn small" data-action="add-marina-cost" data-id="${m.id}">+ Add cost</button></div>
+        </div>
+      `}).join('')}
+    </div>
+  `;
+}
+
+/* ============================= MODALS ============================= */
+function fieldRow(a,b){ return `<div class="field-row">${a}${b}</div>`; }
+
+function vesselForm(v){
+  v = v || { name:'', type:'', reg:'', status:'active', engineHours:0, notes:'' };
+  return `
+    <label class="field">Vessel name<input name="name" value="${esc(v.name)}" required></label>
+    ${fieldRow(
+      `<label class="field">Type<input name="type" value="${esc(v.type)}" placeholder="e.g. Workboat" required></label>`,
+      `<label class="field">Registration<input name="reg" value="${esc(v.reg)}" required></label>`
+    )}
+    ${fieldRow(
+      `<label class="field">Status<select name="status">
+        <option value="active" ${v.status==='active'?'selected':''}>Active</option>
+        <option value="in-maintenance" ${v.status==='in-maintenance'?'selected':''}>In maintenance</option>
+        <option value="docked" ${v.status==='docked'?'selected':''}>Docked</option>
+      </select></label>`,
+      `<label class="field">Engine hours<input name="engineHours" type="number" min="0" value="${v.engineHours}"></label>`
+    )}
+    <label class="field">Notes<textarea name="notes" rows="2">${esc(v.notes)}</textarea></label>
+  `;
+}
+
+function maintenanceForm(m){
+  m = m || { vesselId:state.vessels[0]?.id||'', category:'scheduled', title:'', description:'', dueDate:new Date().toISOString().slice(0,10), cost:0, priority:'medium' };
+  return `
+    <label class="field">Task title<input name="title" value="${esc(m.title)}" required></label>
+    <label class="field">Description<textarea name="description" rows="2">${esc(m.description||'')}</textarea></label>
+    ${fieldRow(
+      `<label class="field">Vessel<select name="vesselId">${state.vessels.map(v=>`<option value="${v.id}" ${m.vesselId===v.id?'selected':''}>${esc(v.name)}</option>`).join('')}</select></label>`,
+      `<label class="field">Type<select name="category">
+        <option value="scheduled" ${m.category==='scheduled'?'selected':''}>Scheduled</option>
+        <option value="unscheduled" ${m.category==='unscheduled'?'selected':''}>Unscheduled</option>
+      </select></label>`
+    )}
+    ${fieldRow(
+      `<label class="field">Due date<input name="dueDate" type="date" value="${m.dueDate}" required></label>`,
+      `<label class="field">Priority<select name="priority">
+        <option value="low" ${m.priority==='low'?'selected':''}>Low</option>
+        <option value="medium" ${m.priority==='medium'?'selected':''}>Medium</option>
+        <option value="high" ${m.priority==='high'?'selected':''}>High</option>
+      </select></label>`
+    )}
+    <label class="field">Estimated / actual cost (R)<input name="cost" type="number" min="0" value="${m.cost}"></label>
+  `;
+}
+
+function crewForm(){
+  return `
+    <label class="field">Full name<input name="name" required></label>
+    ${fieldRow(
+      `<label class="field">Role<input name="role" placeholder="e.g. Master, Deckhand" required></label>`,
+      `<label class="field">Assigned vessel<select name="vesselId">${state.vessels.map(v=>`<option value="${v.id}">${esc(v.name)}</option>`).join('')}</select></label>`
+    )}
+    <p style="font-size:12px; color:var(--ink-soft); margin-top:-4px;">You can add qualifications once the crew member is saved.</p>
+  `;
+}
+
+function qualForm(){
+  return `
+    <label class="field">Qualification / certificate name<input name="name" placeholder="e.g. STCW Basic Safety Training" required></label>
+    <label class="field">Expiry date<input name="expiry" type="date" required></label>
+  `;
+}
+
+function marinaForm(m){
+  m = m || { name:'', berth:'', vesselId:state.vessels[0]?.id||'', contact:'', phone:'', monthlyFee:0, contractEnd:new Date().toISOString().slice(0,10) };
+  return `
+    <label class="field">Marina / yard name<input name="name" value="${esc(m.name)}" required></label>
+    ${fieldRow(
+      `<label class="field">Berth / slip number<input name="berth" value="${esc(m.berth)}" required></label>`,
+      `<label class="field">Vessel<select name="vesselId">${state.vessels.map(v=>`<option value="${v.id}" ${m.vesselId===v.id?'selected':''}>${esc(v.name)}</option>`).join('')}</select></label>`
+    )}
+    ${fieldRow(
+      `<label class="field">Contact name<input name="contact" value="${esc(m.contact)}"></label>`,
+      `<label class="field">Contact phone<input name="phone" value="${esc(m.phone)}"></label>`
+    )}
+    ${fieldRow(
+      `<label class="field">Monthly fee (R)<input name="monthlyFee" type="number" min="0" value="${m.monthlyFee}"></label>`,
+      `<label class="field">Contract renewal date<input name="contractEnd" type="date" value="${m.contractEnd}" required></label>`
+    )}
+  `;
+}
+
+function vesselCostForm(){
+  return `
+    <label class="field">Cost description<input name="label" placeholder="e.g. Insurance, registration, tracking" required></label>
+    ${fieldRow(
+      `<label class="field">Amount (R)<input name="amount" type="number" min="0" required></label>`,
+      `<label class="field">Frequency<select name="frequency">
+        <option value="monthly">Monthly</option>
+        <option value="quarterly">Quarterly</option>
+        <option value="annual">Annual</option>
+      </select></label>`
+    )}
+  `;
+}
+
+function marinaCostForm(){
+  return `
+    <label class="field">Cost description<input name="label" placeholder="e.g. Haul-out, fuel, storage" required></label>
+    ${fieldRow(
+      `<label class="field">Amount (R)<input name="amount" type="number" min="0" required></label>`,
+      `<label class="field">Date<input name="date" type="date" value="${new Date().toISOString().slice(0,10)}" required></label>`
+    )}
+  `;
+}
+
+function renderModal(){
+  const root = document.getElementById('modalRoot');
+  const modal = state.modal;
+  if(!modal){ root.innerHTML=''; return; }
+  let title = '', body = '';
+  const cancelBtn = `<button type="button" class="btn ghost" data-action="close-modal">Cancel</button>`;
+  const saveBtn = `<button type="submit" class="btn primary">Save</button>`;
+
+  if(modal.type==='view-vessel'){
+    root.innerHTML = `<div class="modal-overlay" data-action="overlay-close"><div class="modal" onclick="event.stopPropagation()">${renderVesselDetail(modal.id)}</div></div>`;
+    attachModalEvents();
+    return;
+  }
+  if(modal.type==='vessel'){ title = modal.data ? 'Edit vessel' : 'Add vessel'; body = vesselForm(modal.data); }
+  else if(modal.type==='maintenance'){ title = modal.data ? 'Edit maintenance task' : 'Add maintenance task'; body = maintenanceForm(modal.data); }
+  else if(modal.type==='crew'){ title = 'Add crew member'; body = crewForm(); }
+  else if(modal.type==='qual'){ title = 'Add qualification'; body = qualForm(); }
+  else if(modal.type==='marina'){ title = modal.data ? 'Edit berth' : 'Add berth'; body = marinaForm(modal.data); }
+  else if(modal.type==='marina-cost'){ title = 'Add cost'; body = marinaCostForm(); }
+  else if(modal.type==='vessel-cost'){ title = 'Add fixed cost'; body = vesselCostForm(); }
+
+  root.innerHTML = `
+    <div class="modal-overlay" data-action="overlay-close">
+      <div class="modal" onclick="event.stopPropagation()">
+        <form id="modalForm">
+          <h3>${title}</h3>
+          ${body}
+          <div class="modal-actions">${cancelBtn}${saveBtn}</div>
+        </form>
+      </div>
+    </div>
+  `;
+  attachModalEvents();
+}
+
+function attachModalEvents(){
+  const overlay = document.querySelector('.modal-overlay');
+  if(overlay){
+    overlay.addEventListener('click', ()=>{ state.modal=null; renderModal(); });
+  }
+  document.querySelectorAll('[data-action="close-modal"]').forEach(b=>b.addEventListener('click', (e)=>{ e.preventDefault(); state.modal=null; renderModal(); }));
+  const form = document.getElementById('modalForm');
+  if(form) form.addEventListener('submit', handleFormSubmit);
+  document.querySelectorAll('[data-action="edit-vessel"]').forEach(b=>b.addEventListener('click', ()=>{
+    const v = state.vessels.find(x=>x.id===b.dataset.id);
+    state.modal = { type:'vessel', data:v };
+    renderModal();
+  }));
+  document.querySelectorAll('[data-action="delete-vessel"]').forEach(b=>b.addEventListener('click', async ()=>{
+    if(confirm('Delete this vessel? Related maintenance, crew assignment and berth records will remain but show as unassigned.')){
+      state.vessels = state.vessels.filter(x=>x.id!==b.dataset.id);
+      state.modal = null;
+      await persist(); render();
+    }
+  }));
+  document.querySelectorAll('[data-action="add-vessel-cost"]').forEach(b=>b.addEventListener('click', ()=>{
+    state.modal = { type:'vessel-cost', id:b.dataset.id };
+    renderModal();
+  }));
+  document.querySelectorAll('[data-action="delete-vessel-cost"]').forEach(b=>b.addEventListener('click', async ()=>{
+    const v = state.vessels.find(x=>x.id===b.dataset.id);
+    if(v){
+      v.fixedCosts = (v.fixedCosts||[]).filter(c=>c.id!==b.dataset.costId);
+      state.modal = { type:'view-vessel', id:b.dataset.id };
+      await persist();
+      render();
+    }
+  }));
+}
+
+async function handleFormSubmit(e){
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const modal = state.modal;
+
+  if(modal.type==='vessel'){
+    const data = { name:fd.get('name'), type:fd.get('type'), reg:fd.get('reg'), status:fd.get('status'), engineHours:Number(fd.get('engineHours'))||0, notes:fd.get('notes')||'' };
+    if(modal.data){ Object.assign(modal.data, data); }
+    else { state.vessels.push({ id:uid('v'), ...data }); }
+  }
+  else if(modal.type==='maintenance'){
+    const data = { vesselId:fd.get('vesselId'), category:fd.get('category'), title:fd.get('title'), description:fd.get('description')||'', dueDate:fd.get('dueDate'), cost:Number(fd.get('cost'))||0, priority:fd.get('priority') };
+    if(modal.data){ Object.assign(modal.data, data); }
+    else { state.maintenance.push({ id:uid('m'), status:'upcoming', ...data }); }
+  }
+  else if(modal.type==='crew'){
+    state.crew.push({ id:uid('c'), name:fd.get('name'), role:fd.get('role'), vesselId:fd.get('vesselId'), quals:[] });
+  }
+  else if(modal.type==='qual'){
+    const c = state.crew.find(x=>x.id===modal.id);
+    if(c) c.quals.push({ id:uid('q'), name:fd.get('name'), expiry:fd.get('expiry') });
+  }
+  else if(modal.type==='marina'){
+    const data = { name:fd.get('name'), berth:fd.get('berth'), vesselId:fd.get('vesselId'), contact:fd.get('contact')||'', phone:fd.get('phone')||'', monthlyFee:Number(fd.get('monthlyFee'))||0, contractEnd:fd.get('contractEnd') };
+    if(modal.data){ Object.assign(modal.data, data); }
+    else { state.marina.push({ id:uid('mk'), extraCosts:[], ...data }); }
+  }
+  else if(modal.type==='marina-cost'){
+    const m = state.marina.find(x=>x.id===modal.id);
+    if(m) m.extraCosts.push({ id:uid('x'), label:fd.get('label'), amount:Number(fd.get('amount'))||0, date:fd.get('date') });
+  }
+  else if(modal.type==='vessel-cost'){
+    const v = state.vessels.find(x=>x.id===modal.id);
+    if(v){ if(!v.fixedCosts) v.fixedCosts=[]; v.fixedCosts.push({ id:uid('fc'), label:fd.get('label'), amount:Number(fd.get('amount'))||0, frequency:fd.get('frequency') }); }
+    state.modal = { type:'view-vessel', id: modal.id };
+    await persist();
+    render();
+    return;
+  }
+
+  state.modal = null;
+  await persist();
+  render();
+}
+
+/* ============================= GLOBAL ACTIONS ============================= */
+function attachContentEvents(){
+  document.querySelectorAll('[data-action]').forEach(el=>{
+    const action = el.dataset.action;
+    if(['close-modal','overlay-close','edit-vessel','delete-vessel'].includes(action)) return;
+    el.addEventListener('click', async ()=>{
+      const id = el.dataset.id;
+      switch(action){
+        case 'add-vessel': state.modal = { type:'vessel', data:null }; renderModal(); break;
+        case 'view-vessel': state.modal = { type:'view-vessel', id }; renderModal(); break;
+        case 'add-maintenance': state.modal = { type:'maintenance', data:null }; renderModal(); break;
+        case 'edit-maintenance': state.modal = { type:'maintenance', data: state.maintenance.find(m=>m.id===id) }; renderModal(); break;
+        case 'delete-maintenance':
+          if(confirm('Delete this maintenance task?')){ state.maintenance = state.maintenance.filter(m=>m.id!==id); await persist(); render(); }
+          break;
+        case 'complete-task':
+          { const m = state.maintenance.find(x=>x.id===id); if(m){ m.status='completed'; m.completedDate=new Date().toISOString().slice(0,10); await persist(); render(); } }
+          break;
+        case 'add-crew': state.modal = { type:'crew' }; renderModal(); break;
+        case 'delete-crew':
+          if(confirm('Remove this crew member?')){ state.crew = state.crew.filter(c=>c.id!==id); await persist(); render(); }
+          break;
+        case 'add-qual': state.modal = { type:'qual', id }; renderModal(); break;
+        case 'add-marina': state.modal = { type:'marina', data:null }; renderModal(); break;
+        case 'edit-marina': state.modal = { type:'marina', data: state.marina.find(m=>m.id===id) }; renderModal(); break;
+        case 'delete-marina':
+          if(confirm('Delete this berth record?')){ state.marina = state.marina.filter(m=>m.id!==id); await persist(); render(); }
+          break;
+        case 'add-marina-cost': state.modal = { type:'marina-cost', id }; renderModal(); break;
+      }
+    });
+  });
+
+  const fv = document.getElementById('filterVessel');
+  const fc = document.getElementById('filterCategory');
+  const fs = document.getElementById('filterStatus');
+  if(fv) fv.addEventListener('change', ()=>{ state.filters.vessel=fv.value; render(); });
+  if(fc) fc.addEventListener('change', ()=>{ state.filters.category=fc.value; render(); });
+  if(fs) fs.addEventListener('change', ()=>{ state.filters.status=fs.value; render(); });
+}
+
+/* ============================= RENDER DISPATCH ============================= */
+function render(){
+  renderHeaderMeta();
+  renderNav();
+  const main = document.getElementById('mainContent');
+  switch(state.activeTab){
+    case 'dashboard': main.innerHTML = renderDashboard(); break;
+    case 'vessels': main.innerHTML = renderVessels(); break;
+    case 'maintenance': main.innerHTML = renderMaintenance(); break;
+    case 'crew': main.innerHTML = renderCrew(); break;
+    case 'marina': main.innerHTML = renderMarina(); break;
+  }
+  attachContentEvents();
+  renderModal();
+}
+
+loadState();
+</script>
+</body>
+</html>
