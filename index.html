@@ -207,6 +207,23 @@
   .cost-total-bar .ctb-item .label{font-size:10.5px; text-transform:uppercase; letter-spacing:1px; color:var(--brass-light);}
   .cost-total-bar .ctb-item .value{font-family:'Space Mono',monospace; font-size:22px; font-weight:700;}
 
+  /* ===== Login gate ===== */
+  .login-wrap{max-width:370px; margin:46px auto 0;}
+  .login-roles{display:flex; gap:8px; margin:14px 0 18px;}
+  .login-role{
+    flex:1; font-family:'Inter',sans-serif; font-size:13px; font-weight:600; padding:11px 8px;
+    border-radius:5px; border:1.5px solid var(--paper-line); background:#fff; color:var(--ink-soft); cursor:pointer;
+  }
+  .login-role:hover{color:var(--ink);}
+  .login-role.active{border-color:var(--brass); background:var(--brass); color:#2A1E08;}
+  .login-error{color:var(--signal-red); font-size:13px; min-height:18px; margin:2px 0 8px;}
+
+  /* ===== Companies / vessel assignment ===== */
+  .vessel-check-grid{display:flex; flex-direction:column; gap:7px; margin-bottom:8px;}
+  .vessel-check{display:flex; align-items:center; gap:9px; font-size:13px; font-weight:500; color:var(--ink);}
+  .vessel-check input{width:auto;}
+  .pw-mask{font-family:'Space Mono',monospace; letter-spacing:1px;}
+
   @media (max-width:640px){
     .wrap{padding:0 14px 60px;}
     header.top .inner{padding:20px 14px 16px; flex-direction:column; align-items:flex-start;}
@@ -284,16 +301,24 @@ let state = {
   vessels: [],
   maintenance: [],
   crew: [],
+  allVessels: [],
+  allMaintenance: [],
+  allCrew: [],
+  companies: [],
   activeTab: 'dashboard',
   modal: null,
   filters: { vessel:'all', category:'all', status:'all' }
 };
 
+/* Auth session: null (signed out) | { role:'admin' } | { role:'owner', companyId } */
+let session = null;
+let loginRole = 'admin';
+
 function uid(prefix){ return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 
 function seedData(){
   const v1 = uid('v'), v2 = uid('v'), v3 = uid('v'), v4 = uid('v');
-  state.vessels = [
+  state.allVessels = [
     { id:v1, name:'MV Zephyr', type:'Workboat', reg:'ZA-4471-DBN', status:'active', engineHours:4820, notes:'Primary harbour support vessel.', fixedCosts:[
       { id:uid('fc'), label:'Hull & machinery insurance', amount:3200, frequency:'monthly' },
       { id:uid('fc'), label:'SAMSA registration & survey', amount:6500, frequency:'annual' },
@@ -325,7 +350,7 @@ function seedData(){
   ];
   const today = new Date();
   const d = (offsetDays)=>{ const t = new Date(today); t.setDate(t.getDate()+offsetDays); return t.toISOString().slice(0,10); };
-  state.maintenance = [
+  state.allMaintenance = [
     { id:uid('m'), vesselId:v1, category:'scheduled', title:'150-hour engine service', description:'Oil, filters, impeller check.', dueDate:d(-4), status:'overdue', cost:8200, priority:'high' },
     { id:uid('m'), vesselId:v1, category:'scheduled', title:'Life raft service & recertification', description:'Annual SOLAS raft inspection.', dueDate:d(11), status:'upcoming', cost:4600, priority:'medium' },
     { id:uid('m'), vesselId:v2, category:'unscheduled', title:'Bilge pump failure', description:'Pump seized during last outing, needs replacement.', dueDate:d(2), status:'upcoming', cost:2100, priority:'high' },
@@ -334,7 +359,7 @@ function seedData(){
     { id:uid('m'), vesselId:v4, category:'scheduled', title:'Gearbox oil change', description:'', dueDate:d(6), status:'upcoming', cost:3100, priority:'low' },
     { id:uid('m'), vesselId:v4, category:'unscheduled', title:'Nav light wiring fault', description:'Port side nav light intermittent.', dueDate:d(-20), status:'completed', completedDate:d(-15), cost:850, priority:'low' },
   ];
-  state.crew = [
+  state.allCrew = [
     { id:uid('c'), name:'Sipho Ndlovu', role:'Master', vesselId:v1, email:'sipho.ndlovu@example.com', phone:'+27821234567', quals:[
       { id:uid('q'), name:'Master <500GT Certificate of Competency', expiry:d(210) },
       { id:uid('q'), name:'STCW Basic Safety Training', expiry:d(25) },
@@ -350,6 +375,13 @@ function seedData(){
       { id:uid('q'), name:'GMDSS Restricted Operator Certificate', expiry:d(400) },
     ]},
   ];
+  state.companies = [
+    { id:uid('co'), name:'Zephyr Marine Services', contactName:'Sipho Ndlovu',
+      contactEmail:'ops@zephyrmarine.example', contactPhone:'+27821234567',
+      address:'Durban Harbour, Berth 4', notes:'',
+      username:'zephyr', password:'zephyr123', vesselIds:[v1] },
+  ];
+  applyScoping();
 }
 
 /* ============================= FIREBASE CONFIG ============================= */
@@ -363,16 +395,22 @@ function seedData(){
           ".read": false, ".write": false
         }
       }
-   5. Set your own ADMIN_PIN below, then reload this file.
-   Note: access is gated by the admin PIN in the app itself, not by Firebase
-   Authentication — the database rules above are open to anyone with the link. */
+   5. Set your own ADMIN_PASSWORD below, then reload this file.
+   Note: access is gated in the app itself, not by Firebase Authentication —
+   the database rules above are open to anyone with the link.
+   The landing page has two logins:
+     • Admin — uses ADMIN_PASSWORD below. Full access + the Companies tab, where
+       owner/operator accounts and their vessel assignments are created and edited.
+     • Owner / Operator — uses the username + password set on a company record in
+       the Companies tab. An owner only sees and manages their assigned vessel(s). */
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyA5XbMVrsxvjAPNLJRycum5U5htjw9gSy0",
   authDomain: "ocean-hub-vessel-managem-cdca8.firebaseapp.com",
   databaseURL: "https://ocean-hub-vessel-managem-cdca8-default-rtdb.firebaseio.com",
   projectId: "ocean-hub-vessel-managem-cdca8",
 };
-const ADMIN_PIN = "2026"; /* change this to your own admin PIN */
+const ADMIN_PASSWORD = "2026"; /* change this to your own admin password */
+const ADMIN_PIN = ADMIN_PASSWORD; /* backwards-compatible alias */
 const ADMIN_EMAIL = ""; /* e.g. "ops@oceanhub.co.za" — leave blank to hide admin notify buttons */
 const ADMIN_PHONE = ""; /* e.g. "+27820000000" — used for WhatsApp links, digits/plus only */
 const REQUIRE_PIN = true;
@@ -387,60 +425,101 @@ function bootstrap(){
   document.getElementById('tabNav').innerHTML = '';
   if(!isFirebaseConfigured()){ renderSetupNotice(); return; }
   try{ firebase.initializeApp(FIREBASE_CONFIG); fbInitialized = true; }catch(e){ /* already initialized */ fbInitialized = true; }
-  if(REQUIRE_PIN){ renderPinGate(); } else { loadState(); }
+  try{ const s = sessionStorage.getItem('oceanhub_session'); if(s){ session = JSON.parse(s); } }catch(e){ session = null; }
+  /* Show the gate straight away; data loads in the background (Firebase rules are
+     open) so the Owner login can be checked against the company records. */
+  if(session){
+    document.getElementById('mainContent').innerHTML = '<div class="empty-note" style="margin-top:60px;">Loading fleet data…</div>';
+  } else {
+    renderLoginGate();
+  }
+  loadState().catch(err=>{
+    session = null;
+    renderLoginGate('Could not load data: ' + (err && err.message ? err.message : err));
+  });
+}
+
+function saveSession(){
+  try{
+    if(session) sessionStorage.setItem('oceanhub_session', JSON.stringify(session));
+    else sessionStorage.removeItem('oceanhub_session');
+  }catch(e){ /* private mode — session just won't survive reload */ }
 }
 
 function renderSetupNotice(){
   document.getElementById('mainContent').innerHTML = `
     <div style="max-width:540px;margin:70px auto;text-align:center;">
       <h2 class="section-title">Firebase isn't connected yet</h2>
-      <p class="section-sub">Open this file and fill in FIREBASE_CONFIG and ADMIN_PIN near the top of the script (search for "FIREBASE CONFIG"), following the steps in the comment above it. Then reload the page.</p>
+      <p class="section-sub">Open this file and fill in FIREBASE_CONFIG and ADMIN_PASSWORD near the top of the script (search for "FIREBASE CONFIG"), following the steps in the comment above it. Then reload the page.</p>
     </div>`;
 }
 
-function renderPinGate(err){
-  document.getElementById('mainContent').innerHTML = `
-    <div style="max-width:360px;margin:50px auto 0;text-align:center;">
-      <h2 class="section-title">Enter admin PIN</h2>
-      <p class="section-sub">This fleet ledger is PIN-protected.</p>
-      <div style="display:flex; flex-direction:column; gap:12px; align-items:center;">
-        <input id="pinInput" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off"
-          placeholder="Admin PIN" autofocus
-          style="text-align:center; font-size:18px; letter-spacing:6px; width:200px;">
-        <div id="pinError" style="color:var(--signal-red); font-size:13px; min-height:16px;">${err ? esc(err) : ''}</div>
-        <button type="button" id="unlockBtn" class="btn primary">Unlock</button>
+function renderLoginGate(err){
+  document.getElementById('tabNav').innerHTML = '';
+  document.getElementById('modalRoot').innerHTML = '';
+  const hm = document.getElementById('headerMeta');
+  if(hm) hm.innerHTML = '';
+  const role = loginRole || 'admin';
+  const main = document.getElementById('mainContent');
+  main.innerHTML = `
+    <div class="login-wrap">
+      <h2 class="section-title">Sign in</h2>
+      <p class="section-sub" style="margin-bottom:0;">Choose your access level to continue.</p>
+      <div class="login-roles">
+        <button type="button" class="login-role ${role==='admin'?'active':''}" data-role="admin">Admin</button>
+        <button type="button" class="login-role ${role==='owner'?'active':''}" data-role="owner">Owner / Operator</button>
       </div>
+      <form id="loginForm" autocomplete="off">
+        ${role==='admin' ? `
+          <label class="field">Admin password
+            <input type="password" name="password" autocomplete="off" required autofocus>
+          </label>
+        ` : `
+          <label class="field">Username
+            <input type="text" name="username" autocomplete="off" autocapitalize="none" spellcheck="false" required autofocus>
+          </label>
+          <label class="field">Password
+            <input type="password" name="password" autocomplete="off" required>
+          </label>
+        `}
+        <div class="login-error">${err ? esc(err) : ''}</div>
+        <button type="submit" class="btn primary" style="width:100%;">Sign in</button>
+      </form>
     </div>`;
-  const input = document.getElementById('pinInput');
-  const btn = document.getElementById('unlockBtn');
-  const errBox = document.getElementById('pinError');
+  main.querySelectorAll('[data-role]').forEach(b=>b.addEventListener('click', ()=>{
+    loginRole = b.dataset.role;
+    renderLoginGate();
+  }));
+  document.getElementById('loginForm').addEventListener('submit', handleLogin);
+}
 
-  const attemptUnlock = async ()=>{
-    if(btn.disabled) return;
-    const val = input.value;
-    if(val !== ADMIN_PIN){
-      errBox.textContent = 'Incorrect PIN. Try again.';
-      input.value = '';
-      input.focus();
+function handleLogin(e){
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  if(loginRole === 'admin'){
+    if((fd.get('password')||'') !== ADMIN_PASSWORD){
+      renderLoginGate('Incorrect admin password.');
       return;
     }
-    btn.disabled = true;
-    btn.textContent = 'Unlocking…';
-    errBox.textContent = '';
-    try{
-      await loadState();
-    }catch(e){
-      renderPinGate('Could not load fleet data: ' + e.message);
+    session = { role:'admin' };
+  } else {
+    if(!firstLoadDone){
+      renderLoginGate('Still connecting to the fleet database — try again in a moment.');
+      return;
     }
-  };
-
-  btn.addEventListener('click', attemptUnlock);
-  input.addEventListener('keydown', (e)=>{
-    if(e.key === 'Enter'){ e.preventDefault(); attemptUnlock(); }
-  });
-  input.addEventListener('focus', ()=>{
-    setTimeout(()=>{ btn.scrollIntoView({ block:'center', behavior:'smooth' }); }, 300);
-  });
+    const u = (fd.get('username')||'').trim().toLowerCase();
+    const p = fd.get('password')||'';
+    const co = state.companies.find(c => (c.username||'').trim().toLowerCase() === u && (c.password||'') === p);
+    if(!co){
+      renderLoginGate('Incorrect username or password.');
+      return;
+    }
+    session = { role:'owner', companyId: co.id };
+  }
+  saveSession();
+  state.activeTab = 'dashboard';
+  applyScoping();
+  render();
 }
 
 /* ============================= STORAGE (Firebase Realtime Database, live-synced) ============================= */
@@ -451,10 +530,35 @@ let firstLoadDone = false;
 function logout(){
   if(dbRef && dbListener){ dbRef.off('value', dbListener); dbRef = null; dbListener = null; }
   firstLoadDone = false;
+  session = null;
+  loginRole = 'admin';
+  saveSession();
   state.modal = null;
   state.activeTab = 'dashboard';
   document.getElementById('modalRoot').innerHTML = '';
   bootstrap();
+}
+
+/* Which vessels the signed-in user may see: all of them for admin, only the
+   assigned ones for an owner/operator. */
+function currentCompany(){
+  return (session && session.role === 'owner')
+    ? state.companies.find(c => c.id === session.companyId) || null
+    : null;
+}
+function applyScoping(){
+  if(session && session.role === 'owner'){
+    const co = currentCompany();
+    const allowed = new Set(co ? (co.vesselIds || []) : []);
+    state.vessels = state.allVessels.filter(v => allowed.has(v.id));
+    const vids = new Set(state.vessels.map(v => v.id));
+    state.maintenance = state.allMaintenance.filter(m => vids.has(m.vesselId));
+    state.crew = state.allCrew.filter(c => vids.has(c.vesselId));
+  } else {
+    state.vessels = state.allVessels;
+    state.maintenance = state.allMaintenance;
+    state.crew = state.allCrew;
+  }
 }
 
 function asArray(v){
@@ -467,13 +571,16 @@ function normalizeKey(key, raw){
   if(key==='vessels') return asArray(raw).map(v=>({ ...v, fixedCosts: asArray(v.fixedCosts), documents: asArray(v.documents), engines: asArray(v.engines),
     tenders: asArray(v.tenders).map(t=>({ ...t, engines: asArray(t.engines), documents: asArray(t.documents), maintenance: asArray(t.maintenance) })) }));
   if(key==='crew') return asArray(raw).map(c=>({ ...c, quals: asArray(c.quals), documents: asArray(c.documents) }));
+  if(key==='companies') return asArray(raw).map(c=>({ ...c, vesselIds: asArray(c.vesselIds) }));
   return asArray(raw);
 }
 
 function applyRemoteData(val){
-  state.vessels = normalizeKey('vessels', val.vessels);
-  state.maintenance = normalizeKey('maintenance', val.maintenance);
-  state.crew = normalizeKey('crew', val.crew);
+  state.allVessels = normalizeKey('vessels', val.vessels);
+  state.allMaintenance = normalizeKey('maintenance', val.maintenance);
+  state.allCrew = normalizeKey('crew', val.crew);
+  state.companies = normalizeKey('companies', val.companies);
+  applyScoping();
 }
 
 function loadState(){
@@ -490,9 +597,10 @@ function loadState(){
         }
         if(!firstLoadDone){
           firstLoadDone = true;
-          render();
+          if(session) render();
+          else if(!document.getElementById('loginForm')) renderLoginGate();
           resolve();
-        } else if(!state.modal){
+        } else if(session && !state.modal){
           /* live update from another device/user — only refresh if nobody's mid-edit in a form */
           render();
         }
@@ -514,7 +622,7 @@ async function persistAll(){
   if(!fbInitialized) return;
   try{
     await firebase.database().ref('oceanhub/data').set({
-      vessels: state.vessels, maintenance: state.maintenance, crew: state.crew
+      vessels: state.allVessels, maintenance: state.allMaintenance, crew: state.allCrew, companies: state.companies
     });
   } catch(e){ /* best effort */ }
 }
@@ -531,7 +639,10 @@ async function persistArray(key, mutateFn){
     let fresh = normalizeKey(key, snap.val());
     fresh = mutateFn(fresh);
     await firebase.database().ref('oceanhub/data/' + key).set(fresh);
-    state[key] = fresh;
+    const allKey = key === 'companies' ? 'companies'
+      : 'all' + key.charAt(0).toUpperCase() + key.slice(1);
+    state[allKey] = fresh;
+    applyScoping();
     return fresh;
   }catch(e){
     return null;
@@ -661,8 +772,15 @@ function waLink(phone, text){
 /* ============================= HEADER CLOCK ============================= */
 function renderHeaderMeta(){
   const el = document.getElementById('headerMeta');
+  if(!el) return;
   const now = new Date();
-  el.innerHTML = `Log date <span class="clock">${now.toLocaleDateString('en-ZA',{day:'2-digit',month:'short',year:'numeric'})}</span><br>${state.vessels.length} vessels on register`;
+  const who = !session ? ''
+    : session.role === 'admin' ? 'Admin'
+    : esc((currentCompany() || {}).name || 'Owner / Operator');
+  const n = state.vessels.length;
+  el.innerHTML = `Log date <span class="clock">${now.toLocaleDateString('en-ZA',{day:'2-digit',month:'short',year:'numeric'})}</span><br>`
+    + `${n} vessel${n===1?'':'s'} ${session && session.role==='owner' ? 'in your account' : 'on register'}`
+    + (who ? ` · <span class="clock">${who}</span>` : '');
 }
 
 /* ============================= NAV ============================= */
@@ -672,9 +790,15 @@ const TABS = [
   { id:'maintenance', label:'Maintenance', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a4 4 0 1 0-5.4 5.4L2 19v3h3l7.3-7.3a4 4 0 0 0 5.4-5.4l-2.8 2.8-2-2z"/></svg>' },
   { id:'crew', label:'Crew', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20c0-3.5 3-6 6.5-6s6.5 2.5 6.5 6"/><circle cx="18" cy="8" r="2.6"/><path d="M15.5 14.3c2.9.4 5 2.6 5 5.7"/></svg>' },
 ];
+const ADMIN_TAB = { id:'companies', label:'Companies', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18"/><path d="M5 21V8l7-5 7 5v13"/><path d="M9 21v-5h6v5"/><path d="M9 9h.01M15 9h.01M9 12h.01M15 12h.01"/></svg>' };
+function navTabs(){
+  const t = TABS.slice();
+  if(session && session.role === 'admin') t.push(ADMIN_TAB);
+  return t;
+}
 function renderNav(){
   const nav = document.getElementById('tabNav');
-  nav.innerHTML = TABS.map(t=>`<button class="${state.activeTab===t.id?'active':''}" data-tab="${t.id}">${t.icon}${t.label}</button>`).join('');
+  nav.innerHTML = navTabs().map(t=>`<button class="${state.activeTab===t.id?'active':''}" data-tab="${t.id}">${t.icon}${t.label}</button>`).join('');
   nav.querySelectorAll('button').forEach(b=>b.addEventListener('click', ()=>{ state.activeTab = b.dataset.tab; render(); }));
 }
 
@@ -704,7 +828,7 @@ function renderDashboard(){
         <h2 class="section-title">Fleet dashboard</h2>
         <p class="section-sub" style="margin-bottom:0;">Overview across the register — maintenance and crew certification.</p>
       </div>
-      ${REQUIRE_PIN ? `<button class="btn ghost" data-action="logout">Log out &amp; exit</button>` : ''}
+      <button class="btn ghost" data-action="logout">Sign out</button>
     </div>
     <div class="kpi-grid">
       <div class="kpi"><div class="label">Vessels on register</div><div class="value">${state.vessels.length}</div></div>
@@ -739,9 +863,10 @@ function renderVessels(){
         <h2 class="section-title">Vessels</h2>
         <p class="section-sub" style="margin-bottom:0;">Register of all managed vessels.</p>
       </div>
-      <button class="btn primary" data-action="add-vessel">+ Add vessel</button>
+      ${session && session.role==='admin' ? `<button class="btn primary" data-action="add-vessel">+ Add vessel</button>` : ''}
     </div>
     <div class="card-grid">
+      ${state.vessels.length===0 ? `<div class="empty-note" style="grid-column:1/-1;">No vessels assigned to your account yet. Ask your administrator to assign one.</div>` : ''}
       ${state.vessels.map(v=>{
         const vesselTasks = getAllMaintenanceTasks().filter(m=>m.vesselId===v.id);
         const openTasks = vesselTasks.filter(m=>m.status!=='completed').length;
@@ -782,7 +907,7 @@ function renderVesselDetail(id){
       <h3>${esc(v.name)}</h3>
       <div style="display:flex; gap:8px;">
         <button class="btn small" data-action="edit-vessel" data-id="${v.id}">Edit</button>
-        <button class="btn small danger" data-action="delete-vessel" data-id="${v.id}">Delete</button>
+        ${session && session.role==='admin' ? `<button class="btn small danger" data-action="delete-vessel" data-id="${v.id}">Delete</button>` : ''}
       </div>
     </div>
     <div class="mini-row"><span>Type</span><b>${esc(v.type)}</b></div>
@@ -1277,6 +1402,75 @@ function documentForm(){
   `;
 }
 
+function companyForm(c){
+  c = c || { name:'', contactName:'', contactEmail:'', contactPhone:'', address:'', notes:'', username:'', password:'', vesselIds:[] };
+  const assigned = new Set(c.vesselIds || []);
+  return `
+    <label class="field">Company name<input name="name" value="${esc(c.name)}" required></label>
+    ${fieldRow(
+      `<label class="field">Contact name<input name="contactName" value="${esc(c.contactName||'')}"></label>`,
+      `<label class="field">Contact phone<input name="contactPhone" type="tel" value="${esc(c.contactPhone||'')}"></label>`
+    )}
+    <label class="field">Contact email<input name="contactEmail" type="email" value="${esc(c.contactEmail||'')}"></label>
+    <label class="field">Address<input name="address" value="${esc(c.address||'')}"></label>
+    <label class="field">Notes<textarea name="notes" rows="2">${esc(c.notes||'')}</textarea></label>
+
+    <div class="detail-section" style="margin-top:4px;"><h4>Owner / operator login</h4></div>
+    ${fieldRow(
+      `<label class="field">Username<input name="username" value="${esc(c.username||'')}" autocapitalize="none" spellcheck="false" autocomplete="off" required></label>`,
+      `<label class="field">Password<input name="password" value="${esc(c.password||'')}" autocomplete="off" required></label>`
+    )}
+    <p style="font-size:12px; color:var(--ink-soft); margin-top:-4px;">The owner signs in from the landing page under &ldquo;Owner / Operator&rdquo; with these credentials. Changing them here updates the login immediately.</p>
+
+    <div class="detail-section" style="margin-top:4px;"><h4>Assigned vessels</h4></div>
+    <div class="vessel-check-grid">
+      ${state.allVessels.length === 0
+        ? '<p style="font-size:12px; color:var(--ink-soft);">No vessels on the register yet.</p>'
+        : state.allVessels.map(v=>`<label class="vessel-check"><input type="checkbox" name="vesselIds" value="${v.id}" ${assigned.has(v.id)?'checked':''}> ${esc(v.name)} <span style="color:var(--ink-soft); font-size:11px;">${esc(v.reg||'')}</span></label>`).join('')}
+    </div>
+  `;
+}
+
+/* ============================= COMPANIES (admin only) ============================= */
+function renderCompanies(){
+  const rows = state.companies.map(c=>{
+    const vnames = (c.vesselIds || []).map(id=>{ const v = state.allVessels.find(x=>x.id===id); return v ? esc(v.name) : '<span style="color:var(--ink-soft);">removed</span>'; });
+    return `
+      <tr>
+        <td><b>${esc(c.name)}</b>${c.address ? `<div style="color:var(--ink-soft); font-size:11.5px;">${esc(c.address)}</div>` : ''}</td>
+        <td class="num">${esc(c.username || '—')}</td>
+        <td class="num" style="white-space:nowrap;"><span class="pw-mask" data-pw="${esc(c.password || '')}">••••••••</span> <button class="btn small ghost" data-action="reveal-password">Show</button></td>
+        <td>${esc(c.contactName || '—')}${c.contactEmail ? `<div style="color:var(--ink-soft); font-size:11.5px;">${esc(c.contactEmail)}</div>` : ''}${c.contactPhone ? `<div style="color:var(--ink-soft); font-size:11.5px;">${esc(c.contactPhone)}</div>` : ''}</td>
+        <td>${vnames.length ? vnames.join('<br>') : '<span style="color:var(--ink-soft);">None assigned</span>'}</td>
+        <td style="white-space:nowrap;">
+          <button class="btn small ghost" data-action="edit-company" data-id="${c.id}">Edit</button>
+          <button class="btn small danger" data-action="delete-company" data-id="${c.id}">Delete</button>
+        </td>
+      </tr>`;
+  }).join('');
+  return `
+    <div class="toolbar">
+      <div>
+        <h2 class="section-title">Companies &amp; owner logins</h2>
+        <p class="section-sub" style="margin-bottom:0;">Create an owner / operator account for each company and assign it the vessel(s) it may access. Owners only ever see and manage their assigned vessels.</p>
+      </div>
+      <button class="btn primary" data-action="add-company">+ Add company</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Company</th><th>Login username</th><th>Password</th><th>Contact</th><th>Assigned vessels</th><th></th>
+        </tr></thead>
+        <tbody>
+          ${state.companies.length === 0
+            ? `<tr><td colspan="6"><div class="empty-note">No companies yet. Add one to create an owner login.</div></td></tr>`
+            : rows}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
 function renderModal(){
   const root = document.getElementById('modalRoot');
   const modal = state.modal;
@@ -1307,6 +1501,7 @@ function renderModal(){
   else if(modal.type==='tender-engine'){ title = modal.data ? 'Edit engine' : 'Add engine'; body = vesselEngineForm(modal.data); }
   else if(modal.type==='tender-task'){ title = modal.data ? 'Edit task' : 'Add task'; body = tenderMaintenanceForm(modal.data); }
   else if(modal.type==='tender-doc'){ title = 'Add tender document'; body = documentForm(); }
+  else if(modal.type==='company'){ title = modal.data ? 'Edit company' : 'Add company'; body = companyForm(modal.data); }
 
   root.innerHTML = `
     <div class="modal-overlay" data-action="overlay-close">
@@ -1673,6 +1868,23 @@ async function handleFormSubmit(e){
     });
     nextModal = { type:'view-tender', vesselId, tenderId };
   }
+  else if(modal.type==='company'){
+    const editId = modal.data ? modal.data.id : null;
+    const uname = (fd.get('username')||'').trim();
+    if(uname && state.companies.some(c => c.id !== editId && (c.username||'').trim().toLowerCase() === uname.toLowerCase())){
+      alert('Another company already uses that username. Please choose a different one.');
+      return;
+    }
+    const data = {
+      name:fd.get('name'), contactName:fd.get('contactName')||'', contactEmail:fd.get('contactEmail')||'',
+      contactPhone:fd.get('contactPhone')||'', address:fd.get('address')||'', notes:fd.get('notes')||'',
+      username:uname, password:fd.get('password')||'', vesselIds:fd.getAll('vesselIds')
+    };
+    targetKey = 'companies';
+    mutateFn = fresh => editId
+      ? fresh.map(c=> c.id===editId ? { ...c, ...data } : c)
+      : [...fresh, { id:uid('co'), ...data }];
+  }
 
   if(targetKey && mutateFn){
     await persistArray(targetKey, mutateFn);
@@ -1758,8 +1970,26 @@ function attachContentEvents(){
             render();
           }
           break;
+        case 'add-company': state.modal = { type:'company', data:null }; renderModal(); break;
+        case 'edit-company': state.modal = { type:'company', data: state.companies.find(c=>c.id===id) }; renderModal(); break;
+        case 'delete-company':
+          if(confirm('Delete this company and its owner login? The vessels and their records are kept.')){
+            await persistArray('companies', fresh => fresh.filter(c=>c.id!==id));
+            render();
+          }
+          break;
+        case 'reveal-password': {
+          const span = el.previousElementSibling;
+          if(span && span.classList.contains('pw-mask')){
+            const shown = span.dataset.shown === '1';
+            span.textContent = shown ? '••••••••' : (span.dataset.pw || '');
+            span.dataset.shown = shown ? '0' : '1';
+            el.textContent = shown ? 'Show' : 'Hide';
+          }
+          break;
+        }
         case 'logout':
-          if(confirm('Log out and exit? You will need the PIN again to get back in.')){ await logout(); }
+          if(confirm('Sign out? You will need to sign in again to get back in.')){ await logout(); }
           break;
       }
     });
@@ -1775,14 +2005,26 @@ function attachContentEvents(){
 
 /* ============================= RENDER DISPATCH ============================= */
 function render(){
+  if(!session){ renderLoginGate(); return; }
+  if(session.role === 'owner' && !currentCompany()){
+    /* the company/login was removed or reassigned while signed in */
+    session = null;
+    saveSession();
+    renderLoginGate('Your access has changed — please sign in again.');
+    return;
+  }
+  applyScoping();
   renderHeaderMeta();
   renderNav();
+  const allowed = navTabs().map(t=>t.id);
+  if(!allowed.includes(state.activeTab)) state.activeTab = 'dashboard';
   const main = document.getElementById('mainContent');
   switch(state.activeTab){
     case 'dashboard': main.innerHTML = renderDashboard(); break;
     case 'vessels': main.innerHTML = renderVessels(); break;
     case 'maintenance': main.innerHTML = renderMaintenance(); break;
     case 'crew': main.innerHTML = renderCrew(); break;
+    case 'companies': main.innerHTML = renderCompanies(); break;
   }
   attachContentEvents();
   renderModal();
