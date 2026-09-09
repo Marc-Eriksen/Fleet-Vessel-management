@@ -222,6 +222,19 @@
   .vessel-check input{width:auto;}
   .pw-mask{font-family:'Space Mono',monospace; letter-spacing:1px;}
 
+  /* ===== Sub-tabs (billing filter) ===== */
+  .subtabs{display:flex; gap:6px; flex-wrap:wrap; margin:0 0 16px;}
+  .subtab{
+    font-family:'Inter',sans-serif; font-size:12.5px; font-weight:600; padding:7px 13px;
+    border-radius:5px; border:1.5px solid var(--paper-line); background:#fff; color:var(--ink-soft); cursor:pointer;
+  }
+  .subtab:hover{color:var(--ink);}
+  .subtab.active{border-color:var(--navy); background:var(--navy); color:#F6EFDE;}
+  .subtab .cnt{opacity:0.7; font-weight:700; margin-left:5px;}
+  .stamp.bill-quoted{color:var(--navy); background:rgba(18,58,82,0.06);}
+  .stamp.bill-invoiced{color:var(--brass); background:rgba(184,134,46,0.09);}
+  .stamp.bill-paid{color:var(--seafoam); background:rgba(47,110,98,0.09);}
+
   @media (max-width:640px){
     .wrap{padding:0 14px 60px;}
     header.top .inner{padding:20px 14px 16px; flex-direction:column; align-items:flex-start;}
@@ -305,7 +318,7 @@ let state = {
   companies: [],
   activeTab: 'dashboard',
   modal: null,
-  filters: { vessel:'all', category:'all', status:'all' }
+  filters: { vessel:'all', category:'all', status:'all', billing:'all' }
 };
 
 /* Auth session: null (signed out) | { role:'admin' } | { role:'owner', companyId } */
@@ -536,6 +549,13 @@ function logout(){
   document.getElementById('modalRoot').innerHTML = '';
   bootstrap();
 }
+
+function isAdmin(){ return !!(session && session.role === 'admin'); }
+
+/* Billing lifecycle for a maintenance task (admin-only view). */
+const BILLING_STAGES = [ { id:'quoted', label:'Quoted' }, { id:'invoiced', label:'Invoiced' }, { id:'paid', label:'Paid' } ];
+function billingOf(m){ return m.billing || 'none'; }
+function billingLabel(b){ return ({ none:'Not billed', quoted:'Quoted', invoiced:'Invoiced', paid:'Paid' })[b] || b; }
 
 /* Which vessels the signed-in user may see: all of them for admin, only the
    assigned ones for an owner/operator. */
@@ -1100,6 +1120,10 @@ function tenderMaintenanceForm(m){
       </select></label>`,
       `<label class="field">Cost (R)<input name="cost" type="number" min="0" value="${m.cost}"></label>`
     )}
+    ${isAdmin() ? `<label class="field">Billing status<select name="billing">
+      <option value="none" ${billingOf(m)==='none'?'selected':''}>Not billed</option>
+      ${BILLING_STAGES.map(b=>`<option value="${b.id}" ${billingOf(m)===b.id?'selected':''}>${b.label}</option>`).join('')}
+    </select></label>` : ''}
   `;
 }
 
@@ -1114,21 +1138,40 @@ function renderMaintenance(){
 
 function renderMaintenanceTasks(){
   const f = state.filters;
+  const admin = isAdmin();
   const allTasks = getAllMaintenanceTasks();
   let rows = allTasks.slice();
   if(f.vessel!=='all') rows = rows.filter(m=>m.vesselId===f.vessel);
   if(f.category!=='all') rows = rows.filter(m=>m.category===f.category);
   if(f.status!=='all') rows = rows.filter(m=>maintStatus(m)===f.status);
+
+  /* billing sub-tabs (admin only) — counts reflect the other active filters */
+  const billing = admin ? (f.billing || 'all') : 'all';
+  const rowsBeforeBilling = rows.slice();
+  const billingCount = id => rowsBeforeBilling.filter(m => billingOf(m) === id).length;
+  if(billing !== 'all') rows = rows.filter(m => billingOf(m) === billing);
+
   rows.sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));
 
   const totalCost = allTasks.reduce((s,m)=>s+Number(m.cost||0),0);
   const openCost = allTasks.filter(m=>m.status!=='completed').reduce((s,m)=>s+Number(m.cost||0),0);
+  const invoicedUnpaid = allTasks.filter(m=>billingOf(m)==='invoiced').reduce((s,m)=>s+Number(m.cost||0),0);
+
+  const billingTabs = admin ? `
+    <div class="subtabs">
+      <button type="button" class="subtab ${billing==='all'?'active':''}" data-action="billing-tab" data-billing="all">All${''}</button>
+      ${BILLING_STAGES.map(b=>`<button type="button" class="subtab ${billing===b.id?'active':''}" data-action="billing-tab" data-billing="${b.id}">${b.label}<span class="cnt">${billingCount(b.id)}</span></button>`).join('')}
+      <button type="button" class="subtab ${billing==='none'?'active':''}" data-action="billing-tab" data-billing="none">Not billed<span class="cnt">${billingCount('none')}</span></button>
+    </div>` : '';
+  const colspan = admin ? 9 : 8;
 
   return `
     <div class="cost-total-bar">
       <div class="ctb-item"><div class="label">Open work cost</div><div class="value">${fmtCurrency(openCost)}</div></div>
       <div class="ctb-item"><div class="label">All-time recorded cost</div><div class="value">${fmtCurrency(totalCost)}</div></div>
+      ${admin ? `<div class="ctb-item"><div class="label">Invoiced, unpaid</div><div class="value">${fmtCurrency(invoicedUnpaid)}</div></div>` : ''}
     </div>
+    ${billingTabs}
     <div class="toolbar">
       <div class="filters">
         <select id="filterVessel">
@@ -1154,10 +1197,10 @@ function renderMaintenanceTasks(){
     <div class="table-wrap">
       <table>
         <thead><tr>
-          <th>Task</th><th>Vessel</th><th>Type</th><th>Due</th><th>Priority</th><th class="num">Cost</th><th>Status</th><th></th>
+          <th>Task</th><th>Vessel</th><th>Type</th><th>Due</th><th>Priority</th><th class="num">Cost</th><th>Status</th>${admin?'<th>Billing</th>':''}<th></th>
         </tr></thead>
         <tbody>
-          ${rows.length===0 ? `<tr><td colspan="8"><div class="empty-note">No tasks match these filters.</div></td></tr>` : rows.map(m=>{
+          ${rows.length===0 ? `<tr><td colspan="${colspan}"><div class="empty-note">No tasks match these filters.</div></td></tr>` : rows.map(m=>{
             const isTender = m._source==='tender';
             const vesselLabel = isTender ? `${esc(vesselName(m.vesselId))} <span style="color:var(--ink-soft); font-size:11px;">— ${esc(m._tenderName)} (tender)</span>` : esc(vesselName(m.vesselId));
             const completeAttrs = isTender ? `data-action="complete-tender-task" data-id="${m.vesselId}" data-tender-id="${m._tenderId}" data-task-id="${m.id}"` : `data-action="complete-task" data-id="${m.id}"`;
@@ -1172,6 +1215,7 @@ function renderMaintenanceTasks(){
               <td style="text-transform:capitalize;">${m.priority}</td>
               <td class="num">${fmtCurrency(m.cost)}</td>
               <td><span class="stamp ${maintStatus(m)}">${stampLabel(maintStatus(m))}</span></td>
+              ${admin ? `<td>${billingOf(m)==='none' ? '<span style="color:var(--ink-soft);">—</span>' : `<span class="stamp bill-${billingOf(m)}">${billingLabel(billingOf(m))}</span>`}</td>` : ''}
               <td style="white-space:nowrap;">
                 ${m.status!=='completed' ? `<button class="btn small" ${completeAttrs}>Complete</button>` : ''}
                 <button class="btn small ghost" ${editAttrs}>Edit</button>
@@ -1333,7 +1377,13 @@ function maintenanceForm(m){
         <option value="high" ${m.priority==='high'?'selected':''}>High</option>
       </select></label>`
     )}
-    <label class="field">Estimated / actual cost (R)<input name="cost" type="number" min="0" value="${m.cost}"></label>
+    ${fieldRow(
+      `<label class="field">Estimated / actual cost (R)<input name="cost" type="number" min="0" value="${m.cost}"></label>`,
+      isAdmin() ? `<label class="field">Billing status<select name="billing">
+        <option value="none" ${billingOf(m)==='none'?'selected':''}>Not billed</option>
+        ${BILLING_STAGES.map(b=>`<option value="${b.id}" ${billingOf(m)===b.id?'selected':''}>${b.label}</option>`).join('')}
+      </select></label>` : `<span></span>`
+    )}
   `;
 }
 
@@ -1732,7 +1782,8 @@ async function handleFormSubmit(e){
       : [...fresh, { id:uid('v'), fixedCosts:[], documents:[], engines:[], ...data }];
   }
   else if(modal.type==='maintenance'){
-    const data = { vesselId:fd.get('vesselId'), category:fd.get('category'), title:fd.get('title'), description:fd.get('description')||'', dueDate:fd.get('dueDate'), cost:Number(fd.get('cost'))||0, priority:fd.get('priority') };
+    const data = { vesselId:fd.get('vesselId'), category:fd.get('category'), title:fd.get('title'), description:fd.get('description')||'', dueDate:fd.get('dueDate'), cost:Number(fd.get('cost'))||0, priority:fd.get('priority'),
+      billing: fd.get('billing') || (modal.data ? billingOf(modal.data) : 'none') };
     const editId = modal.data ? modal.data.id : null;
     targetKey = 'maintenance';
     mutateFn = fresh => editId
@@ -1835,7 +1886,8 @@ async function handleFormSubmit(e){
     nextModal = { type:'view-tender', vesselId, tenderId };
   }
   else if(modal.type==='tender-task'){
-    const data = { title:fd.get('title'), description:fd.get('description')||'', category:fd.get('category'), dueDate:fd.get('dueDate'), priority:fd.get('priority'), cost:Number(fd.get('cost'))||0 };
+    const data = { title:fd.get('title'), description:fd.get('description')||'', category:fd.get('category'), dueDate:fd.get('dueDate'), priority:fd.get('priority'), cost:Number(fd.get('cost'))||0,
+      billing: fd.get('billing') || (modal.data ? billingOf(modal.data) : 'none') };
     const vesselId = modal.vesselId, tenderId = modal.tenderId;
     const editTaskId = modal.data ? modal.data.id : null;
     targetKey = 'vessels';
@@ -1986,6 +2038,10 @@ function attachContentEvents(){
           }
           break;
         }
+        case 'billing-tab':
+          state.filters.billing = el.dataset.billing;
+          render();
+          break;
         case 'logout':
           if(confirm('Sign out? You will need to sign in again to get back in.')){ await logout(); }
           break;
