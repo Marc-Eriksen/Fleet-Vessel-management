@@ -733,6 +733,51 @@ function readFileAsDataURL(file){
     reader.readAsDataURL(file);
   });
 }
+/* Browsers block navigating a tab straight to a data: URL, so stored documents
+   (base64 data URLs) can't be opened with a plain <a href>. Convert to a Blob
+   URL and open that instead — works for both images and PDFs. */
+function dataUrlToBlob(dataUrl){
+  const comma = dataUrl.indexOf(',');
+  const header = dataUrl.slice(0, comma);
+  const body = dataUrl.slice(comma + 1);
+  const mime = (header.match(/data:([^;]+)/) || [null, 'application/octet-stream'])[1];
+  const isBase64 = /;base64/i.test(header);
+  const raw = isBase64 ? atob(body) : decodeURIComponent(body);
+  const bytes = new Uint8Array(raw.length);
+  for(let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+function findStoredDocUrl(ds){
+  const pick = list => ((list || []).find(d => d.id === ds.docId) || {}).dataUrl;
+  if(ds.scope === 'crew'){
+    const c = state.crew.find(x => x.id === ds.id) || (state.allCrew || []).find(x => x.id === ds.id);
+    return pick(c && c.documents);
+  }
+  const v = state.vessels.find(x => x.id === ds.id) || (state.allVessels || []).find(x => x.id === ds.id);
+  if(ds.scope === 'tender'){
+    const t = v && (v.tenders || []).find(x => x.id === ds.tenderId);
+    return pick(t && t.documents);
+  }
+  return pick(v && v.documents);
+}
+function openStoredDocument(dataUrl){
+  if(!dataUrl){ alert('That document has no file attached.'); return; }
+  try{
+    if(dataUrl.slice(0, 5) === 'data:'){
+      const url = URL.createObjectURL(dataUrlToBlob(dataUrl));
+      /* no 'noopener' here: with it window.open always returns null and we
+         couldn't tell a real pop-up block from success */
+      const win = window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      if(!win) alert('Your browser blocked the document window — allow pop-ups for this site and try again.');
+    } else {
+      window.open(dataUrl, '_blank', 'noopener');
+    }
+  }catch(e){
+    alert("Couldn't open that document.");
+  }
+}
+
 async function processDocumentFile(file){
   const MAX_RAW_BYTES = 4 * 1024 * 1024; /* 4MB */
   if(file.size > MAX_RAW_BYTES){
@@ -1000,7 +1045,7 @@ function renderVesselDetail(id){
         <div class="mini-row">
           <span>${esc(doc.name)} <span style="color:var(--ink-soft); font-size:11px;">(${fmtDate(doc.addedDate)})</span></span>
           <span style="display:flex; align-items:center; gap:8px;">
-            <a href="${doc.dataUrl}" target="_blank" rel="noopener" class="btn small ghost">View</a>
+            <button class="btn small ghost" data-action="view-doc" data-scope="vessel" data-id="${v.id}" data-doc-id="${doc.id}">View</button>
             <button class="btn small danger" data-action="delete-vessel-doc" data-id="${v.id}" data-doc-id="${doc.id}">Remove</button>
           </span>
         </div>
@@ -1073,7 +1118,7 @@ function renderTenderDetail(vesselId, tenderId){
         <div class="mini-row">
           <span>${esc(doc.name)} <span style="color:var(--ink-soft); font-size:11px;">(${fmtDate(doc.addedDate)})</span></span>
           <span style="display:flex; align-items:center; gap:8px;">
-            <a href="${doc.dataUrl}" target="_blank" rel="noopener" class="btn small ghost">View</a>
+            <button class="btn small ghost" data-action="view-doc" data-scope="tender" data-id="${v.id}" data-tender-id="${t.id}" data-doc-id="${doc.id}">View</button>
             <button class="btn small danger" data-action="delete-tender-doc" data-id="${v.id}" data-tender-id="${t.id}" data-doc-id="${doc.id}">Remove</button>
           </span>
         </div>
@@ -1300,7 +1345,7 @@ function renderCrew(){
               <div class="mini-row">
                 <span>${esc(doc.name)} <span style="color:var(--ink-soft); font-size:11px;">(${fmtDate(doc.addedDate)})</span></span>
                 <span style="display:flex; align-items:center; gap:8px;">
-                  <a href="${doc.dataUrl}" target="_blank" rel="noopener" class="btn small ghost">View</a>
+                  <button class="btn small ghost" data-action="view-doc" data-scope="crew" data-id="${c.id}" data-doc-id="${doc.id}">View</button>
                   <button class="btn small danger" data-action="delete-crew-doc" data-id="${c.id}" data-doc-id="${doc.id}">Remove</button>
                 </span>
               </div>
@@ -1571,6 +1616,7 @@ function attachModalEvents(){
     overlay.addEventListener('click', ()=>{ state.modal=null; render(); });
   }
   document.querySelectorAll('[data-action="close-modal"]').forEach(b=>b.addEventListener('click', (e)=>{ e.preventDefault(); state.modal=null; render(); }));
+  document.querySelectorAll('[data-action="view-doc"]').forEach(b=>b.addEventListener('click', (e)=>{ e.preventDefault(); openStoredDocument(findStoredDocUrl(b.dataset)); }));
   const form = document.getElementById('modalForm');
   if(form) form.addEventListener('submit', handleFormSubmit);
   const photoInput = document.getElementById('vesselPhotoInput');
@@ -2041,6 +2087,9 @@ function attachContentEvents(){
         case 'billing-tab':
           state.filters.billing = el.dataset.billing;
           render();
+          break;
+        case 'view-doc':
+          openStoredDocument(findStoredDocUrl(el.dataset));
           break;
         case 'logout':
           if(confirm('Sign out? You will need to sign in again to get back in.')){ await logout(); }
