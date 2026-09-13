@@ -234,6 +234,8 @@
   .stamp.bill-quoted{color:var(--navy); background:rgba(18,58,82,0.06);}
   .stamp.bill-invoiced{color:var(--brass); background:rgba(184,134,46,0.09);}
   .stamp.bill-paid{color:var(--seafoam); background:rgba(47,110,98,0.09);}
+  .stamp.pay-outstanding{color:var(--signal-red); background:rgba(163,55,46,0.07);}
+  .stamp.pay-paid{color:var(--seafoam); background:rgba(47,110,98,0.09);}
 
   @media (max-width:640px){
     .wrap{padding:0 14px 60px;}
@@ -306,6 +308,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
 /* ============================= STATE ============================= */
 let state = {
@@ -316,6 +319,7 @@ let state = {
   allMaintenance: [],
   allCrew: [],
   companies: [],
+  contractors: [],
   activeTab: 'dashboard',
   modal: null,
   filters: { vessel:'all', category:'all', status:'all', billing:'all' }
@@ -391,6 +395,16 @@ function seedData(){
       contactEmail:'ops@zephyrmarine.example', contactPhone:'+27821234567',
       address:'Durban Harbour, Berth 4', notes:'',
       username:'zephyr', password:'zephyr123', vesselIds:[v1] },
+  ];
+  state.contractors = [
+    { id:uid('ct'), name:'Bluewater Marine Engineering', contactName:'Derek van Wyk',
+      email:'accounts@bluewaterme.example', phone:'+27831112222',
+      bankName:'Standard Bank', accountHolder:'Bluewater Marine Engineering CC', accountNumber:'0123456789',
+      branchCode:'051001', accountType:'Cheque/Current', swift:'SBZAZAJJ', notes:'',
+      payments:[
+        { id:uid('pay'), description:'Shaft seal replacement — MV Kingfisher', amount:34500, date:d(-1), status:'outstanding' },
+        { id:uid('pay'), description:'150-hour engine service — MV Zephyr', amount:8200, date:d(-4), status:'outstanding' },
+      ] },
   ];
   applyScoping();
 }
@@ -557,6 +571,9 @@ const BILLING_STAGES = [ { id:'quoted', label:'Quoted' }, { id:'invoiced', label
 function billingOf(m){ return m.billing || 'none'; }
 function billingLabel(b){ return ({ none:'Not billed', quoted:'Quoted', invoiced:'Invoiced', paid:'Paid' })[b] || b; }
 
+/* Contractor outstanding-payments total (admin-only view). */
+function outstandingTotal(ct){ return (ct.payments||[]).filter(p=>p.status!=='paid').reduce((s,p)=>s+(Number(p.amount)||0),0); }
+
 /* Which vessels the signed-in user may see: all of them for admin, only the
    assigned ones for an owner/operator. */
 function currentCompany(){
@@ -590,6 +607,7 @@ function normalizeKey(key, raw){
     tenders: asArray(v.tenders).map(t=>({ ...t, engines: asArray(t.engines), documents: asArray(t.documents), maintenance: asArray(t.maintenance) })) }));
   if(key==='crew') return asArray(raw).map(c=>({ ...c, quals: asArray(c.quals), documents: asArray(c.documents) }));
   if(key==='companies') return asArray(raw).map(c=>({ ...c, vesselIds: asArray(c.vesselIds) }));
+  if(key==='contractors') return asArray(raw).map(c=>({ ...c, payments: asArray(c.payments) }));
   return asArray(raw);
 }
 
@@ -598,6 +616,7 @@ function applyRemoteData(val){
   state.allMaintenance = normalizeKey('maintenance', val.maintenance);
   state.allCrew = normalizeKey('crew', val.crew);
   state.companies = normalizeKey('companies', val.companies);
+  state.contractors = normalizeKey('contractors', val.contractors);
   applyScoping();
 }
 
@@ -640,7 +659,7 @@ async function persistAll(){
   if(!fbInitialized) return;
   try{
     await firebase.database().ref('oceanhub/data').set({
-      vessels: state.allVessels, maintenance: state.allMaintenance, crew: state.allCrew, companies: state.companies
+      vessels: state.allVessels, maintenance: state.allMaintenance, crew: state.allCrew, companies: state.companies, contractors: state.contractors
     });
   } catch(e){ /* best effort */ }
 }
@@ -657,7 +676,7 @@ async function persistArray(key, mutateFn){
     let fresh = normalizeKey(key, snap.val());
     fresh = mutateFn(fresh);
     await firebase.database().ref('oceanhub/data/' + key).set(fresh);
-    const allKey = key === 'companies' ? 'companies'
+    const allKey = (key === 'companies' || key === 'contractors') ? key
       : 'all' + key.charAt(0).toUpperCase() + key.slice(1);
     state[allKey] = fresh;
     applyScoping();
@@ -853,10 +872,13 @@ const TABS = [
   { id:'maintenance', label:'Maintenance', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a4 4 0 1 0-5.4 5.4L2 19v3h3l7.3-7.3a4 4 0 0 0 5.4-5.4l-2.8 2.8-2-2z"/></svg>' },
   { id:'crew', label:'Crew', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20c0-3.5 3-6 6.5-6s6.5 2.5 6.5 6"/><circle cx="18" cy="8" r="2.6"/><path d="M15.5 14.3c2.9.4 5 2.6 5 5.7"/></svg>' },
 ];
-const ADMIN_TAB = { id:'companies', label:'Companies', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18"/><path d="M5 21V8l7-5 7 5v13"/><path d="M9 21v-5h6v5"/><path d="M9 9h.01M15 9h.01M9 12h.01M15 12h.01"/></svg>' };
+const ADMIN_TABS = [
+  { id:'companies', label:'Companies', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18"/><path d="M5 21V8l7-5 7 5v13"/><path d="M9 21v-5h6v5"/><path d="M9 9h.01M15 9h.01M9 12h.01M15 12h.01"/></svg>' },
+  { id:'contractors', label:'Contractors', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M6 9v0M18 15v0"/></svg>' },
+];
 function navTabs(){
   const t = TABS.slice();
-  if(session && session.role === 'admin') t.push(ADMIN_TAB);
+  if(session && session.role === 'admin') t.push(...ADMIN_TABS);
   return t;
 }
 function renderNav(){
@@ -1564,6 +1586,219 @@ function renderCompanies(){
   `;
 }
 
+/* ============================= CONTRACTORS (admin only) ============================= */
+function contractorForm(c){
+  c = c || { name:'', contactName:'', email:'', phone:'', bankName:'', accountHolder:'', accountNumber:'', branchCode:'', accountType:'', swift:'', notes:'' };
+  return `
+    <label class="field">Contractor / company name<input name="name" value="${esc(c.name)}" required></label>
+    ${fieldRow(
+      `<label class="field">Contact person<input name="contactName" value="${esc(c.contactName||'')}"></label>`,
+      `<label class="field">Phone<input name="phone" type="tel" value="${esc(c.phone||'')}"></label>`
+    )}
+    <label class="field">Email<input name="email" type="email" value="${esc(c.email||'')}"></label>
+    <label class="field">Notes<textarea name="notes" rows="2">${esc(c.notes||'')}</textarea></label>
+
+    <div class="detail-section" style="margin-top:4px;"><h4>Banking details</h4></div>
+    ${fieldRow(
+      `<label class="field">Bank<input name="bankName" value="${esc(c.bankName||'')}"></label>`,
+      `<label class="field">Account holder<input name="accountHolder" value="${esc(c.accountHolder||'')}"></label>`
+    )}
+    ${fieldRow(
+      `<label class="field">Account number<input name="accountNumber" value="${esc(c.accountNumber||'')}" autocomplete="off"></label>`,
+      `<label class="field">Branch code<input name="branchCode" value="${esc(c.branchCode||'')}"></label>`
+    )}
+    ${fieldRow(
+      `<label class="field">Account type<select name="accountType">
+        <option value="">Select…</option>
+        <option value="Cheque/Current" ${c.accountType==='Cheque/Current'?'selected':''}>Cheque / Current</option>
+        <option value="Savings" ${c.accountType==='Savings'?'selected':''}>Savings</option>
+        <option value="Transmission" ${c.accountType==='Transmission'?'selected':''}>Transmission</option>
+      </select></label>`,
+      `<label class="field">SWIFT / BIC (if international)<input name="swift" value="${esc(c.swift||'')}"></label>`
+    )}
+  `;
+}
+
+function contractorPaymentForm(p){
+  p = p || { description:'', amount:'', date:new Date().toISOString().slice(0,10), status:'outstanding' };
+  return `
+    <label class="field">Description<input name="description" value="${esc(p.description)}" placeholder="e.g. Shaft seal replacement — MV Kingfisher" required></label>
+    ${fieldRow(
+      `<label class="field">Amount (R)<input name="amount" type="number" step="0.01" min="0" value="${p.amount!==''&&p.amount!=null?esc(String(p.amount)):''}" required></label>`,
+      `<label class="field">Date<input name="date" type="date" value="${esc(p.date||'')}" required></label>`
+    )}
+    <label class="field">Status<select name="status">
+      <option value="outstanding" ${p.status==='outstanding'?'selected':''}>Outstanding</option>
+      <option value="paid" ${p.status==='paid'?'selected':''}>Paid</option>
+    </select></label>
+  `;
+}
+
+function renderContractors(){
+  const rows = state.contractors.map(ct=>{
+    const total = outstandingTotal(ct);
+    return `
+      <tr>
+        <td><b>${esc(ct.name)}</b>${ct.notes ? `<div style="color:var(--ink-soft); font-size:11.5px;">${esc(ct.notes)}</div>` : ''}</td>
+        <td>${esc(ct.contactName || '—')}${ct.email ? `<div style="color:var(--ink-soft); font-size:11.5px;">${esc(ct.email)}</div>` : ''}${ct.phone ? `<div style="color:var(--ink-soft); font-size:11.5px;">${esc(ct.phone)}</div>` : ''}</td>
+        <td>${esc(ct.bankName || '—')}${ct.accountNumber ? `<div style="color:var(--ink-soft); font-size:11.5px;">Acc <span class="pw-mask" data-pw="${esc(ct.accountNumber)}">••••${esc(ct.accountNumber.slice(-4))}</span> <button type="button" class="btn small ghost" data-action="reveal-password">Show</button></div>` : ''}</td>
+        <td class="num">${total>0 ? `<span class="stamp pay-outstanding">${fmtCurrency(total)}</span>` : '<span style="color:var(--ink-soft);">—</span>'}</td>
+        <td style="white-space:nowrap;">
+          <button class="btn small ghost" data-action="view-contractor" data-id="${ct.id}">Manage</button>
+          <button class="btn small danger" data-action="delete-contractor" data-id="${ct.id}">Delete</button>
+        </td>
+      </tr>`;
+  }).join('');
+  return `
+    <div class="toolbar">
+      <div>
+        <h2 class="section-title">Contractors</h2>
+        <p class="section-sub" style="margin-bottom:0;">Contact and banking details for contractors, with outstanding payments you can send as a PDF statement via WhatsApp or email.</p>
+      </div>
+      <button class="btn primary" data-action="add-contractor">+ Add contractor</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Contractor</th><th>Contact</th><th>Banking</th><th class="num">Outstanding</th><th></th>
+        </tr></thead>
+        <tbody>
+          ${state.contractors.length === 0
+            ? `<tr><td colspan="5"><div class="empty-note">No contractors yet. Add one to record banking details and payments.</div></td></tr>`
+            : rows}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderContractorDetail(id){
+  const ct = state.contractors.find(c=>c.id===id);
+  if(!ct) return '<p>Contractor not found.</p>';
+  const payments = (ct.payments||[]).slice().sort((a,b)=> new Date(b.date) - new Date(a.date));
+  const outstanding = payments.filter(p=>p.status!=='paid');
+  const paidTotal = payments.filter(p=>p.status==='paid').reduce((s,p)=>s+(Number(p.amount)||0),0);
+  const total = outstandingTotal(ct);
+  return `
+    <div class="modal-header-row">
+      <h3 style="margin:0;">${esc(ct.name)}</h3>
+      <div style="display:flex; gap:8px;">
+        <button type="button" class="btn small ghost" data-action="edit-contractor" data-id="${ct.id}">Edit details</button>
+        <button type="button" class="btn small ghost" data-action="close-modal">Close</button>
+      </div>
+    </div>
+    <div class="detail-section">
+      <h4>Contact</h4>
+      <div class="mini-row"><span>Contact person</span><b>${esc(ct.contactName || '—')}</b></div>
+      ${ct.email ? `<div class="mini-row"><span>Email</span><a href="mailto:${esc(ct.email)}" style="color:var(--seafoam); font-weight:600; text-decoration:none;">${esc(ct.email)}</a></div>` : ''}
+      ${ct.phone ? `<div class="mini-row"><span>Phone</span><b>${esc(ct.phone)}</b></div>` : ''}
+    </div>
+    <div class="detail-section">
+      <h4>Banking details</h4>
+      <div class="mini-row"><span>Bank</span><b>${esc(ct.bankName || '—')}</b></div>
+      <div class="mini-row"><span>Account holder</span><b>${esc(ct.accountHolder || '—')}</b></div>
+      <div class="mini-row"><span>Account number</span><b><span class="pw-mask" data-pw="${esc(ct.accountNumber || '')}">••••••••</span> <button type="button" class="btn small ghost" data-action="reveal-password">Show</button></b></div>
+      <div class="mini-row"><span>Branch code</span><b>${esc(ct.branchCode || '—')}</b></div>
+      <div class="mini-row"><span>Account type</span><b>${esc(ct.accountType || '—')}</b></div>
+      ${ct.swift ? `<div class="mini-row"><span>SWIFT / BIC</span><b>${esc(ct.swift)}</b></div>` : ''}
+    </div>
+    <div class="cost-total-bar" style="margin-top:16px;">
+      <div class="ctb-item"><div class="label">Outstanding</div><div class="value">${fmtCurrency(total)}</div></div>
+      <div class="ctb-item"><div class="label">Paid to date</div><div class="value">${fmtCurrency(paidTotal)}</div></div>
+    </div>
+    <div class="detail-section">
+      <div class="modal-header-row"><h4 style="margin:0; border:none; padding:0;">Payments</h4><button type="button" class="btn small primary" data-action="add-contractor-payment" data-id="${ct.id}">+ Add payment</button></div>
+      ${payments.length === 0 ? '<div class="empty-note">No payments recorded yet.</div>' : payments.map(p=>`
+        <div class="mini-row">
+          <span>${esc(p.description)}<div style="color:var(--ink-soft); font-size:11px;">${esc(p.date || '')}</div></span>
+          <span style="display:flex; align-items:center; gap:8px;">
+            <b>${fmtCurrency(p.amount)}</b>
+            <span class="stamp ${p.status==='paid'?'pay-paid':'pay-outstanding'}">${p.status==='paid'?'Paid':'Outstanding'}</span>
+            <button type="button" class="btn small ghost" data-action="edit-contractor-payment" data-id="${ct.id}" data-payid="${p.id}">Edit</button>
+            <button type="button" class="btn small danger" data-action="delete-contractor-payment" data-id="${ct.id}" data-payid="${p.id}">Delete</button>
+          </span>
+        </div>`).join('')}
+    </div>
+    <div class="detail-section">
+      <h4>Send outstanding statement</h4>
+      <p style="font-size:12px; color:var(--ink-soft); margin:0 0 10px;">
+        Downloads a PDF of the ${outstanding.length} outstanding payment${outstanding.length===1?'':'s'} (total ${fmtCurrency(total)}) to this device,
+        then opens WhatsApp or email so you can attach it and send it on.
+      </p>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button type="button" class="btn primary" data-action="send-contractor-statement" data-channel="whatsapp" data-id="${ct.id}" ${!ct.phone || outstanding.length===0 ? 'disabled' : ''}>Send via WhatsApp</button>
+        <button type="button" class="btn" data-action="send-contractor-statement" data-channel="email" data-id="${ct.id}" ${!ct.email || outstanding.length===0 ? 'disabled' : ''}>Send via Email</button>
+      </div>
+    </div>
+  `;
+}
+
+/* Builds and downloads a PDF statement of a contractor's outstanding payments, then
+   opens WhatsApp or email with a message so the just-downloaded file can be attached
+   (a static page can't attach files to either automatically). */
+function sendContractorStatement(id, channel){
+  const ct = state.contractors.find(c=>c.id===id);
+  if(!ct) return;
+  const outstanding = (ct.payments||[]).filter(p=>p.status!=='paid');
+  if(outstanding.length === 0){ alert('No outstanding payments for this contractor.'); return; }
+  const total = outstanding.reduce((s,p)=>s+(Number(p.amount)||0),0);
+  const todayStr = new Date().toLocaleDateString('en-ZA', {day:'2-digit', month:'short', year:'numeric'});
+
+  try{
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    doc.setFont('helvetica','bold'); doc.setFontSize(16);
+    doc.text('Ocean Hub — Fleet Operations', 14, 18);
+    doc.setFont('helvetica','normal'); doc.setFontSize(10);
+    doc.text('Outstanding payments statement', 14, 25);
+    doc.text(`Date: ${todayStr}`, 14, 31);
+
+    doc.setFont('helvetica','bold'); doc.setFontSize(12);
+    doc.text(ct.name || 'Contractor', 14, 42);
+    doc.setFont('helvetica','normal'); doc.setFontSize(10);
+    let y = 49;
+    if(ct.contactName){ doc.text(`Attn: ${ct.contactName}`, 14, y); y += 6; }
+    if(ct.email){ doc.text(`Email: ${ct.email}`, 14, y); y += 6; }
+    if(ct.phone){ doc.text(`Phone: ${ct.phone}`, 14, y); y += 6; }
+    y += 4;
+
+    doc.setFont('helvetica','bold');
+    doc.text('Description', 14, y); doc.text('Date', 130, y); doc.text('Amount', 170, y);
+    doc.setFont('helvetica','normal');
+    y += 3;
+    doc.line(14, y, 196, y);
+    y += 7;
+    outstanding.forEach(p=>{
+      const lines = doc.splitTextToSize(p.description || '', 108);
+      doc.text(lines, 14, y);
+      doc.text(p.date || '', 130, y);
+      doc.text(fmtCurrency(p.amount), 170, y);
+      y += Math.max(6, lines.length * 6);
+      if(y > 270){ doc.addPage(); y = 20; }
+    });
+    y += 4;
+    doc.line(14, y, 196, y);
+    y += 8;
+    doc.setFont('helvetica','bold'); doc.setFontSize(12);
+    doc.text(`Total outstanding: ${fmtCurrency(total)}`, 14, y);
+
+    const fileName = `Statement-${(ct.name||'contractor').replace(/[^a-z0-9]+/gi,'-')}-${new Date().toISOString().slice(0,10)}.pdf`;
+    doc.save(fileName);
+  }catch(e){
+    alert('Could not generate the PDF. ' + (e && e.message ? e.message : ''));
+    return;
+  }
+
+  const msg = `Hi${ct.contactName ? ' ' + ct.contactName : ''}, please find your outstanding payments statement from Ocean Hub — total ${fmtCurrency(total)} as of ${todayStr}. The PDF has just downloaded to this device — please attach it here.`;
+  if(channel === 'whatsapp'){
+    if(!ct.phone){ alert('No phone number on file for this contractor.'); return; }
+    window.open(waLink(ct.phone, msg), '_blank');
+  } else {
+    if(!ct.email){ alert('No email address on file for this contractor.'); return; }
+    window.open(mailtoLink(ct.email, ADMIN_EMAIL, `Outstanding payments statement — ${ct.name}`, msg), '_blank');
+  }
+}
+
 function renderModal(){
   const root = document.getElementById('modalRoot');
   const modal = state.modal;
@@ -1582,6 +1817,11 @@ function renderModal(){
     attachModalEvents();
     return;
   }
+  if(modal.type==='view-contractor'){
+    root.innerHTML = `<div class="modal-overlay" data-action="overlay-close"><div class="modal" onclick="event.stopPropagation()">${renderContractorDetail(modal.id)}</div></div>`;
+    attachModalEvents();
+    return;
+  }
   if(modal.type==='vessel'){ title = modal.data ? 'Edit vessel' : 'Add vessel'; body = vesselForm(modal.data); }
   else if(modal.type==='maintenance'){ title = modal.data ? 'Edit maintenance task' : 'Add maintenance task'; body = maintenanceForm(modal.data); }
   else if(modal.type==='crew'){ title = modal.data ? 'Edit crew member' : 'Add crew member'; body = crewForm(modal.data); }
@@ -1595,6 +1835,8 @@ function renderModal(){
   else if(modal.type==='tender-task'){ title = modal.data ? 'Edit task' : 'Add task'; body = tenderMaintenanceForm(modal.data); }
   else if(modal.type==='tender-doc'){ title = 'Add tender document'; body = documentForm(); }
   else if(modal.type==='company'){ title = modal.data ? 'Edit company' : 'Add company'; body = companyForm(modal.data); }
+  else if(modal.type==='contractor'){ title = modal.data ? 'Edit contractor' : 'Add contractor'; body = contractorForm(modal.data); }
+  else if(modal.type==='contractor-payment'){ title = modal.data ? 'Edit payment' : 'Add payment'; body = contractorPaymentForm(modal.data); }
 
   root.innerHTML = `
     <div class="modal-overlay" data-action="overlay-close">
@@ -1811,6 +2053,44 @@ function attachModalEvents(){
     }));
     render();
   }));
+  /* Scoped to .modal because reveal-password also appears in the (already-bound)
+     companies/contractors list rows — an unscoped query here would double-bind those. */
+  const modalEl = document.querySelector('.modal');
+  if(modalEl){
+    modalEl.querySelectorAll('[data-action="reveal-password"]').forEach(b=>b.addEventListener('click', ()=>{
+      const span = b.previousElementSibling;
+      if(span && span.classList.contains('pw-mask')){
+        const shown = span.dataset.shown === '1';
+        span.textContent = shown ? '••••••••' : (span.dataset.pw || '');
+        span.dataset.shown = shown ? '0' : '1';
+        b.textContent = shown ? 'Show' : 'Hide';
+      }
+    }));
+  }
+  document.querySelectorAll('[data-action="edit-contractor"]').forEach(b=>b.addEventListener('click', ()=>{
+    state.modal = { type:'contractor', data: state.contractors.find(c=>c.id===b.dataset.id) };
+    renderModal();
+  }));
+  document.querySelectorAll('[data-action="add-contractor-payment"]').forEach(b=>b.addEventListener('click', ()=>{
+    state.modal = { type:'contractor-payment', id:b.dataset.id, data:null };
+    renderModal();
+  }));
+  document.querySelectorAll('[data-action="edit-contractor-payment"]').forEach(b=>b.addEventListener('click', ()=>{
+    const ct = state.contractors.find(x=>x.id===b.dataset.id);
+    const pay = ct ? (ct.payments||[]).find(p=>p.id===b.dataset.payid) : null;
+    state.modal = { type:'contractor-payment', id:b.dataset.id, data:pay };
+    renderModal();
+  }));
+  document.querySelectorAll('[data-action="delete-contractor-payment"]').forEach(b=>b.addEventListener('click', async ()=>{
+    if(!confirm('Delete this payment record?')) return;
+    const contractorId = b.dataset.id, payId = b.dataset.payid;
+    state.modal = { type:'view-contractor', id:contractorId };
+    await persistArray('contractors', fresh => fresh.map(c=> c.id===contractorId ? { ...c, payments:(c.payments||[]).filter(p=>p.id!==payId) } : c));
+    render();
+  }));
+  document.querySelectorAll('[data-action="send-contractor-statement"]').forEach(b=>b.addEventListener('click', ()=>{
+    sendContractorStatement(b.dataset.id, b.dataset.channel);
+  }));
 }
 
 async function handleFormSubmit(e){
@@ -1981,6 +2261,34 @@ async function handleFormSubmit(e){
       ? fresh.map(c=> c.id===editId ? { ...c, ...data } : c)
       : [...fresh, { id:uid('co'), ...data }];
   }
+  else if(modal.type==='contractor'){
+    const data = {
+      name:fd.get('name'), contactName:fd.get('contactName')||'', email:fd.get('email')||'', phone:fd.get('phone')||'',
+      bankName:fd.get('bankName')||'', accountHolder:fd.get('accountHolder')||'', accountNumber:fd.get('accountNumber')||'',
+      branchCode:fd.get('branchCode')||'', accountType:fd.get('accountType')||'', swift:fd.get('swift')||'', notes:fd.get('notes')||''
+    };
+    const editId = modal.data ? modal.data.id : null;
+    targetKey = 'contractors';
+    mutateFn = fresh => editId
+      ? fresh.map(c=> c.id===editId ? { ...c, ...data } : c)
+      : [...fresh, { id:uid('ct'), payments:[], ...data }];
+    nextModal = editId ? { type:'view-contractor', id: editId } : null;
+  }
+  else if(modal.type==='contractor-payment'){
+    const data = { description:fd.get('description'), amount:Number(fd.get('amount'))||0, date:fd.get('date'), status:fd.get('status') };
+    const contractorId = modal.id;
+    const editPayId = modal.data ? modal.data.id : null;
+    targetKey = 'contractors';
+    mutateFn = fresh => fresh.map(c=>{
+      if(c.id!==contractorId) return c;
+      const payments = c.payments || [];
+      const newPayments = editPayId
+        ? payments.map(p=> p.id===editPayId ? { ...p, ...data } : p)
+        : [...payments, { id:uid('pay'), ...data }];
+      return { ...c, payments: newPayments };
+    });
+    nextModal = { type:'view-contractor', id: contractorId };
+  }
 
   if(targetKey && mutateFn){
     await persistArray(targetKey, mutateFn);
@@ -1993,7 +2301,7 @@ async function handleFormSubmit(e){
 function attachContentEvents(){
   document.querySelectorAll('[data-action]').forEach(el=>{
     const action = el.dataset.action;
-    if(['close-modal','overlay-close','edit-vessel','delete-vessel'].includes(action)) return;
+    if(['close-modal','overlay-close','edit-vessel','delete-vessel','edit-contractor','add-contractor-payment','edit-contractor-payment','delete-contractor-payment','send-contractor-statement'].includes(action)) return;
     el.addEventListener('click', async ()=>{
       const id = el.dataset.id;
       switch(action){
@@ -2074,6 +2382,15 @@ function attachContentEvents(){
             render();
           }
           break;
+        case 'add-contractor': state.modal = { type:'contractor', data:null }; renderModal(); break;
+        case 'view-contractor': state.modal = { type:'view-contractor', id }; renderModal(); break;
+        case 'delete-contractor':
+          if(confirm('Delete this contractor and their payment records?')){
+            await persistArray('contractors', fresh => fresh.filter(c=>c.id!==id));
+            state.modal = null;
+            render();
+          }
+          break;
         case 'reveal-password': {
           const span = el.previousElementSibling;
           if(span && span.classList.contains('pw-mask')){
@@ -2128,6 +2445,7 @@ function render(){
     case 'maintenance': main.innerHTML = renderMaintenance(); break;
     case 'crew': main.innerHTML = renderCrew(); break;
     case 'companies': main.innerHTML = renderCompanies(); break;
+    case 'contractors': main.innerHTML = renderContractors(); break;
   }
   attachContentEvents();
   renderModal();
