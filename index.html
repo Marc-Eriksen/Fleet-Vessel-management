@@ -1782,6 +1782,21 @@ function sendContractorStatement(id, channel){
     doc.setFont('helvetica','bold'); doc.setFontSize(12);
     doc.text(`Total outstanding: ${fmtCurrency(total)}`, 14, y);
 
+    if(ct.bankName || ct.accountHolder || ct.accountNumber){
+      y += 14;
+      if(y > 260){ doc.addPage(); y = 20; }
+      doc.setFont('helvetica','bold'); doc.setFontSize(11);
+      doc.text('Banking details', 14, y);
+      y += 7;
+      doc.setFont('helvetica','normal'); doc.setFontSize(10);
+      if(ct.bankName){ doc.text(`Bank: ${ct.bankName}`, 14, y); y += 6; }
+      if(ct.accountHolder){ doc.text(`Account holder: ${ct.accountHolder}`, 14, y); y += 6; }
+      if(ct.accountNumber){ doc.text(`Account number: ${ct.accountNumber}`, 14, y); y += 6; }
+      if(ct.branchCode){ doc.text(`Branch code: ${ct.branchCode}`, 14, y); y += 6; }
+      if(ct.accountType){ doc.text(`Account type: ${ct.accountType}`, 14, y); y += 6; }
+      if(ct.swift){ doc.text(`SWIFT / BIC: ${ct.swift}`, 14, y); y += 6; }
+    }
+
     const fileName = `Statement-${(ct.name||'contractor').replace(/[^a-z0-9]+/gi,'-')}-${new Date().toISOString().slice(0,10)}.pdf`;
     doc.save(fileName);
   }catch(e){
