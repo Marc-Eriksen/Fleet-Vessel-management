@@ -1596,7 +1596,7 @@ function contractorForm(c){
       `<label class="field">Phone<input name="phone" type="tel" value="${esc(c.phone||'')}"></label>`
     )}
     <label class="field">Email<input name="email" type="email" value="${esc(c.email||'')}"></label>
-    <label class="field">Notes<textarea name="notes" rows="2">${esc(c.notes||'')}</textarea></label>
+    <label class="field">Notes<textarea name="notes" rows="6">${esc(c.notes||'')}</textarea></label>
 
     <div class="detail-section" style="margin-top:4px;"><h4>Banking details</h4></div>
     ${fieldRow(
@@ -1741,8 +1741,18 @@ function sendContractorStatement(id, channel){
   if(!ct) return;
   const outstanding = (ct.payments||[]).filter(p=>p.status!=='paid');
   if(outstanding.length === 0){ alert('No outstanding payments for this contractor.'); return; }
+  if(channel === 'whatsapp' && !ct.phone){ alert('No phone number on file for this contractor.'); return; }
+  if(channel === 'email' && !ct.email){ alert('No email address on file for this contractor.'); return; }
   const total = outstanding.reduce((s,p)=>s+(Number(p.amount)||0),0);
   const todayStr = new Date().toLocaleDateString('en-ZA', {day:'2-digit', month:'short', year:'numeric'});
+
+  /* Open the destination tab synchronously, right on the click, before generating the
+     PDF below. jsPDF's save() can itself open/navigate a tab to work around browsers
+     (notably Safari) that don't support downloading via the anchor `download` attribute,
+     which consumes the page's one-per-gesture "open a window" allowance — so opening
+     the WhatsApp tab afterwards would get silently blocked as a popup. We fill in its
+     location once the message text is ready. */
+  const target = channel === 'whatsapp' ? window.open('', '_blank') : null;
 
   try{
     const { jsPDF } = window.jspdf;
@@ -1800,16 +1810,16 @@ function sendContractorStatement(id, channel){
     const fileName = `Statement-${(ct.name||'contractor').replace(/[^a-z0-9]+/gi,'-')}-${new Date().toISOString().slice(0,10)}.pdf`;
     doc.save(fileName);
   }catch(e){
+    if(target) target.close();
     alert('Could not generate the PDF. ' + (e && e.message ? e.message : ''));
     return;
   }
 
   const msg = `Hi${ct.contactName ? ' ' + ct.contactName : ''}, please find your outstanding payments statement from Ocean Hub — total ${fmtCurrency(total)} as of ${todayStr}. The PDF has just downloaded to this device — please attach it here.`;
   if(channel === 'whatsapp'){
-    if(!ct.phone){ alert('No phone number on file for this contractor.'); return; }
-    window.open(waLink(ct.phone, msg), '_blank');
+    const url = waLink(ct.phone, msg);
+    if(target){ target.location = url; } else { window.open(url, '_blank'); }
   } else {
-    if(!ct.email){ alert('No email address on file for this contractor.'); return; }
     window.open(mailtoLink(ct.email, ADMIN_EMAIL, `Outstanding payments statement — ${ct.name}`, msg), '_blank');
   }
 }
