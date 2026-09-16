@@ -1722,9 +1722,8 @@ function renderContractorDetail(id){
     <div class="detail-section">
       <h4>Send outstanding statement</h4>
       <p style="font-size:12px; color:var(--ink-soft); margin:0 0 10px;">
-        Builds a PDF of the ${outstanding.length} outstanding payment${outstanding.length===1?'':'s'} (total ${fmtCurrency(total)}). On most phones this opens your
-        share sheet with the PDF already attached — pick WhatsApp or Mail and send it to Ocean Hub for payment. On desktop it downloads the
-        PDF and opens WhatsApp/email with a message instead, so you'll need to attach it manually there.
+        Downloads a PDF of the ${outstanding.length} outstanding payment${outstanding.length===1?'':'s'} (total ${fmtCurrency(total)}) to this device,
+        then opens WhatsApp or email so you can attach it and send it to Ocean Hub for payment.
       </p>
       <div style="display:flex; gap:10px; flex-wrap:wrap;">
         <button type="button" class="btn primary" data-action="send-contractor-statement" data-channel="whatsapp" data-id="${ct.id}" ${outstanding.length===0 ? 'disabled' : ''}>Send via WhatsApp</button>
@@ -1734,12 +1733,10 @@ function renderContractorDetail(id){
   `;
 }
 
-/* Builds a PDF statement of a contractor's outstanding payments. Where the device
-   supports it (most phones), it's handed to the OS share sheet as an actual attached
-   file alongside the message, so the contact picked there (WhatsApp, Mail, etc.)
-   receives it pre-attached. Desktop browsers can't do that, so there it falls back to
-   downloading the PDF and opening WhatsApp/email with just the message text. */
-async function sendContractorStatement(id, channel){
+/* Builds and downloads a PDF statement of a contractor's outstanding payments, then
+   opens WhatsApp or email with a message so the just-downloaded file can be attached
+   (a static page can't attach files to either automatically). */
+function sendContractorStatement(id, channel){
   const ct = state.contractors.find(c=>c.id===id);
   if(!ct) return;
   const outstanding = (ct.payments||[]).filter(p=>p.status!=='paid');
@@ -1748,10 +1745,17 @@ async function sendContractorStatement(id, channel){
   const total = outstanding.reduce((s,p)=>s+(Number(p.amount)||0),0);
   const todayStr = new Date().toLocaleDateString('en-ZA', {day:'2-digit', month:'short', year:'numeric'});
 
-  let doc;
+  /* Open the destination tab synchronously, right on the click, before generating the
+     PDF below. jsPDF's save() can itself open/navigate a tab to work around browsers
+     (notably Safari) that don't support downloading via the anchor `download` attribute,
+     which consumes the page's one-per-gesture "open a window" allowance — so opening
+     the WhatsApp tab afterwards would get silently blocked as a popup. We fill in its
+     location once the message text is ready. */
+  const target = channel === 'whatsapp' ? window.open('', '_blank') : null;
+
   try{
     const { jsPDF } = window.jspdf;
-    doc = new jsPDF();
+    const doc = new jsPDF();
     doc.setFont('helvetica','bold'); doc.setFontSize(16);
     doc.text('Ocean Hub — Fleet Operations', 14, 18);
     doc.setFont('helvetica','normal'); doc.setFontSize(10);
@@ -1802,43 +1806,21 @@ async function sendContractorStatement(id, channel){
       if(ct.swift){ doc.text(`SWIFT / BIC: ${ct.swift}`, 14, y); y += 6; }
     }
 
+    const fileName = `Statement-${(ct.name||'contractor').replace(/[^a-z0-9]+/gi,'-')}-${new Date().toISOString().slice(0,10)}.pdf`;
+    doc.save(fileName);
   }catch(e){
+    if(target) target.close();
     alert('Could not generate the PDF. ' + (e && e.message ? e.message : ''));
     return;
   }
 
-  const fileName = `Statement-${(ct.name||'contractor').replace(/[^a-z0-9]+/gi,'-')}-${new Date().toISOString().slice(0,10)}.pdf`;
   const subject = `Outstanding payments statement — ${ct.name}`;
-  const msg = `Outstanding payments statement for ${ct.name} — total ${fmtCurrency(total)} as of ${todayStr}.`;
-
-  let file = null;
-  try{ file = new File([doc.output('blob')], fileName, { type:'application/pdf' }); }catch(e){ file = null; }
-
-  if(file && navigator.canShare && navigator.canShare({ files:[file] })){
-    try{ await navigator.share({ files:[file], title:subject, text:msg }); }catch(e){ /* user cancelled the share sheet */ }
-    return;
-  }
-
-  /* Fallback: no file-sharing support (mainly desktop browsers) — download the PDF,
-     then open WhatsApp/email with the message text; the file needs a manual attach
-     there. The destination tab is opened before doc.save() because jsPDF's save() can
-     itself open/navigate a tab on browsers that don't support the anchor `download`
-     attribute, which would otherwise eat the one-per-gesture popup allowance and
-     silently block this tab (notably Safari). */
-  const target = channel === 'whatsapp' ? window.open('', '_blank') : null;
-  try{
-    doc.save(fileName);
-  }catch(e){
-    if(target) target.close();
-    alert('Could not download the PDF. ' + (e && e.message ? e.message : ''));
-    return;
-  }
-  const fallbackMsg = msg + ' The PDF has just downloaded to this device — please attach it here and process payment.';
+  const msg = `Outstanding payment statement from ${ct.name} — total ${fmtCurrency(total)} as of ${todayStr}. The PDF has just downloaded to this device — please attach it here and process payment.`;
   if(channel === 'whatsapp'){
-    const url = waLink('', fallbackMsg);
+    const url = waLink('', msg);
     if(target){ target.location = url; } else { window.open(url, '_blank'); }
   } else {
-    window.open(mailtoLink(ADMIN_EMAIL, '', subject, fallbackMsg), '_blank');
+    window.open(mailtoLink(ADMIN_EMAIL, '', subject, msg), '_blank');
   }
 }
 
