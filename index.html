@@ -1743,16 +1743,6 @@ function sendContractorStatement(id, channel){
   if(outstanding.length === 0){ alert('No outstanding payments for this contractor.'); return; }
   if(channel === 'email' && !ct.email){ alert('No email address on file for this contractor.'); return; }
 
-  /* WhatsApp isn't limited to the contractor's own number — ask who to send it to,
-     defaulting to the contractor's number when we have one, but any number (or the
-     WhatsApp contact picker, if left blank) is fine. */
-  let waPhone = '';
-  if(channel === 'whatsapp'){
-    const entered = prompt('Send to which WhatsApp number? (include country code, e.g. +27 82 000 0000)\nLeave blank to pick a contact inside WhatsApp instead.', ct.phone || '');
-    if(entered === null) return; /* cancelled */
-    waPhone = entered.trim();
-  }
-
   const total = outstanding.reduce((s,p)=>s+(Number(p.amount)||0),0);
   const todayStr = new Date().toLocaleDateString('en-ZA', {day:'2-digit', month:'short', year:'numeric'});
 
@@ -1827,7 +1817,7 @@ function sendContractorStatement(id, channel){
 
   const msg = `Hi${ct.contactName ? ' ' + ct.contactName : ''}, please find your outstanding payments statement from Ocean Hub — total ${fmtCurrency(total)} as of ${todayStr}. The PDF has just downloaded to this device — please attach it here.`;
   if(channel === 'whatsapp'){
-    const url = waLink(waPhone, msg);
+    const url = waLink('', msg);
     if(target){ target.location = url; } else { window.open(url, '_blank'); }
   } else {
     window.open(mailtoLink(ct.email, ADMIN_EMAIL, `Outstanding payments statement — ${ct.name}`, msg), '_blank');
