@@ -1723,11 +1723,11 @@ function renderContractorDetail(id){
       <h4>Send outstanding statement</h4>
       <p style="font-size:12px; color:var(--ink-soft); margin:0 0 10px;">
         Downloads a PDF of the ${outstanding.length} outstanding payment${outstanding.length===1?'':'s'} (total ${fmtCurrency(total)}) to this device,
-        then opens WhatsApp or email so you can attach it and send it on.
+        then opens WhatsApp or email so you can send it on to Ocean Hub for payment.
       </p>
       <div style="display:flex; gap:10px; flex-wrap:wrap;">
         <button type="button" class="btn primary" data-action="send-contractor-statement" data-channel="whatsapp" data-id="${ct.id}" ${outstanding.length===0 ? 'disabled' : ''}>Send via WhatsApp</button>
-        <button type="button" class="btn" data-action="send-contractor-statement" data-channel="email" data-id="${ct.id}" ${!ct.email || outstanding.length===0 ? 'disabled' : ''}>Send via Email</button>
+        <button type="button" class="btn" data-action="send-contractor-statement" data-channel="email" data-id="${ct.id}" ${outstanding.length===0 ? 'disabled' : ''}>Send via Email</button>
       </div>
     </div>
   `;
@@ -1741,7 +1741,6 @@ function sendContractorStatement(id, channel){
   if(!ct) return;
   const outstanding = (ct.payments||[]).filter(p=>p.status!=='paid');
   if(outstanding.length === 0){ alert('No outstanding payments for this contractor.'); return; }
-  if(channel === 'email' && !ct.email){ alert('No email address on file for this contractor.'); return; }
 
   const total = outstanding.reduce((s,p)=>s+(Number(p.amount)||0),0);
   const todayStr = new Date().toLocaleDateString('en-ZA', {day:'2-digit', month:'short', year:'numeric'});
@@ -1815,12 +1814,12 @@ function sendContractorStatement(id, channel){
     return;
   }
 
-  const msg = `Hi${ct.contactName ? ' ' + ct.contactName : ''}, please find your outstanding payments statement from Ocean Hub — total ${fmtCurrency(total)} as of ${todayStr}. The PDF has just downloaded to this device — please attach it here.`;
+  const msg = `Outstanding payments statement for ${ct.name} — total ${fmtCurrency(total)} as of ${todayStr}. The PDF has just downloaded to this device — please attach it here and process payment.`;
   if(channel === 'whatsapp'){
     const url = waLink('', msg);
     if(target){ target.location = url; } else { window.open(url, '_blank'); }
   } else {
-    window.open(mailtoLink(ct.email, ADMIN_EMAIL, `Outstanding payments statement — ${ct.name}`, msg), '_blank');
+    window.open(mailtoLink(ADMIN_EMAIL, '', `Outstanding payments statement — ${ct.name}`, msg), '_blank');
   }
 }
 
