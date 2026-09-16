@@ -1622,7 +1622,7 @@ function contractorForm(c){
 function contractorPaymentForm(p){
   p = p || { description:'', amount:'', date:new Date().toISOString().slice(0,10), status:'outstanding' };
   return `
-    <label class="field">Description<input name="description" value="${esc(p.description)}" placeholder="e.g. Shaft seal replacement — MV Kingfisher" required></label>
+    <label class="field">Description<textarea name="description" rows="10" placeholder="e.g. Shaft seal replacement — MV Kingfisher" required>${esc(p.description)}</textarea></label>
     ${fieldRow(
       `<label class="field">Amount (R)<input name="amount" type="number" step="0.01" min="0" value="${p.amount!==''&&p.amount!=null?esc(String(p.amount)):''}" required></label>`,
       `<label class="field">Date<input name="date" type="date" value="${esc(p.date||'')}" required></label>`
