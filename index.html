@@ -1596,7 +1596,7 @@ function contractorForm(c){
       `<label class="field">Phone<input name="phone" type="tel" value="${esc(c.phone||'')}"></label>`
     )}
     <label class="field">Email<input name="email" type="email" value="${esc(c.email||'')}"></label>
-    <label class="field">Notes<textarea name="notes" rows="6">${esc(c.notes||'')}</textarea></label>
+    <label class="field">Notes<textarea name="notes" rows="10">${esc(c.notes||'')}</textarea></label>
 
     <div class="detail-section" style="margin-top:4px;"><h4>Banking details</h4></div>
     ${fieldRow(
