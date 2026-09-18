@@ -1621,22 +1621,23 @@ function contractorForm(c){
 }
 
 function contractorPaymentForm(p){
-  p = p || { description:'', amount:'', date:new Date().toISOString().slice(0,10), status:'outstanding', costType:'fixed', odometerStart:'', odometerEnd:'', distanceKm:'', ratePerKm:AA_RATE_PER_KM, photoBefore:'', photoAfter:'' };
-  const isTravel = p.costType === 'travel';
+  p = p || { description:'', fixedAmount:'', date:new Date().toISOString().slice(0,10), status:'outstanding', includeTravel:false, odometerStart:'', odometerEnd:'', distanceKm:'', ratePerKm:AA_RATE_PER_KM, photoBefore:'', photoAfter:'' };
+  const includeTravel = !!p.includeTravel || p.costType==='travel'; /* costType: legacy shape from an earlier version */
   const distance = Number(p.distanceKm)||0;
   const rate = p.ratePerKm!=null && p.ratePerKm!=='' ? Number(p.ratePerKm) : AA_RATE_PER_KM;
+  const travelAmount = p.travelAmount!=null ? Number(p.travelAmount) : distance*rate;
+  const fixedAmount = p.fixedAmount!=null && p.fixedAmount!=='' ? Number(p.fixedAmount) : Math.max(0, (Number(p.amount)||0) - (includeTravel ? travelAmount : 0));
+  const total = fixedAmount + (includeTravel ? travelAmount : 0);
   return `
     <label class="field">Description<textarea name="description" rows="10" placeholder="e.g. Shaft seal replacement — MV Kingfisher" required>${esc(p.description)}</textarea></label>
-    <label class="field">Payment type<select name="costType" id="payCostType">
-      <option value="fixed" ${!isTravel?'selected':''}>Fixed amount</option>
-      <option value="travel" ${isTravel?'selected':''}>Vehicle travel (AA rate per km)</option>
-    </select></label>
+    <label class="field">Fixed / base amount (R)<input name="fixedAmount" id="payFixedAmount" type="number" step="0.01" min="0" value="${fixedAmount}"></label>
 
-    <div id="fixedAmountFields" style="${isTravel?'display:none;':''}">
-      <label class="field">Amount (R)<input name="amount" type="number" step="0.01" min="0" value="${p.amount!==''&&p.amount!=null?esc(String(p.amount)):''}"></label>
-    </div>
+    <label style="display:flex; align-items:center; gap:9px; font-size:13px; font-weight:600; color:var(--ink); margin:-2px 0 14px;">
+      <input type="checkbox" name="includeTravel" id="includeTravelCheck" value="1" ${includeTravel?'checked':''} style="width:auto;">
+      Add vehicle travel (AA rate per km)
+    </label>
 
-    <div id="travelFields" style="${isTravel?'':'display:none;'}">
+    <div id="travelFields" style="${includeTravel?'':'display:none;'}">
       ${fieldRow(
         `<label class="field">Odometer — before (km)<input name="odometerStart" id="odoStart" type="number" step="1" min="0" value="${p.odometerStart!==''&&p.odometerStart!=null?esc(String(p.odometerStart)):''}"></label>`,
         `<label class="field">Odometer — after (km)<input name="odometerEnd" id="odoEnd" type="number" step="1" min="0" value="${p.odometerEnd!==''&&p.odometerEnd!=null?esc(String(p.odometerEnd)):''}"></label>`
@@ -1645,11 +1646,10 @@ function contractorPaymentForm(p){
         `<label class="field">Distance travelled (km)<input id="odoDistance" type="number" value="${distance}" readonly style="background:var(--paper-2);"></label>`,
         `<label class="field">AA rate (R/km)<input name="ratePerKm" id="odoRate" type="number" step="0.01" min="0" value="${rate}"></label>`
       )}
-      <input type="hidden" name="travelAmount" id="travelAmountHidden" value="${p.amount||0}">
-      <div class="mini-row" style="padding:2px 0 12px;"><span>Calculated cost (distance × rate)</span><b id="odoCalcAmount">${fmtCurrency(p.amount||0)}</b></div>
+      <div class="mini-row" style="padding:2px 0 12px;"><span>Travel cost (distance × rate)</span><b id="odoCalcAmount">${fmtCurrency(travelAmount)}</b></div>
 
       <label class="field">Odometer photo — before
-        <input type="file" id="odoPhotoBeforeInput" accept="image/*" capture="environment">
+        <input type="file" id="odoPhotoBeforeInput" accept="image/*">
       </label>
       <input type="hidden" name="photoBefore" id="odoPhotoBeforeHidden" value="${esc(p.photoBefore||'')}">
       <div id="odoPhotoBeforePreview" style="margin:-4px 0 12px;">
@@ -1657,13 +1657,15 @@ function contractorPaymentForm(p){
       </div>
 
       <label class="field">Odometer photo — after
-        <input type="file" id="odoPhotoAfterInput" accept="image/*" capture="environment">
+        <input type="file" id="odoPhotoAfterInput" accept="image/*">
       </label>
       <input type="hidden" name="photoAfter" id="odoPhotoAfterHidden" value="${esc(p.photoAfter||'')}">
       <div id="odoPhotoAfterPreview" style="margin:-4px 0 12px;">
         ${p.photoAfter ? `<img src="${p.photoAfter}" style="max-width:160px; max-height:120px; border-radius:6px; display:block;">` : ''}
       </div>
     </div>
+
+    <div class="mini-row" style="padding:4px 0 14px; border-top:1px dashed var(--paper-line); margin-top:2px;"><span>Total payment amount</span><b id="payTotalAmount">${fmtCurrency(total)}</b></div>
 
     <label class="field">Date<input name="date" type="date" value="${esc(p.date||'')}" required></label>
     <label class="field">Status<select name="status">
@@ -1747,14 +1749,16 @@ function renderContractorDetail(id){
     </div>
     <div class="detail-section">
       <div class="modal-header-row"><h4 style="margin:0; border:none; padding:0;">Payments</h4><button type="button" class="btn small primary" data-action="add-contractor-payment" data-id="${ct.id}">+ Add payment</button></div>
-      ${payments.length === 0 ? '<div class="empty-note">No payments recorded yet.</div>' : payments.map(p=>`
+      ${payments.length === 0 ? '<div class="empty-note">No payments recorded yet.</div>' : payments.map(p=>{
+        const hasTravel = !!p.includeTravel || p.costType==='travel';
+        return `
         <div class="mini-row" style="align-items:flex-start;">
           <span>
             ${esc(p.description)}
             <div style="color:var(--ink-soft); font-size:11px;">
-              ${esc(p.date || '')}${p.costType==='travel' ? ` · ${Number(p.distanceKm)||0} km @ ${fmtCurrency(p.ratePerKm||0)}/km` : ''}
+              ${esc(p.date || '')}${hasTravel ? ` · base ${fmtCurrency(p.fixedAmount||0)} + ${Number(p.distanceKm)||0} km @ ${fmtCurrency(p.ratePerKm||0)}/km (${fmtCurrency(p.travelAmount||0)})` : ''}
             </div>
-            ${p.costType==='travel' && (p.photoBefore || p.photoAfter) ? `
+            ${hasTravel && (p.photoBefore || p.photoAfter) ? `
             <div style="margin-top:5px; display:flex; gap:6px; flex-wrap:wrap;">
               ${p.photoBefore ? `<button type="button" class="btn small ghost" data-action="view-payment-photo" data-id="${ct.id}" data-payid="${p.id}" data-which="before">Before photo</button>` : ''}
               ${p.photoAfter ? `<button type="button" class="btn small ghost" data-action="view-payment-photo" data-id="${ct.id}" data-payid="${p.id}" data-which="after">After photo</button>` : ''}
@@ -1766,7 +1770,8 @@ function renderContractorDetail(id){
             <button type="button" class="btn small ghost" data-action="edit-contractor-payment" data-id="${ct.id}" data-payid="${p.id}">Edit</button>
             <button type="button" class="btn small danger" data-action="delete-contractor-payment" data-id="${ct.id}" data-payid="${p.id}">Delete</button>
           </span>
-        </div>`).join('')}
+        </div>`;
+      }).join('')}
     </div>
     <div class="detail-section">
       <h4>Send outstanding statement</h4>
@@ -1824,8 +1829,9 @@ async function sendContractorStatement(id, channel){
     doc.line(14, y, 196, y);
     y += 7;
     outstanding.forEach(p=>{
-      const desc = p.costType==='travel'
-        ? `${p.description || ''} (${Number(p.distanceKm)||0} km @ ${fmtCurrency(p.ratePerKm||0)}/km)`
+      const hasTravel = !!p.includeTravel || p.costType==='travel';
+      const desc = hasTravel
+        ? `${p.description || ''} (base ${fmtCurrency(p.fixedAmount||0)} + ${Number(p.distanceKm)||0} km @ ${fmtCurrency(p.ratePerKm||0)}/km)`
         : (p.description || '');
       const lines = doc.splitTextToSize(desc, 108);
       doc.text(lines, 14, y);
@@ -1999,28 +2005,27 @@ function attachModalEvents(){
       }
     });
   }
-  const payCostType = document.getElementById('payCostType');
-  if(payCostType){
-    const fixedAmountFields = document.getElementById('fixedAmountFields');
+  const includeTravelCheck = document.getElementById('includeTravelCheck');
+  if(includeTravelCheck){
     const travelFields = document.getElementById('travelFields');
-    const recalcTravelAmount = ()=>{
+    const recalcTotal = ()=>{
       const start = Number(document.getElementById('odoStart').value)||0;
       const end = Number(document.getElementById('odoEnd').value)||0;
       const rate = Number(document.getElementById('odoRate').value)||0;
       const distance = Math.max(0, end - start);
       document.getElementById('odoDistance').value = distance;
-      const amount = distance * rate;
-      document.getElementById('travelAmountHidden').value = amount.toFixed(2);
-      document.getElementById('odoCalcAmount').textContent = fmtCurrency(amount);
+      const travelAmount = includeTravelCheck.checked ? distance * rate : 0;
+      document.getElementById('odoCalcAmount').textContent = fmtCurrency(distance * rate);
+      const fixedAmount = Number(document.getElementById('payFixedAmount').value)||0;
+      document.getElementById('payTotalAmount').textContent = fmtCurrency(fixedAmount + travelAmount);
     };
-    payCostType.addEventListener('change', ()=>{
-      const isTravel = payCostType.value === 'travel';
-      fixedAmountFields.style.display = isTravel ? 'none' : '';
-      travelFields.style.display = isTravel ? '' : 'none';
-      if(isTravel) recalcTravelAmount();
+    includeTravelCheck.addEventListener('change', ()=>{
+      travelFields.style.display = includeTravelCheck.checked ? '' : 'none';
+      recalcTotal();
     });
+    document.getElementById('payFixedAmount').addEventListener('input', recalcTotal);
     ['odoStart','odoEnd','odoRate'].forEach(id=>{
-      document.getElementById(id).addEventListener('input', recalcTravelAmount);
+      document.getElementById(id).addEventListener('input', recalcTotal);
     });
     const wireOdoPhoto = (inputId, hiddenId, previewId)=>{
       const input = document.getElementById(inputId);
@@ -2418,26 +2423,29 @@ async function handleFormSubmit(e){
     nextModal = editId ? { type:'view-contractor', id: editId } : null;
   }
   else if(modal.type==='contractor-payment'){
-    const costType = fd.get('costType') === 'travel' ? 'travel' : 'fixed';
+    const includeTravel = fd.get('includeTravel') === '1';
+    const fixedAmount = Number(fd.get('fixedAmount'))||0;
     let data;
-    if(costType === 'travel'){
+    if(includeTravel){
       const odometerStart = Number(fd.get('odometerStart'))||0;
       const odometerEnd = Number(fd.get('odometerEnd'))||0;
       const distanceKm = Math.max(0, odometerEnd - odometerStart);
       const ratePerKm = Number(fd.get('ratePerKm'))||0;
       if(distanceKm <= 0){ alert('Enter valid odometer readings — the after reading must be greater than the before reading.'); return; }
-      const amount = Math.round(distanceKm * ratePerKm * 100) / 100;
+      const travelAmount = Math.round(distanceKm * ratePerKm * 100) / 100;
+      const amount = Math.round((fixedAmount + travelAmount) * 100) / 100;
       data = {
-        description:fd.get('description'), date:fd.get('date'), status:fd.get('status'), costType, amount,
-        odometerStart, odometerEnd, distanceKm, ratePerKm,
+        description:fd.get('description'), date:fd.get('date'), status:fd.get('status'),
+        includeTravel, fixedAmount, amount,
+        odometerStart, odometerEnd, distanceKm, ratePerKm, travelAmount,
         photoBefore:fd.get('photoBefore')||'', photoAfter:fd.get('photoAfter')||''
       };
     } else {
-      const amount = Number(fd.get('amount'))||0;
-      if(amount <= 0){ alert('Enter an amount.'); return; }
+      if(fixedAmount <= 0){ alert('Enter an amount, or add vehicle travel.'); return; }
       data = {
-        description:fd.get('description'), date:fd.get('date'), status:fd.get('status'), costType, amount,
-        odometerStart:null, odometerEnd:null, distanceKm:null, ratePerKm:null, photoBefore:'', photoAfter:''
+        description:fd.get('description'), date:fd.get('date'), status:fd.get('status'),
+        includeTravel, fixedAmount, amount:fixedAmount,
+        odometerStart:null, odometerEnd:null, distanceKm:null, ratePerKm:null, travelAmount:null, photoBefore:'', photoAfter:''
       };
     }
     const contractorId = modal.id;
