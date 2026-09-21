@@ -1834,7 +1834,7 @@ function renderContractorDetail(id){
 async function sendContractorStatement(id, channel){
   const ct = state.contractors.find(c=>c.id===id);
   if(!ct) return;
-  const outstanding = (ct.payments||[]).filter(p=>p.status!=='paid');
+  const outstanding = (ct.payments||[]).filter(p=>p.status!=='paid').sort((a,b)=> new Date(b.date) - new Date(a.date));
   if(outstanding.length === 0){ alert('No outstanding payments for this contractor.'); return; }
 
   const total = outstanding.reduce((s,p)=>s+(Number(p.amount)||0),0);
