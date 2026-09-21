@@ -1921,8 +1921,12 @@ async function sendContractorStatement(id, channel){
      there. The destination tab is opened before doc.save() because jsPDF's save() can
      itself open/navigate a tab on browsers that don't support the anchor `download`
      attribute, which would otherwise eat the one-per-gesture popup allowance and
-     silently block this tab (notably Safari). */
-  const target = channel === 'whatsapp' ? window.open('', '_blank') : null;
+     silently block this tab (notably Safari). If the browser's popup blocker eats
+     this window entirely (e.g. Chrome remembers "always block" for this site), the
+     handle it returns can still look non-null but be already closed — checked below
+     so a silent block surfaces as a message instead of doing nothing. */
+  let target = channel === 'whatsapp' ? window.open('', '_blank') : null;
+  if(target && target.closed) target = null;
   try{
     doc.save(fileName);
   }catch(e){
@@ -1931,11 +1935,17 @@ async function sendContractorStatement(id, channel){
     return;
   }
   const fallbackMsg = msg + ' The PDF has just downloaded to this device — please attach it here and process payment.';
+  const popupBlockedMsg = 'The PDF downloaded, but your browser blocked the pop-up window. Please allow pop-ups for this site (usually a blocked-popup icon in the address bar) and try again, or open WhatsApp/email manually and attach the PDF.';
   if(channel === 'whatsapp'){
     const url = waLink('', fallbackMsg);
-    if(target){ target.location = url; } else { window.open(url, '_blank'); }
+    if(target && !target.closed){ target.location = url; }
+    else{
+      const opened = window.open(url, '_blank');
+      if(!opened || opened.closed) alert(popupBlockedMsg);
+    }
   } else {
-    window.open(mailtoLink(ADMIN_EMAIL, '', subject, fallbackMsg), '_blank');
+    const opened = window.open(mailtoLink(ADMIN_EMAIL, '', subject, fallbackMsg), '_blank');
+    if(!opened || opened.closed) alert(popupBlockedMsg);
   }
 }
 
