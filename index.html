@@ -1620,14 +1620,31 @@ function contractorForm(c){
   `;
 }
 
+function renderExpenseRows(expenses){
+  if(!expenses || expenses.length===0) return '<div class="empty-note" style="padding:8px 0;">No expenses added yet.</div>';
+  return expenses.map(x=>`
+    <div class="mini-row" style="align-items:center;">
+      <span style="display:flex; align-items:center; gap:8px;">
+        ${x.photo ? `<img src="${x.photo}" style="width:34px; height:34px; object-fit:cover; border-radius:5px; flex-shrink:0;">` : ''}
+        ${esc(x.description||'Expense')}
+      </span>
+      <span style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+        <b>${fmtCurrency(x.amount||0)}</b>
+        <button type="button" class="btn small danger" data-remove-expense="${x.id}">Remove</button>
+      </span>
+    </div>`).join('');
+}
+
 function contractorPaymentForm(p){
-  p = p || { description:'', fixedAmount:'', date:new Date().toISOString().slice(0,10), status:'outstanding', includeTravel:false, odometerStart:'', odometerEnd:'', distanceKm:'', ratePerKm:AA_RATE_PER_KM, photoBefore:'', photoAfter:'' };
+  p = p || { description:'', fixedAmount:'', date:new Date().toISOString().slice(0,10), status:'outstanding', includeTravel:false, odometerStart:'', odometerEnd:'', distanceKm:'', ratePerKm:AA_RATE_PER_KM, photoBefore:'', photoAfter:'', expenses:[] };
   const includeTravel = !!p.includeTravel || p.costType==='travel'; /* costType: legacy shape from an earlier version */
   const distance = Number(p.distanceKm)||0;
   const rate = p.ratePerKm!=null && p.ratePerKm!=='' ? Number(p.ratePerKm) : AA_RATE_PER_KM;
   const travelAmount = p.travelAmount!=null ? Number(p.travelAmount) : distance*rate;
   const fixedAmount = p.fixedAmount!=null && p.fixedAmount!=='' ? Number(p.fixedAmount) : Math.max(0, (Number(p.amount)||0) - (includeTravel ? travelAmount : 0));
-  const total = fixedAmount + (includeTravel ? travelAmount : 0);
+  const expenses = Array.isArray(p.expenses) ? p.expenses : [];
+  const expensesTotal = expenses.reduce((s,x)=>s+(Number(x.amount)||0),0);
+  const total = fixedAmount + (includeTravel ? travelAmount : 0) + expensesTotal;
   return `
     <label class="field">Description<textarea name="description" rows="10" placeholder="e.g. Shaft seal replacement — MV Kingfisher" required>${esc(p.description)}</textarea></label>
     <label class="field">Fixed / base amount (R)<input name="fixedAmount" id="payFixedAmount" type="number" step="0.01" min="0" value="${fixedAmount}"></label>
@@ -1664,6 +1681,20 @@ function contractorPaymentForm(p){
         ${p.photoAfter ? `<img src="${p.photoAfter}" style="max-width:160px; max-height:120px; border-radius:6px; display:block;">` : ''}
       </div>
     </div>
+
+    <div class="detail-section" style="margin:14px 0 6px;"><h4 style="margin-bottom:0;">Miscellaneous expenses</h4></div>
+    <div id="expenseList">${renderExpenseRows(expenses)}</div>
+    <input type="hidden" name="expensesData" id="expensesDataHidden" value="${esc(JSON.stringify(expenses))}">
+    <div class="mini-row" style="padding:2px 0 10px;"><span>Expenses total</span><b id="expensesTotalAmount">${fmtCurrency(expensesTotal)}</b></div>
+    ${fieldRow(
+      `<label class="field">Expense description<input id="newExpDesc" placeholder="e.g. Toll fees, parts, fuel"></label>`,
+      `<label class="field">Amount (R)<input id="newExpAmount" type="number" step="0.01" min="0"></label>`
+    )}
+    <label class="field">Sales slip photo (optional)
+      <input type="file" id="newExpPhotoInput" accept="image/*">
+    </label>
+    <div id="newExpPhotoPreview" style="margin:-4px 0 10px;"></div>
+    <button type="button" class="btn small ghost" id="addExpenseBtn" style="margin:0 0 14px;">+ Add expense</button>
 
     <div class="mini-row" style="padding:4px 0 14px; border-top:1px dashed var(--paper-line); margin-top:2px;"><span>Total payment amount</span><b id="payTotalAmount">${fmtCurrency(total)}</b></div>
 
@@ -1751,17 +1782,23 @@ function renderContractorDetail(id){
       <div class="modal-header-row"><h4 style="margin:0; border:none; padding:0;">Payments</h4><button type="button" class="btn small primary" data-action="add-contractor-payment" data-id="${ct.id}">+ Add payment</button></div>
       ${payments.length === 0 ? '<div class="empty-note">No payments recorded yet.</div>' : payments.map(p=>{
         const hasTravel = !!p.includeTravel || p.costType==='travel';
+        const expenses = Array.isArray(p.expenses) ? p.expenses : [];
+        const expensesTotal = expenses.reduce((s,x)=>s+(Number(x.amount)||0),0);
         return `
         <div class="mini-row" style="align-items:flex-start;">
           <span>
             ${esc(p.description)}
             <div style="color:var(--ink-soft); font-size:11px;">
-              ${esc(p.date || '')}${hasTravel ? ` · base ${fmtCurrency(p.fixedAmount||0)} + ${Number(p.distanceKm)||0} km @ ${fmtCurrency(p.ratePerKm||0)}/km (${fmtCurrency(p.travelAmount||0)})` : ''}
+              ${esc(p.date || '')}${hasTravel ? ` · base ${fmtCurrency(p.fixedAmount||0)} + ${Number(p.distanceKm)||0} km @ ${fmtCurrency(p.ratePerKm||0)}/km (${fmtCurrency(p.travelAmount||0)})` : ''}${expenses.length ? ` · ${expenses.length} expense${expenses.length===1?'':'s'} (${fmtCurrency(expensesTotal)})` : ''}
             </div>
             ${hasTravel && (p.photoBefore || p.photoAfter) ? `
             <div style="margin-top:5px; display:flex; gap:6px; flex-wrap:wrap;">
               ${p.photoBefore ? `<button type="button" class="btn small ghost" data-action="view-payment-photo" data-id="${ct.id}" data-payid="${p.id}" data-which="before">Before photo</button>` : ''}
               ${p.photoAfter ? `<button type="button" class="btn small ghost" data-action="view-payment-photo" data-id="${ct.id}" data-payid="${p.id}" data-which="after">After photo</button>` : ''}
+            </div>` : ''}
+            ${expenses.length ? `
+            <div style="margin-top:5px; display:flex; gap:6px; flex-wrap:wrap;">
+              ${expenses.map((x,i)=>`<button type="button" class="btn small ghost" data-action="view-payment-photo" data-id="${ct.id}" data-payid="${p.id}" data-which="expense:${i}" ${x.photo?'':'disabled'}>${esc(x.description||'Expense')} (${fmtCurrency(x.amount||0)})${x.photo?' · slip':''}</button>`).join('')}
             </div>` : ''}
           </span>
           <span style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
@@ -1830,9 +1867,10 @@ async function sendContractorStatement(id, channel){
     y += 7;
     outstanding.forEach(p=>{
       const hasTravel = !!p.includeTravel || p.costType==='travel';
-      const desc = hasTravel
-        ? `${p.description || ''} (base ${fmtCurrency(p.fixedAmount||0)} + ${Number(p.distanceKm)||0} km @ ${fmtCurrency(p.ratePerKm||0)}/km)`
-        : (p.description || '');
+      const expenses = Array.isArray(p.expenses) ? p.expenses : [];
+      let desc = p.description || '';
+      if(hasTravel) desc += ` (base ${fmtCurrency(p.fixedAmount||0)} + ${Number(p.distanceKm)||0} km @ ${fmtCurrency(p.ratePerKm||0)}/km)`;
+      if(expenses.length) desc += ` + expenses: ${expenses.map(x=>`${x.description||'Expense'} ${fmtCurrency(x.amount||0)}`).join(', ')}`;
       const lines = doc.splitTextToSize(desc, 108);
       doc.text(lines, 14, y);
       doc.text(p.date || '', 130, y);
@@ -2008,6 +2046,9 @@ function attachModalEvents(){
   const includeTravelCheck = document.getElementById('includeTravelCheck');
   if(includeTravelCheck){
     const travelFields = document.getElementById('travelFields');
+    let expenses = [];
+    try{ expenses = JSON.parse(document.getElementById('expensesDataHidden').value || '[]'); }catch(e){ expenses = []; }
+    const expensesTotalOf = ()=> expenses.reduce((s,x)=>s+(Number(x.amount)||0),0);
     const recalcTotal = ()=>{
       const start = Number(document.getElementById('odoStart').value)||0;
       const end = Number(document.getElementById('odoEnd').value)||0;
@@ -2017,7 +2058,8 @@ function attachModalEvents(){
       const travelAmount = includeTravelCheck.checked ? distance * rate : 0;
       document.getElementById('odoCalcAmount').textContent = fmtCurrency(distance * rate);
       const fixedAmount = Number(document.getElementById('payFixedAmount').value)||0;
-      document.getElementById('payTotalAmount').textContent = fmtCurrency(fixedAmount + travelAmount);
+      document.getElementById('expensesTotalAmount').textContent = fmtCurrency(expensesTotalOf());
+      document.getElementById('payTotalAmount').textContent = fmtCurrency(fixedAmount + travelAmount + expensesTotalOf());
     };
     includeTravelCheck.addEventListener('change', ()=>{
       travelFields.style.display = includeTravelCheck.checked ? '' : 'none';
@@ -2043,6 +2085,49 @@ function attachModalEvents(){
     };
     wireOdoPhoto('odoPhotoBeforeInput','odoPhotoBeforeHidden','odoPhotoBeforePreview');
     wireOdoPhoto('odoPhotoAfterInput','odoPhotoAfterHidden','odoPhotoAfterPreview');
+
+    /* Miscellaneous expenses, each with an optional sales-slip photo */
+    const expenseListEl = document.getElementById('expenseList');
+    const expensesDataHidden = document.getElementById('expensesDataHidden');
+    const newExpPhotoPreview = document.getElementById('newExpPhotoPreview');
+    const newExpPhotoInput = document.getElementById('newExpPhotoInput');
+    let newExpPhoto = '';
+    const renderExpenses = ()=>{
+      expenseListEl.innerHTML = renderExpenseRows(expenses);
+      expensesDataHidden.value = JSON.stringify(expenses);
+      expenseListEl.querySelectorAll('[data-remove-expense]').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          expenses = expenses.filter(x=>x.id!==btn.dataset.removeExpense);
+          renderExpenses();
+          recalcTotal();
+        });
+      });
+    };
+    renderExpenses();
+    newExpPhotoInput.addEventListener('change', async (e)=>{
+      const file = e.target.files[0];
+      if(!file) return;
+      try{
+        newExpPhoto = await resizeImageFile(file, 900, 0.65);
+        newExpPhotoPreview.innerHTML = `<img src="${newExpPhoto}" style="max-width:120px; max-height:90px; border-radius:6px; display:block;">`;
+      }catch(err){
+        newExpPhoto = '';
+        alert("Couldn't process that photo. Try a different file.");
+      }
+    });
+    document.getElementById('addExpenseBtn').addEventListener('click', ()=>{
+      const descInput = document.getElementById('newExpDesc');
+      const amountInput = document.getElementById('newExpAmount');
+      const description = descInput.value.trim();
+      const amount = Number(amountInput.value)||0;
+      if(!description || amount<=0){ alert('Enter a description and an amount greater than zero for the expense.'); return; }
+      expenses.push({ id:uid('exp'), description, amount, photo:newExpPhoto });
+      descInput.value = ''; amountInput.value = ''; newExpPhoto = '';
+      newExpPhotoPreview.innerHTML = '';
+      newExpPhotoInput.value = '';
+      renderExpenses();
+      recalcTotal();
+    });
   }
   document.querySelectorAll('[data-action="edit-vessel"]').forEach(b=>b.addEventListener('click', ()=>{
     const v = state.vessels.find(x=>x.id===b.dataset.id);
@@ -2236,7 +2321,15 @@ function attachModalEvents(){
     e.preventDefault();
     const ct = state.contractors.find(x=>x.id===b.dataset.id);
     const p = ct ? (ct.payments||[]).find(x=>x.id===b.dataset.payid) : null;
-    const url = p ? (b.dataset.which==='before' ? p.photoBefore : p.photoAfter) : null;
+    if(!p) return;
+    const which = b.dataset.which;
+    let url = null;
+    if(which==='before') url = p.photoBefore;
+    else if(which==='after') url = p.photoAfter;
+    else if(which && which.startsWith('expense:')){
+      const exp = (p.expenses||[])[Number(which.split(':')[1])];
+      url = exp ? exp.photo : null;
+    }
     openStoredDocument(url);
   }));
 }
@@ -2425,6 +2518,9 @@ async function handleFormSubmit(e){
   else if(modal.type==='contractor-payment'){
     const includeTravel = fd.get('includeTravel') === '1';
     const fixedAmount = Number(fd.get('fixedAmount'))||0;
+    let expenses = [];
+    try{ expenses = JSON.parse(fd.get('expensesData') || '[]'); }catch(e){ expenses = []; }
+    const expensesTotal = expenses.reduce((s,x)=>s+(Number(x.amount)||0),0);
     let data;
     if(includeTravel){
       const odometerStart = Number(fd.get('odometerStart'))||0;
@@ -2433,19 +2529,22 @@ async function handleFormSubmit(e){
       const ratePerKm = Number(fd.get('ratePerKm'))||0;
       if(distanceKm <= 0){ alert('Enter valid odometer readings — the after reading must be greater than the before reading.'); return; }
       const travelAmount = Math.round(distanceKm * ratePerKm * 100) / 100;
-      const amount = Math.round((fixedAmount + travelAmount) * 100) / 100;
+      const amount = Math.round((fixedAmount + travelAmount + expensesTotal) * 100) / 100;
       data = {
         description:fd.get('description'), date:fd.get('date'), status:fd.get('status'),
         includeTravel, fixedAmount, amount,
         odometerStart, odometerEnd, distanceKm, ratePerKm, travelAmount,
-        photoBefore:fd.get('photoBefore')||'', photoAfter:fd.get('photoAfter')||''
+        photoBefore:fd.get('photoBefore')||'', photoAfter:fd.get('photoAfter')||'',
+        expenses
       };
     } else {
-      if(fixedAmount <= 0){ alert('Enter an amount, or add vehicle travel.'); return; }
+      if(fixedAmount <= 0 && expensesTotal <= 0){ alert('Enter an amount, add vehicle travel, or add an expense.'); return; }
+      const amount = Math.round((fixedAmount + expensesTotal) * 100) / 100;
       data = {
         description:fd.get('description'), date:fd.get('date'), status:fd.get('status'),
-        includeTravel, fixedAmount, amount:fixedAmount,
-        odometerStart:null, odometerEnd:null, distanceKm:null, ratePerKm:null, travelAmount:null, photoBefore:'', photoAfter:''
+        includeTravel, fixedAmount, amount,
+        odometerStart:null, odometerEnd:null, distanceKm:null, ratePerKm:null, travelAmount:null, photoBefore:'', photoAfter:'',
+        expenses
       };
     }
     const contractorId = modal.id;
