@@ -1597,10 +1597,16 @@ function renderCompanies(){
 }
 
 /* ============================= CONTRACTORS (admin only) ============================= */
+const CONTRACTOR_DETAIL_FIELDS = ['contactName','email','phone','bankName','accountHolder','accountNumber','branchCode','accountType','swift','notes'];
+
 function contractorForm(c){
+  const isNew = !c;
   c = c || { name:'', contactName:'', email:'', phone:'', bankName:'', accountHolder:'', accountNumber:'', branchCode:'', accountType:'', swift:'', notes:'' };
   return `
-    <label class="field">Contractor / company name<input name="name" value="${esc(c.name)}" required></label>
+    <label class="field">Contractor / company name<input name="name" value="${esc(c.name)}" required${isNew ? ' list="contractorNames" autocomplete="off"' : ''}></label>
+    ${isNew ? `<datalist id="contractorNames">${[...new Set(state.contractors.map(x=>x.name).filter(Boolean))].map(n=>`<option value="${esc(n)}">`).join('')}</datalist>
+    <div id="contractorAutofillNote" class="section-sub" style="display:none; margin:-4px 0 8px;">This contractor already exists — their details are filled in below. Saving updates them and opens Manage, where you add payments.
+      <button type="button" class="btn small ghost" id="openExistingContractorBtn" style="margin-left:6px;">Open Manage</button></div>` : ''}
     ${fieldRow(
       `<label class="field">Contact person<input name="contactName" value="${esc(c.contactName||'')}"></label>`,
       `<label class="field">Phone<input name="phone" type="tel" value="${esc(c.phone||'')}"></label>`
@@ -1644,8 +1650,23 @@ function renderExpenseRows(expenses){
     </div>`).join('');
 }
 
-function contractorPaymentForm(p){
-  p = p || { description:'', fixedAmount:'', date:new Date().toISOString().slice(0,10), status:'outstanding', includeTravel:false, odometerStart:'', odometerEnd:'', distanceKm:'', ratePerKm:AA_RATE_PER_KM, photoBefore:'', photoAfter:'', expenses:[] };
+/* Vehicle-travel setup from the most recent travel payment for this contractor,
+   or for any contractor with the same name — used to prefill a new payment. */
+function lastTravelDefaults(contractorId){
+  const ct = state.contractors.find(c=>c.id===contractorId);
+  if(!ct) return null;
+  const key = (ct.name||'').trim().toLowerCase();
+  const travel = state.contractors
+    .filter(c=>c.id===contractorId || (key && (c.name||'').trim().toLowerCase()===key))
+    .flatMap(c=>c.payments||[])
+    .filter(p=>p.includeTravel || p.costType==='travel')
+    .sort((a,b)=>(b.date||'').localeCompare(a.date||''))[0];
+  if(!travel) return null;
+  return { includeTravel:true, ratePerKm: travel.ratePerKm!=null && travel.ratePerKm!=='' ? Number(travel.ratePerKm) : AA_RATE_PER_KM };
+}
+
+function contractorPaymentForm(p, defaults){
+  p = p || { description:'', fixedAmount:'', date:new Date().toISOString().slice(0,10), status:'outstanding', includeTravel:false, odometerStart:'', odometerEnd:'', distanceKm:'', ratePerKm:AA_RATE_PER_KM, photoBefore:'', photoAfter:'', expenses:[], ...(defaults||{}) };
   const includeTravel = !!p.includeTravel || p.costType==='travel'; /* costType: legacy shape from an earlier version */
   const distance = Number(p.distanceKm)||0;
   const rate = p.ratePerKm!=null && p.ratePerKm!=='' ? Number(p.ratePerKm) : AA_RATE_PER_KM;
@@ -1655,7 +1676,7 @@ function contractorPaymentForm(p){
   const expensesTotal = expenses.reduce((s,x)=>s+(Number(x.amount)||0),0);
   const total = fixedAmount + (includeTravel ? travelAmount : 0) + expensesTotal;
   return `
-    <label class="field">Description<textarea name="description" rows="10" placeholder="e.g. Shaft seal replacement — MV Kingfisher" required>${esc(p.description)}</textarea></label>
+    <label class="field">Description<textarea name="description" rows="10" placeholder="e.g. Shaft seal replacement — MV Kingfisher">${esc(p.description)}</textarea></label>
     <label class="field">Fixed / base amount (R)<input name="fixedAmount" id="payFixedAmount" type="number" step="0.01" min="0" value="${fixedAmount}"></label>
 
     <label style="display:flex; align-items:center; gap:9px; font-size:13px; font-weight:600; color:var(--ink); margin:-2px 0 14px;">
@@ -1707,7 +1728,7 @@ function contractorPaymentForm(p){
 
     <div class="mini-row" style="padding:4px 0 14px; border-top:1px dashed var(--paper-line); margin-top:2px;"><span>Total payment amount</span><b id="payTotalAmount">${fmtCurrency(total)}</b></div>
 
-    <label class="field">Date<input name="date" type="date" value="${esc(p.date||'')}" required></label>
+    <label class="field">Date<input name="date" type="date" value="${esc(p.date||'')}"></label>
     <label class="field">Status<select name="status">
       <option value="outstanding" ${p.status==='outstanding'?'selected':''}>Outstanding</option>
       <option value="paid" ${p.status==='paid'?'selected':''}>Paid</option>
@@ -1995,7 +2016,7 @@ function renderModal(){
   else if(modal.type==='tender-doc'){ title = 'Add tender document'; body = documentForm(); }
   else if(modal.type==='company'){ title = modal.data ? 'Edit company' : 'Add company'; body = companyForm(modal.data); }
   else if(modal.type==='contractor'){ title = modal.data ? 'Edit contractor' : 'Add contractor'; body = contractorForm(modal.data); }
-  else if(modal.type==='contractor-payment'){ title = modal.data ? 'Edit payment' : 'Add payment'; body = contractorPaymentForm(modal.data); }
+  else if(modal.type==='contractor-payment'){ title = modal.data ? 'Edit payment' : 'Add payment'; body = contractorPaymentForm(modal.data, modal.data ? null : lastTravelDefaults(modal.id)); }
 
   root.innerHTML = `
     <div class="modal-overlay" data-action="overlay-close">
@@ -2134,19 +2155,23 @@ function attachModalEvents(){
         alert("Couldn't process that photo. Try a different file.");
       }
     });
-    document.getElementById('addExpenseBtn').addEventListener('click', ()=>{
+    const addPendingExpense = (strict)=>{
       const descInput = document.getElementById('newExpDesc');
       const amountInput = document.getElementById('newExpAmount');
       const description = descInput.value.trim();
       const amount = Number(amountInput.value)||0;
-      if(!description || amount<=0){ alert('Enter a description and an amount greater than zero for the expense.'); return; }
+      if(strict && (!description || amount<=0)){ alert('Enter a description and an amount greater than zero for the expense.'); return; }
+      if(!description && amount<=0 && !newExpPhoto) return;
       expenses.push({ id:uid('exp'), description, amount, photo:newExpPhoto });
       descInput.value = ''; amountInput.value = ''; newExpPhoto = '';
       newExpPhotoPreview.innerHTML = '';
       newExpPhotoInput.value = '';
       renderExpenses();
       recalcTotal();
-    });
+    };
+    document.getElementById('addExpenseBtn').addEventListener('click', ()=>addPendingExpense(true));
+    /* Saving keeps an expense that was typed in but not yet added */
+    form.flushPendingExpense = ()=>addPendingExpense(false);
   }
   document.querySelectorAll('[data-action="edit-vessel"]').forEach(b=>b.addEventListener('click', ()=>{
     const v = state.vessels.find(x=>x.id===b.dataset.id);
@@ -2312,6 +2337,31 @@ function attachModalEvents(){
       }
     }));
   }
+  /* Add contractor: typing a name that matches an existing contractor fills in
+     their details. Only empty fields are filled, so nothing typed is overwritten. */
+  const contractorNameInput = state.modal && state.modal.type==='contractor' && !state.modal.data && form ? form.elements.name : null;
+  if(contractorNameInput){
+    contractorNameInput.addEventListener('input', ()=>{
+      const key = contractorNameInput.value.trim().toLowerCase();
+      const match = key && state.contractors.find(c=>(c.name||'').trim().toLowerCase()===key);
+      const note = document.getElementById('contractorAutofillNote');
+      if(note) note.style.display = match ? '' : 'none';
+      contractorNameInput.dataset.matchId = match ? match.id : '';
+      if(!match) return;
+      CONTRACTOR_DETAIL_FIELDS.forEach(f=>{
+        const el = form.elements[f];
+        if(el && !el.value && match[f]) el.value = match[f];
+      });
+    });
+  }
+  const openExistingBtn = document.getElementById('openExistingContractorBtn');
+  if(openExistingBtn && contractorNameInput){
+    openExistingBtn.addEventListener('click', ()=>{
+      if(!contractorNameInput.dataset.matchId) return;
+      state.modal = { type:'view-contractor', id: contractorNameInput.dataset.matchId };
+      renderModal();
+    });
+  }
   document.querySelectorAll('[data-action="edit-contractor"]').forEach(b=>b.addEventListener('click', ()=>{
     state.modal = { type:'contractor', data: state.contractors.find(c=>c.id===b.dataset.id) };
     renderModal();
@@ -2355,6 +2405,7 @@ function attachModalEvents(){
 
 async function handleFormSubmit(e){
   e.preventDefault();
+  if(e.target.flushPendingExpense) e.target.flushPendingExpense();
   const fd = new FormData(e.target);
   const modal = state.modal;
   let targetKey = null, mutateFn = null, nextModal = null;
@@ -2527,7 +2578,11 @@ async function handleFormSubmit(e){
       bankName:fd.get('bankName')||'', accountHolder:fd.get('accountHolder')||'', accountNumber:fd.get('accountNumber')||'',
       branchCode:fd.get('branchCode')||'', accountType:fd.get('accountType')||'', swift:fd.get('swift')||'', notes:fd.get('notes')||''
     };
-    const editId = modal.data ? modal.data.id : null;
+    /* One record per contractor: adding a name that already exists updates that
+       contractor and opens Manage, where further payments are added. */
+    const nameKey = (data.name||'').trim().toLowerCase();
+    const existing = !modal.data && nameKey ? state.contractors.find(c=>(c.name||'').trim().toLowerCase()===nameKey) : null;
+    const editId = modal.data ? modal.data.id : existing ? existing.id : null;
     targetKey = 'contractors';
     mutateFn = fresh => editId
       ? fresh.map(c=> c.id===editId ? { ...c, ...data } : c)
@@ -2542,11 +2597,13 @@ async function handleFormSubmit(e){
     const expensesTotal = expenses.reduce((s,x)=>s+(Number(x.amount)||0),0);
     let data;
     if(includeTravel){
-      const odometerStart = Number(fd.get('odometerStart'))||0;
-      const odometerEnd = Number(fd.get('odometerEnd'))||0;
-      const distanceKm = Math.max(0, odometerEnd - odometerStart);
+      /* Blank readings stay blank so a trip can be saved with only the "before"
+         reading and completed later; distance counts only once both are in. */
+      const odoVal = name => { const v = fd.get(name); return v==='' || v==null ? '' : Number(v)||0; };
+      const odometerStart = odoVal('odometerStart');
+      const odometerEnd = odoVal('odometerEnd');
+      const distanceKm = odometerStart!=='' && odometerEnd!=='' ? Math.max(0, odometerEnd - odometerStart) : 0;
       const ratePerKm = Number(fd.get('ratePerKm'))||0;
-      if(distanceKm <= 0){ alert('Enter valid odometer readings — the after reading must be greater than the before reading.'); return; }
       const travelAmount = Math.round(distanceKm * ratePerKm * 100) / 100;
       const amount = Math.round((fixedAmount + travelAmount + expensesTotal) * 100) / 100;
       data = {
@@ -2557,7 +2614,6 @@ async function handleFormSubmit(e){
         expenses
       };
     } else {
-      if(fixedAmount <= 0 && expensesTotal <= 0){ alert('Enter an amount, add vehicle travel, or add an expense.'); return; }
       const amount = Math.round((fixedAmount + expensesTotal) * 100) / 100;
       data = {
         description:fd.get('description'), date:fd.get('date'), status:fd.get('status'),
