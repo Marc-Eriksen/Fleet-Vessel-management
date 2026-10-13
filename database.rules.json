@@ -1,0 +1,27 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "oceanhub": {
+      "users": {
+        ".read": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin'",
+        ".write": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin'",
+        "$uid": {
+          ".read": "auth != null && auth.uid === $uid"
+        }
+      },
+      "data": {
+        ".read": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin'",
+        ".write": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin'",
+        "vessels":       { ".read": "auth != null && root.child('oceanhub/users/' + auth.uid).exists()", ".write": "auth != null && root.child('oceanhub/users/' + auth.uid).exists()" },
+        "maintenance":   { ".read": "auth != null && root.child('oceanhub/users/' + auth.uid).exists()", ".write": "auth != null && root.child('oceanhub/users/' + auth.uid).exists()" },
+        "crew":          { ".read": "auth != null && root.child('oceanhub/users/' + auth.uid).exists()", ".write": "auth != null && root.child('oceanhub/users/' + auth.uid).exists()" },
+        "checklists":    { ".read": "auth != null && root.child('oceanhub/users/' + auth.uid).exists()", ".write": "auth != null && root.child('oceanhub/users/' + auth.uid).exists()" },
+        "checklistRuns": { ".read": "auth != null && root.child('oceanhub/users/' + auth.uid).exists()", ".write": "auth != null && root.child('oceanhub/users/' + auth.uid).exists()" },
+        "hourReadings":  { ".read": "auth != null && root.child('oceanhub/users/' + auth.uid).exists()", ".write": "auth != null && root.child('oceanhub/users/' + auth.uid).exists()" },
+        "serviceLog":    { ".read": "auth != null && root.child('oceanhub/users/' + auth.uid).exists()", ".write": "auth != null && root.child('oceanhub/users/' + auth.uid).exists()" },
+        "companies":     { ".read": "auth != null && root.child('oceanhub/users/' + auth.uid).exists()" }
+      }
+    }
+  }
+}

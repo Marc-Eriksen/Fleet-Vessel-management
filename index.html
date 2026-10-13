@@ -470,9 +470,8 @@ let state = {
   clSaved: false
 };
 
-/* Auth session: null (signed out) | { role:'admin' } | { role:'owner', companyId } */
+/* Auth session: null (signed out) | { role:'admin', uid, email } | { role:'owner', companyId, uid, email } */
 let session = null;
-let loginRole = 'admin';
 
 function uid(prefix){ return prefix + '_' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 
@@ -539,7 +538,7 @@ function seedData(){
     { id:uid('co'), name:'Zephyr Marine Services', contactName:'Sipho Ndlovu',
       contactEmail:'ops@zephyrmarine.example', contactPhone:'+27821234567',
       address:'Durban Harbour, Berth 4', notes:'',
-      username:'zephyr', password:'zephyr123', vesselIds:[v1] },
+      loginEmail:'', loginUid:'', vesselIds:[v1] },
   ];
   state.contractors = [
     { id:uid('ct'), name:'Bluewater Marine Engineering', contactName:'Derek van Wyk',
@@ -555,36 +554,29 @@ function seedData(){
 }
 
 /* ============================= FIREBASE CONFIG ============================= */
-/* 1. Go to console.firebase.google.com, create a project (free tier is fine).
-   2. Build > Realtime Database > Create Database (start in locked mode).
-   3. Project settings > General > Add app > Web app — copy the config below.
-   4. Realtime Database > Rules, paste:
-      {
-        "rules": {
-          "oceanhub": { ".read": true, ".write": true },
-          ".read": false, ".write": false
-        }
-      }
-   5. Set your own ADMIN_PASSWORD below, then reload this file.
-   Note: access is gated in the app itself, not by Firebase Authentication —
-   the database rules above are open to anyone with the link.
-   The landing page has two logins:
-     • Admin — uses ADMIN_PASSWORD below. Full access + the Companies tab, where
-       owner/operator accounts and their vessel assignments are created and edited.
-     • Owner / Operator — uses the username + password set on a company record in
-       the Companies tab. An owner only sees and manages their assigned vessel(s). */
+/* Sign-in uses Firebase Authentication (email + password) and the Realtime Database
+   rules below decide what each signed-in account may read and write.
+   1. console.firebase.google.com > your project > Build > Authentication > Get started >
+      Sign-in method > Email/Password > Enable.
+   2. Authentication > Users > Add user — create the admin's email + password, then copy
+      that user's "User UID".
+   3. Realtime Database > Data — under "oceanhub" add: users > <that UID> > role = "admin".
+   4. Realtime Database > Rules — paste the contents of database.rules.json and Publish.
+   Every account needs a record at oceanhub/users/<uid> ({ role:'admin' } or
+   { role:'owner', companyId }) to get in. Admin creates owner logins from the
+   Companies tab; an account without a record has no access to any data. */
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyA5XbMVrsxvjAPNLJRycum5U5htjw9gSy0",
   authDomain: "ocean-hub-vessel-managem-cdca8.firebaseapp.com",
   databaseURL: "https://ocean-hub-vessel-managem-cdca8-default-rtdb.firebaseio.com",
   projectId: "ocean-hub-vessel-managem-cdca8",
 };
-const ADMIN_PASSWORD = "LZbwuNphSbqphLN5yvua"; /* change this to your own admin password */
-const ADMIN_PIN = ADMIN_PASSWORD; /* backwards-compatible alias */
 const ADMIN_EMAIL = ""; /* e.g. "ops@oceanhub.co.za" — leave blank to hide admin notify buttons */
 const ADMIN_PHONE = ""; /* e.g. "+27820000000" — used for WhatsApp links, digits/plus only */
 const AA_RATE_PER_KM = 3.75; /* default AA (Automobile Association) cost-per-km rate for contractor travel payments (GWM P-Series) — update as AA rates change; editable per payment */
-const REQUIRE_PIN = true;
+/* Collections an owner/operator account may read; everything else under oceanhub/data
+   (contractors) is admin-only in the database rules. */
+const OWNER_KEYS = ['vessels','maintenance','crew','companies','checklists','checklistRuns','hourReadings','serviceLog'];
 let fbInitialized = false;
 
 function isFirebaseConfigured(){
@@ -595,119 +587,116 @@ function isFirebaseConfigured(){
 function bootstrap(){
   document.getElementById('tabNav').innerHTML = '';
   if(!isFirebaseConfigured()){ renderSetupNotice(); return; }
-  try{ firebase.initializeApp(FIREBASE_CONFIG); fbInitialized = true; }catch(e){ /* already initialized */ fbInitialized = true; }
-  try{ const s = sessionStorage.getItem('oceanhub_session'); if(s){ session = JSON.parse(s); } }catch(e){ session = null; }
-  /* Show the gate straight away; data loads in the background (Firebase rules are
-     open) so the Owner login can be checked against the company records. */
-  if(session){
-    document.getElementById('mainContent').innerHTML = '<div class="empty-note" style="margin-top:60px;">Loading fleet data…</div>';
-  } else {
-    renderLoginGate();
-  }
-  loadState().catch(err=>{
-    session = null;
-    renderLoginGate('Could not load data: ' + (err && err.message ? err.message : err));
-  });
+  try{ firebase.initializeApp(FIREBASE_CONFIG); }catch(e){ /* already initialized */ }
+  fbInitialized = true;
+  document.getElementById('mainContent').innerHTML = '<div class="empty-note" style="margin-top:60px;">Loading…</div>';
+  firebase.auth().onAuthStateChanged(handleAuthChange);
 }
 
-function saveSession(){
+/* Signed in → look up the account's role record, then load the data it may see. */
+async function handleAuthChange(user){
+  detachData();
+  session = null;
+  if(!user){ renderLoginGate(authNotice); authNotice = ''; return; }
+  document.getElementById('mainContent').innerHTML = '<div class="empty-note" style="margin-top:60px;">Loading fleet data…</div>';
+  let rec = null;
   try{
-    if(session) sessionStorage.setItem('oceanhub_session', JSON.stringify(session));
-    else sessionStorage.removeItem('oceanhub_session');
-  }catch(e){ /* private mode — session just won't survive reload */ }
+    rec = (await firebase.database().ref('oceanhub/users/' + user.uid).once('value')).val();
+  }catch(e){ rec = null; }
+  if(!rec || (rec.role !== 'admin' && rec.role !== 'owner')){
+    authNotice = 'This account has not been given access yet — ask the OCEANHUB admin.';
+    firebase.auth().signOut();
+    return;
+  }
+  session = { role:rec.role, companyId:rec.companyId || null, uid:user.uid, email:user.email };
+  state.activeTab = 'dashboard';
+  loadState().catch(err=>{
+    authNotice = 'Could not load data: ' + (err && err.message ? err.message : err);
+    firebase.auth().signOut();
+  });
 }
 
 function renderSetupNotice(){
   document.getElementById('mainContent').innerHTML = `
     <div style="max-width:540px;margin:70px auto;text-align:center;">
       <h2 class="section-title">Firebase isn't connected yet</h2>
-      <p class="section-sub">Open this file and fill in FIREBASE_CONFIG and ADMIN_PASSWORD near the top of the script (search for "FIREBASE CONFIG"), following the steps in the comment above it. Then reload the page.</p>
+      <p class="section-sub">Open this file and fill in FIREBASE_CONFIG near the top of the script (search for "FIREBASE CONFIG"), following the steps in the comment above it. Then reload the page.</p>
     </div>`;
 }
 
-function renderLoginGate(err){
+let authNotice = '';
+function authErrorText(err){
+  const code = err && err.code || '';
+  if(['auth/invalid-credential','auth/wrong-password','auth/user-not-found','auth/invalid-email','auth/invalid-login-credentials'].includes(code)) return 'Incorrect email or password.';
+  if(code === 'auth/too-many-requests') return 'Too many attempts — wait a few minutes, or reset your password.';
+  if(code === 'auth/network-request-failed') return 'No connection — check your internet and try again.';
+  if(code === 'auth/user-disabled') return 'This account has been disabled.';
+  return (err && err.message) || String(err);
+}
+
+function renderLoginGate(err, info){
   document.getElementById('tabNav').innerHTML = '';
   document.getElementById('modalRoot').innerHTML = '';
   const hm = document.getElementById('headerMeta');
   if(hm) hm.innerHTML = '';
-  const role = loginRole || 'admin';
   const main = document.getElementById('mainContent');
+  const prevEmail = (document.querySelector('#loginForm [name=email]') || {}).value || '';
   main.innerHTML = `
     <div class="login-wrap">
       <h2 class="section-title">Sign in</h2>
-      <p class="section-sub" style="margin-bottom:0;">Choose your access level to continue.</p>
-      <div class="login-roles">
-        <button type="button" class="login-role ${role==='admin'?'active':''}" data-role="admin">Admin</button>
-        <button type="button" class="login-role ${role==='owner'?'active':''}" data-role="owner">Owner / Operator</button>
-      </div>
-      <form id="loginForm" autocomplete="off">
-        ${role==='admin' ? `
-          <label class="field">Admin password
-            <input type="password" name="password" autocomplete="off" required autofocus>
-          </label>
-        ` : `
-          <label class="field">Username
-            <input type="text" name="username" autocomplete="off" autocapitalize="none" spellcheck="false" required autofocus>
-          </label>
-          <label class="field">Password
-            <input type="password" name="password" autocomplete="off" required>
-          </label>
-        `}
+      <p class="section-sub">Admin and owner / operator accounts sign in with their email address.</p>
+      <form id="loginForm" autocomplete="on">
+        <label class="field">Email
+          <input type="email" name="email" value="${esc(prevEmail)}" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required autofocus>
+        </label>
+        <label class="field">Password
+          <input type="password" name="password" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false" required>
+        </label>
         <div class="login-error">${err ? esc(err) : ''}</div>
+        ${info ? `<div class="section-sub" style="margin:-4px 0 8px;">${esc(info)}</div>` : ''}
         <button type="submit" class="btn primary" style="width:100%;">Sign in</button>
+        <button type="button" class="btn ghost" id="forgotPasswordBtn" style="width:100%; margin-top:8px;">Forgot password?</button>
       </form>
     </div>`;
-  main.querySelectorAll('[data-role]').forEach(b=>b.addEventListener('click', ()=>{
-    loginRole = b.dataset.role;
-    renderLoginGate();
-  }));
   document.getElementById('loginForm').addEventListener('submit', handleLogin);
+  document.getElementById('forgotPasswordBtn').addEventListener('click', async ()=>{
+    const email = (document.querySelector('#loginForm [name=email]').value || '').trim();
+    if(!email){ renderLoginGate('Enter your email address first, then tap “Forgot password?”.'); return; }
+    try{
+      await firebase.auth().sendPasswordResetEmail(email);
+      renderLoginGate('', `If ${email} has an account, a password reset link is on its way — check your inbox (and spam).`);
+    }catch(e2){ renderLoginGate(authErrorText(e2)); }
+  });
 }
 
-function handleLogin(e){
+async function handleLogin(e){
   e.preventDefault();
   const fd = new FormData(e.target);
-  if(loginRole === 'admin'){
-    if((fd.get('password')||'') !== ADMIN_PASSWORD){
-      renderLoginGate('Incorrect admin password.');
-      return;
-    }
-    session = { role:'admin' };
-  } else {
-    if(!firstLoadDone){
-      renderLoginGate('Still connecting to the fleet database — try again in a moment.');
-      return;
-    }
-    const u = (fd.get('username')||'').trim().toLowerCase();
-    const p = fd.get('password')||'';
-    const co = state.companies.find(c => (c.username||'').trim().toLowerCase() === u && (c.password||'') === p);
-    if(!co){
-      renderLoginGate('Incorrect username or password.');
-      return;
-    }
-    session = { role:'owner', companyId: co.id };
+  const btn = e.target.querySelector('button[type=submit]');
+  if(btn){ btn.disabled = true; btn.textContent = 'Signing in…'; }
+  try{
+    await firebase.auth().signInWithEmailAndPassword(String(fd.get('email')||'').trim(), String(fd.get('password')||''));
+    /* handleAuthChange takes it from here */
+  }catch(err){
+    renderLoginGate(authErrorText(err));
   }
-  saveSession();
-  state.activeTab = 'dashboard';
-  applyScoping();
-  render();
 }
 
 /* ============================= STORAGE (Firebase Realtime Database, live-synced) ============================= */
-let dbRef = null;
-let dbListener = null;
+let dataListeners = []; /* [{ ref, fn }] */
 let firstLoadDone = false;
 
-function logout(){
-  if(dbRef && dbListener){ dbRef.off('value', dbListener); dbRef = null; dbListener = null; }
+function detachData(){
+  dataListeners.forEach(l=>l.ref.off('value', l.fn));
+  dataListeners = [];
   firstLoadDone = false;
-  session = null;
-  loginRole = 'admin';
-  saveSession();
+}
+
+function logout(){
   state.modal = null;
   state.activeTab = 'dashboard';
   document.getElementById('modalRoot').innerHTML = '';
-  bootstrap();
+  firebase.auth().signOut();
 }
 
 function isAdmin(){ return !!(session && session.role === 'admin'); }
@@ -778,34 +767,47 @@ function applyRemoteData(val){
   applyScoping();
 }
 
+/* Admin listens to the whole data tree; an owner listens to just the collections the
+   database rules let owners read, and the app is drawn once each has arrived. */
 function loadState(){
   return new Promise((resolve, reject)=>{
+    const onFirstError = err=>{ if(!firstLoadDone){ firstLoadDone = true; reject(err); } };
+    const afterData = ()=>{
+      if(!firstLoadDone){
+        firstLoadDone = true;
+        render();
+        resolve();
+      } else if(session && !state.modal && !state.clDirty){
+        /* live update from another device/user — only refresh if nobody's mid-edit in a form */
+        render();
+      }
+    };
     try{
-      dbRef = firebase.database().ref('oceanhub/data');
-      dbListener = (snap)=>{
-        const val = snap.val();
-        if(val){
-          applyRemoteData(val);
-        } else if(!firstLoadDone){
-          seedData();
-          persistAll();
-        }
-        if(!firstLoadDone){
-          firstLoadDone = true;
-          if(session) render();
-          else if(!document.getElementById('loginForm')) renderLoginGate();
-          resolve();
-        } else if(session && !state.modal && !state.clDirty){
-          /* live update from another device/user — only refresh if nobody's mid-edit in a form */
-          render();
-        }
-      };
-      dbRef.on('value', dbListener, (err)=>{
-        if(!firstLoadDone){
-          firstLoadDone = true;
-          reject(err);
-        }
-      });
+      if(session.role === 'admin'){
+        const ref = firebase.database().ref('oceanhub/data');
+        const fn = snap=>{
+          const val = snap.val();
+          if(val) applyRemoteData(val);
+          else if(!firstLoadDone){ seedData(); persistAll(); }
+          afterData();
+        };
+        dataListeners.push({ ref, fn });
+        ref.on('value', fn, onFirstError);
+      } else {
+        const val = {}, arrived = new Set();
+        OWNER_KEYS.forEach(key=>{
+          const ref = firebase.database().ref('oceanhub/data/' + key);
+          const fn = snap=>{
+            val[key] = snap.val();
+            arrived.add(key);
+            if(arrived.size < OWNER_KEYS.length) return;
+            applyRemoteData(val);
+            afterData();
+          };
+          dataListeners.push({ ref, fn });
+          ref.on('value', fn, onFirstError);
+        });
+      }
     }catch(e){
       reject(e);
     }
@@ -2884,7 +2886,7 @@ function documentForm(){
 }
 
 function companyForm(c){
-  c = c || { name:'', contactName:'', contactEmail:'', contactPhone:'', address:'', notes:'', username:'', password:'', vesselIds:[] };
+  c = c || { name:'', contactName:'', contactEmail:'', contactPhone:'', address:'', notes:'', loginEmail:'', loginUid:'', vesselIds:[] };
   const assigned = new Set(c.vesselIds || []);
   return `
     <label class="field">Company name<input name="name" value="${esc(c.name)}" required></label>
@@ -2897,11 +2899,22 @@ function companyForm(c){
     <label class="field">Notes<textarea name="notes" rows="2">${esc(c.notes||'')}</textarea></label>
 
     <div class="detail-section" style="margin-top:4px;"><h4>Owner / operator login</h4></div>
-    ${fieldRow(
-      `<label class="field">Username<input name="username" value="${esc(c.username||'')}" autocapitalize="none" spellcheck="false" autocomplete="off" required></label>`,
-      `<label class="field">Password<input name="password" value="${esc(c.password||'')}" autocomplete="off" required></label>`
-    )}
-    <p style="font-size:12px; color:var(--ink-soft); margin-top:-4px;">The owner signs in from the landing page under &ldquo;Owner / Operator&rdquo; with these credentials. Changing them here updates the login immediately.</p>
+    ${c.loginUid ? `
+      <div class="mini-row"><span>Signs in as</span><b>${esc(c.loginEmail)}</b></div>
+      <div style="display:flex; gap:6px; flex-wrap:wrap; margin:8px 0 4px;">
+        <button type="button" class="btn small" data-action="company-reset-password" data-email="${esc(c.loginEmail)}">Send password reset email</button>
+        <button type="button" class="btn small danger" data-action="company-remove-login" data-id="${c.id}">Remove login</button>
+      </div>
+      <p style="font-size:12px; color:var(--ink-soft);">Owners change their own password with &ldquo;Forgot password?&rdquo; on the sign-in page, or from the reset email above.</p>
+    ` : `
+      ${fieldRow(
+        `<label class="field">Login email<input name="loginEmail" type="email" value="" placeholder="${esc(c.contactEmail || 'owner@example.com')}" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="off"></label>`,
+        `<label class="field">Starting password<input name="loginPassword" value="${esc(c.password||'')}" minlength="6" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="off"></label>`
+      )}
+      <p style="font-size:12px; color:var(--ink-soft); margin-top:-4px;">${c.username
+        ? `This company still has an old-style login (username &ldquo;${esc(c.username)}&rdquo;), which no longer works. Enter the owner's email to create their new login — their old password is filled in so they can keep using it.`
+        : 'Leave the email blank to save the company without a login.'} Passwords need at least 6 characters.</p>
+    `}
 
     <div class="detail-section" style="margin-top:4px;"><h4>Assigned vessels</h4></div>
     <div class="vessel-check-grid">
@@ -2913,14 +2926,24 @@ function companyForm(c){
 }
 
 /* ============================= COMPANIES (admin only) ============================= */
+/* Creates an owner's Firebase Auth account without signing the admin out: a second,
+   throwaway Firebase app instance does the sign-up and is signed straight back out. */
+async function createOwnerAccount(email, password){
+  const app = firebase.apps.find(a=>a.name==='owner-setup') || firebase.initializeApp(FIREBASE_CONFIG, 'owner-setup');
+  const auth = app.auth();
+  await auth.setPersistence(firebase.auth.Auth.Persistence.NONE);
+  const cred = await auth.createUserWithEmailAndPassword(email, password);
+  const uid = cred.user.uid;
+  await auth.signOut();
+  return uid;
+}
 function renderCompanies(){
   const rows = state.companies.map(c=>{
     const vnames = (c.vesselIds || []).map(id=>{ const v = state.allVessels.find(x=>x.id===id); return v ? esc(v.name) : '<span style="color:var(--ink-soft);">removed</span>'; });
     return `
       <tr>
         <td><b>${esc(c.name)}</b>${c.address ? `<div style="color:var(--ink-soft); font-size:11.5px;">${esc(c.address)}</div>` : ''}</td>
-        <td class="num">${esc(c.username || '—')}</td>
-        <td class="num" style="white-space:nowrap;"><span class="pw-mask" data-pw="${esc(c.password || '')}">••••••••</span> <button class="btn small ghost" data-action="reveal-password">Show</button></td>
+        <td>${c.loginUid ? esc(c.loginEmail) : c.username ? '<span class="stamp due-soon">Needs new login</span>' : '<span style="color:var(--ink-soft);">No login</span>'}</td>
         <td>${esc(c.contactName || '—')}${c.contactEmail ? `<div style="color:var(--ink-soft); font-size:11.5px;">${esc(c.contactEmail)}</div>` : ''}${c.contactPhone ? `<div style="color:var(--ink-soft); font-size:11.5px;">${esc(c.contactPhone)}</div>` : ''}</td>
         <td>${vnames.length ? vnames.join('<br>') : '<span style="color:var(--ink-soft);">None assigned</span>'}</td>
         <td style="white-space:nowrap;">
@@ -2940,11 +2963,11 @@ function renderCompanies(){
     <div class="table-wrap">
       <table>
         <thead><tr>
-          <th>Company</th><th>Login username</th><th>Password</th><th>Contact</th><th>Assigned vessels</th><th></th>
+          <th>Company</th><th>Owner login</th><th>Contact</th><th>Assigned vessels</th><th></th>
         </tr></thead>
         <tbody>
           ${state.companies.length === 0
-            ? `<tr><td colspan="6"><div class="empty-note">No companies yet. Add one to create an owner login.</div></td></tr>`
+            ? `<tr><td colspan="5"><div class="empty-note">No companies yet. Add one to create an owner login.</div></td></tr>`
             : rows}
         </tbody>
       </table>
@@ -3685,6 +3708,21 @@ function attachModalEvents(){
     }));
     render();
   }));
+  document.querySelectorAll('[data-action="company-reset-password"]').forEach(b=>b.addEventListener('click', async ()=>{
+    try{
+      await firebase.auth().sendPasswordResetEmail(b.dataset.email);
+      alert(`Password reset email sent to ${b.dataset.email}.`);
+    }catch(err){ alert("Couldn't send the reset email: " + authErrorText(err)); }
+  }));
+  document.querySelectorAll('[data-action="company-remove-login"]').forEach(b=>b.addEventListener('click', async ()=>{
+    const co = state.companies.find(c=>c.id===b.dataset.id);
+    if(!co || !confirm(`Remove ${co.loginEmail}'s login? They will no longer be able to sign in. You can then create a new login with a different email.`)) return;
+    try{ await firebase.database().ref('oceanhub/users/' + co.loginUid).remove(); }
+    catch(err){ alert("Couldn't remove the login: " + (err && err.message || err)); return; }
+    await persistArray('companies', fresh => fresh.map(c=> c.id===co.id ? { ...c, loginEmail:'', loginUid:'' } : c));
+    state.modal = { type:'company', data: state.companies.find(c=>c.id===co.id) };
+    render();
+  }));
   /* Scoped to .modal because reveal-password also appears in the (already-bound)
      companies/contractors list rows — an unscoped query here would double-bind those. */
   const modalEl = document.querySelector('.modal');
@@ -3927,20 +3965,37 @@ async function handleFormSubmit(e){
   }
   else if(modal.type==='company'){
     const editId = modal.data ? modal.data.id : null;
-    const uname = (fd.get('username')||'').trim();
-    if(uname && state.companies.some(c => c.id !== editId && (c.username||'').trim().toLowerCase() === uname.toLowerCase())){
-      alert('Another company already uses that username. Please choose a different one.');
-      return;
-    }
+    const coId = editId || uid('co');
     const data = {
       name:fd.get('name'), contactName:fd.get('contactName')||'', contactEmail:fd.get('contactEmail')||'',
       contactPhone:fd.get('contactPhone')||'', address:fd.get('address')||'', notes:fd.get('notes')||'',
-      username:uname, password:fd.get('password')||'', vesselIds:fd.getAll('vesselIds')
+      vesselIds:fd.getAll('vesselIds')
     };
+    const loginEmail = String(fd.get('loginEmail')||'').trim().toLowerCase();
+    let login = null;
+    if(loginEmail){
+      const pw = String(fd.get('loginPassword')||'');
+      if(pw.length < 6){ alert('The starting password needs at least 6 characters.'); return; }
+      if(state.companies.some(c => c.id !== editId && (c.loginEmail||'').toLowerCase() === loginEmail)){
+        alert('Another company already signs in with that email.'); return;
+      }
+      try{
+        const loginUid = await createOwnerAccount(loginEmail, pw);
+        await firebase.database().ref('oceanhub/users/' + loginUid).set({ role:'owner', companyId:coId, email:loginEmail });
+        login = { loginEmail, loginUid };
+      }catch(err){
+        alert(err && err.code === 'auth/email-already-in-use'
+          ? `${loginEmail} already has an OCEANHUB account. Use a different email, or delete that user in the Firebase console (Authentication > Users) and try again.`
+          : "Couldn't create the owner login: " + authErrorText(err));
+        return;
+      }
+    }
+    /* a new login replaces the old username/password fields, which are then dropped */
+    const merge = c => { const out = { ...c, ...data, ...(login || {}) }; if(login){ delete out.username; delete out.password; } return out; };
     targetKey = 'companies';
     mutateFn = fresh => editId
-      ? fresh.map(c=> c.id===editId ? { ...c, ...data } : c)
-      : [...fresh, { id:uid('co'), ...data }];
+      ? fresh.map(c=> c.id===editId ? merge(c) : c)
+      : [...fresh, merge({ id:coId })];
   }
   else if(modal.type==='contractor'){
     const data = {
@@ -4140,6 +4195,8 @@ function attachContentEvents(){
         case 'edit-company': state.modal = { type:'company', data: state.companies.find(c=>c.id===id) }; renderModal(); break;
         case 'delete-company':
           if(confirm('Delete this company and its owner login? The vessels and their records are kept.')){
+            const co = state.companies.find(c=>c.id===id);
+            if(co && co.loginUid){ try{ await firebase.database().ref('oceanhub/users/' + co.loginUid).remove(); }catch(e){} }
             await persistArray('companies', fresh => fresh.filter(c=>c.id!==id));
             render();
           }
@@ -4240,8 +4297,8 @@ function render(){
   if(session.role === 'owner' && !currentCompany()){
     /* the company/login was removed or reassigned while signed in */
     session = null;
-    saveSession();
-    renderLoginGate('Your access has changed — please sign in again.');
+    authNotice = 'Your access has changed — please ask the OCEANHUB admin.';
+    firebase.auth().signOut();
     return;
   }
   applyScoping();
