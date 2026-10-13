@@ -286,12 +286,32 @@
   .cl-mini span{font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--ink-soft);}
   .cl-item-row.task .cl-stock-only, .cl-item-row.heading .cl-stock-only{visibility:hidden;}
   .cl-item-row.heading .cl-label{font-weight:700; text-transform:uppercase; letter-spacing:0.5px; font-size:12px;}
-  .cl-run-heading{font-size:11.5px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; color:var(--ink-muted); margin:16px 0 2px; padding-bottom:5px; border-bottom:1px solid var(--paper-line);}
-  .cl-run-item{display:flex; justify-content:space-between; align-items:center; gap:12px; padding:9px 0; border-bottom:1px solid var(--paper-line); font-size:13.5px;}
-  .cl-run-item:last-child{border-bottom:none;}
-  .cl-run-item label{display:flex; align-items:center; gap:10px; cursor:pointer; flex:1; min-width:0;}
-  .cl-run-item input[type=checkbox]{width:19px; height:19px; flex-shrink:0;}
-  .cl-run-item .cl-qty{width:96px; flex-shrink:0; text-align:right;}
+  .cl-card{background:var(--white-card); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:8px;}
+  .cl-card .subtabs{margin-bottom:12px;}
+  .cl-due{display:inline-block; width:7px; height:7px; border-radius:50%; background:#fab219; margin-left:7px; vertical-align:1px;}
+  .cl-note{background:var(--brand-tint); border:1px solid var(--border); border-radius:10px; padding:10px 12px; font-size:12.5px; color:var(--ink-soft); margin-bottom:12px; white-space:pre-line;}
+  .cl-period{display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; font-size:12.5px; color:var(--ink-soft); margin-bottom:12px;}
+  .cl-period b{color:var(--ink);}
+  .cl-run-heading{font-size:11.5px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; color:var(--ink-muted); margin:14px 0 2px;}
+  .cl-items > .cl-run-heading:first-child{margin-top:0;}
+  .cl-run-item{display:flex; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid var(--paper-line); font-size:13.5px; line-height:1.35; font-weight:500; color:var(--ink);}
+  label.cl-run-item{cursor:pointer;}
+  .cl-run-item:last-child, .cl-run-item:has(+ .cl-run-heading){border-bottom:none;}
+  .cl-run-item input[type=checkbox]{width:19px; height:19px; margin:0; flex-shrink:0;}
+  .cl-run-item .cl-txt{flex:1; min-width:0;}
+  .cl-run-item .cl-qty{width:88px; flex-shrink:0; text-align:right;}
+  .stock-qty{flex:0 0 auto; min-width:34px; text-align:center; font-size:12px; font-weight:800; font-variant-numeric:tabular-nums; color:var(--navy); background:var(--brand-tint); border:1px solid var(--border); border-radius:7px; padding:3px 7px; line-height:1.3;}
+  .cl-actions{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:4px;}
+  .cl-meta-row{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+  .cl-meta-row input{min-width:0; width:100%;}
+  .cl-saved{font-size:13px; font-weight:700; color:var(--seafoam);}
+  .cl-recent{margin-top:16px; padding-top:14px; border-top:1px solid var(--paper-line);}
+  .cl-recent h3{font-size:14px; font-weight:800; margin:0 0 10px; color:var(--heading);}
+  .cl-entry{border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-bottom:8px;}
+  .cl-entry.open{border-color:var(--navy);}
+  .cl-entry-head{display:flex; justify-content:space-between; align-items:center; gap:8px;}
+  .cl-entry-title{font-weight:700; font-size:13.5px;}
+  .cl-entry-notes{font-size:12px; color:var(--ink-soft); margin-top:6px; white-space:pre-line;}
   .cl-hint{font-size:11px; color:var(--ink-soft); font-weight:400;}
   .cl-section{margin-top:28px;}
   .cl-section > h2.section-title{font-size:18px;}
@@ -324,6 +344,8 @@
     .cl-item-row.task .cl-stock-only, .cl-item-row.heading .cl-stock-only{display:none;}
     .cl-item-row select{grid-column:1 / 3;}
     .cl-item-row.stock select{grid-column:auto;}
+    .cl-card{padding:14px 12px;}
+    .cl-actions .btn{flex:1 1 auto;}
     input, select, textarea{font-size:16px;}
     .btn{min-height:40px;}
 
@@ -340,12 +362,12 @@
     .tl-item{padding:11px 14px; gap:10px;}
     .tl-date{width:66px; font-size:11px;}
   }
-  /* Printing a checklist: only the open dialog goes to paper. */
+  /* Printing a checklist: only the checklist card goes to paper. */
   @media print{
-    body.print-modal header.top, body.print-modal nav.tabs, body.print-modal .wrap, body.print-modal .modal-actions{display:none !important;}
-    body.print-modal{background:#fff; color:#000;}
-    body.print-modal .modal-overlay{position:static; background:none; padding:0; overflow:visible;}
-    body.print-modal .modal{box-shadow:none; max-width:none; padding:0;}
+    body.print-checklist header.top, body.print-checklist nav.tabs, body.print-checklist #mainContent > :not(.cl-card),
+    body.print-checklist .cl-card .subtabs, body.print-checklist .cl-actions, body.print-checklist .cl-recent, body.print-checklist #modalRoot{display:none !important;}
+    body.print-checklist{background:#fff; color:#000;}
+    body.print-checklist .cl-card{border:none; padding:0;}
   }
 </style>
 </head>
@@ -400,7 +422,10 @@ let state = {
   allChecklistRuns: [],
   activeTab: 'dashboard',
   modal: null,
-  filters: { vessel:'all', category:'all', status:'all', billing:'all', clVessel:'all' }
+  filters: { vessel:'all', category:'all', status:'all', billing:'all' },
+  clView: { vesselId:null, checklistId:null, period:null },
+  clDirty: false,
+  clSaved: false
 };
 
 /* Auth session: null (signed out) | { role:'admin' } | { role:'owner', companyId } */
@@ -723,7 +748,7 @@ function loadState(){
           if(session) render();
           else if(!document.getElementById('loginForm')) renderLoginGate();
           resolve();
-        } else if(session && !state.modal){
+        } else if(session && !state.modal && !state.clDirty){
           /* live update from another device/user — only refresh if nobody's mid-edit in a form */
           render();
         }
@@ -970,7 +995,7 @@ function navTabs(){
 function renderNav(){
   const nav = document.getElementById('tabNav');
   nav.innerHTML = navTabs().map(t=>`<button class="${(state.activeTab===t.id || (state.activeTab==='checklists' && t.id==='dashboard'))?'active':''}" data-tab="${t.id}">${t.icon}${t.label}</button>`).join('');
-  nav.querySelectorAll('button').forEach(b=>b.addEventListener('click', ()=>{ state.activeTab = b.dataset.tab; render(); }));
+  nav.querySelectorAll('button').forEach(b=>b.addEventListener('click', ()=>{ if(!confirmDiscardChecklist()) return; state.activeTab = b.dataset.tab; render(); }));
 }
 
 /* ============================= DASHBOARD ============================= */
@@ -1236,24 +1261,136 @@ function fmtDateTime(iso){
   return dt.toLocaleDateString('en-ZA', {day:'2-digit', month:'short'}) + ' ' + dt.toLocaleTimeString('en-ZA', {hour:'2-digit', minute:'2-digit'});
 }
 
+/* Checklists page: one card per vessel with a pill per checklist (Daily / Weekly /
+   Monthly / Stock guide), filled in on the page. state.clView remembers which vessel,
+   checklist and period is open; period null means the current day / week / month. */
+function checklistsForVessel(vesselId){
+  const order = { daily:0, weekly:1, monthly:2 };
+  const stockOnly = cl => !(cl.items||[]).some(i=>i.type==='task');
+  return state.checklists
+    .filter(cl => checklistVesselIds(cl).includes(vesselId))
+    .sort((a,b)=> (stockOnly(a)-stockOnly(b)) || (order[a.frequency]-order[b.frequency]) || a.name.localeCompare(b.name));
+}
+function checklistPillLabel(cl){ return cl.name.replace(/\s+checklist$/i, '') || cl.name; }
+function checklistIsDue(cl, vesselId){
+  const run = findChecklistRun(cl.id, vesselId, checklistPeriod(cl.frequency));
+  return !run || run.status !== 'completed';
+}
+function resolveChecklistView(){
+  const view = state.clView;
+  if(!state.vessels.some(v=>v.id===view.vesselId)) view.vesselId = state.vessels[0] ? state.vessels[0].id : null;
+  const list = view.vesselId ? checklistsForVessel(view.vesselId) : [];
+  if(!list.some(cl=>cl.id===view.checklistId)){ view.checklistId = list[0] ? list[0].id : null; view.period = null; }
+  const cl = list.find(c=>c.id===view.checklistId) || null;
+  const current = cl ? checklistPeriod(cl.frequency) : null;
+  const period = view.period || current;
+  return { vesselId:view.vesselId, list, cl, period, current,
+    run: cl ? findChecklistRun(cl.id, view.vesselId, period) : null };
+}
+/* Unsaved ticks on the checklist page; asked before anything replaces the form. */
+function confirmDiscardChecklist(){
+  if(!state.clDirty) return true;
+  if(!confirm('You have unsaved changes on this checklist. Discard them?')) return false;
+  state.clDirty = false;
+  return true;
+}
+
 function renderChecklists(){
   const admin = isAdmin();
-  if(state.filters.clVessel!=='all' && !state.vessels.some(v=>v.id===state.filters.clVessel)) state.filters.clVessel = 'all';
-  const fv = state.filters.clVessel;
-  const assignments = checklistAssignments(fv);
-  const stock = stockRows(fv);
-  const recent = state.checklistRuns
-    .filter(r=> fv==='all' || r.vesselId===fv)
-    .slice().sort((a,b)=> String(b.updatedAt||'').localeCompare(String(a.updatedAt||'')))
-    .slice(0, 25);
+  const view = resolveChecklistView();
+  const { vesselId, list, cl, period, current, run } = view;
+  const stock = vesselId ? stockRows(vesselId) : [];
 
-  const vesselFilter = state.vessels.length > 1 ? `
-    <div class="filters" style="margin-bottom:16px;">
-      <select id="filterChecklistVessel">
-        <option value="all">All vessels</option>
-        ${state.vessels.map(v=>`<option value="${v.id}" ${fv===v.id?'selected':''}>${esc(v.name)}</option>`).join('')}
+  const vesselPicker = state.vessels.length > 1 ? `
+    <div class="filters" style="margin-bottom:14px;">
+      <select id="clVesselSelect">
+        ${state.vessels.map(v=>{ const due = checklistsForVessel(v.id).filter(c=>checklistIsDue(c, v.id)).length;
+          return `<option value="${v.id}" ${vesselId===v.id?'selected':''}>${esc(v.name)}${v.type ? ' — ' + esc(v.type) : ''}${due ? ` (${due} due)` : ''}</option>`; }).join('')}
       </select>
     </div>` : '';
+
+  let card;
+  if(!vesselId){
+    card = `<div class="empty-note">No vessels assigned to your account yet.</div>`;
+  } else if(!cl){
+    card = `<div class="empty-note">${admin ? 'No checklists for this vessel yet. Create one with &ldquo;+ New checklist&rdquo;, or use &ldquo;Import standard lists&rdquo; below.' : 'No checklists have been assigned to this vessel yet.'}</div>`;
+  } else {
+    const items = checklistRunItems({ checklistId:cl.id, vesselId, period });
+    const entryOf = id => run ? (run.entries||[]).find(en=>en.itemId===id) : null;
+    const date = run && run.date ? run.date : period === current ? localISODate(new Date()) : periodStartDate(period);
+    let crew = run ? run.completedBy || '' : '';
+    if(!run){ try{ crew = localStorage.getItem(CREW_NAME_KEY) || ''; }catch(e){} }
+    const lastCount = id => {
+      const prev = state.checklistRuns
+        .filter(r=>r.vesselId===vesselId && !(r.checklistId===cl.id && r.period===period))
+        .map(r=>({ r, en:(r.entries||[]).find(en=>en.itemId===id) }))
+        .filter(x=>x.en && x.en.qty!=='' && x.en.qty!=null)
+        .sort((a,b)=> String(b.r.updatedAt||'').localeCompare(String(a.r.updatedAt||'')))[0];
+      return prev ? prev.en.qty : null;
+    };
+    const itemHtml = it=>{
+      if(it.type==='heading') return `<div class="cl-run-heading">${esc(it.label)}</div>`;
+      const en = entryOf(it.id);
+      if(it.type==='stock'){
+        const lc = lastCount(it.id);
+        const hints = [it.unit ? esc(it.unit) : '', it.min!=='' && it.min!=null ? `min ${esc(it.min)}` : '', lc!=null ? `last count ${esc(lc)}` : ''].filter(Boolean).join(' · ');
+        return `
+          <div class="cl-run-item">
+            <span class="stock-qty" title="Par — should be on hand">${it.par!=='' && it.par!=null ? esc(it.par) : '—'}</span>
+            <div style="flex:1; min-width:0;"><span class="cl-txt">${esc(it.label)}</span>${hints ? `<div class="cl-hint">${hints}</div>` : ''}</div>
+            <input class="cl-qty" type="number" min="0" step="any" inputmode="decimal" name="qty_${esc(it.id)}" value="${en && en.qty!=='' && en.qty!=null ? esc(en.qty) : ''}" placeholder="Count">
+          </div>`;
+      }
+      return `<label class="cl-run-item"><input type="checkbox" name="done_${esc(it.id)}" value="1" ${en && en.done ? 'checked' : ''}><span class="cl-txt">${esc(it.label)}</span></label>`;
+    };
+    const hasHeadings = items.some(it=>it.type==='heading');
+    const itemsHtml = hasHeadings ? items.map(itemHtml).join('') : [
+      items.some(i=>i.type==='task') ? (items.some(i=>i.type==='stock') ? `<div class="cl-run-heading">Tasks</div>` : '') + items.filter(i=>i.type==='task').map(itemHtml).join('') : '',
+      items.some(i=>i.type==='stock') ? (items.some(i=>i.type==='task') ? `<div class="cl-run-heading">Stock count</div>` : '') + items.filter(i=>i.type==='stock').map(itemHtml).join('') : ''
+    ].join('');
+    const recent = state.checklistRuns
+      .filter(r=>r.checklistId===cl.id && r.vesselId===vesselId)
+      .sort((a,b)=> String(b.period).localeCompare(String(a.period)))
+      .slice(0, 8);
+    const pg = run ? runProgress(run) : null;
+    card = `
+      <form id="clForm" autocomplete="off">
+        ${cl.description ? `<div class="cl-note">${esc(cl.description)}</div>` : ''}
+        <div class="cl-period">
+          <b>${freqName(cl.frequency)}</b> · ${period===current ? ({ daily:'Today', weekly:'This week', monthly:'This month' })[cl.frequency] + ' · ' : ''}${checklistPeriodLabel(period)}
+          ${checklistRunStamp(run)}${pg ? `<span>${pg.done}/${pg.total} done · saved ${fmtDateTime(run.updatedAt)}</span>` : ''}
+          ${period!==current ? `<button type="button" class="btn small" data-action="cl-current">Back to current</button>` : ''}
+        </div>
+        <div class="cl-meta-row">
+          <label class="field">Crew member<input name="completedBy" value="${esc(crew)}" placeholder="Name"></label>
+          <label class="field">Date<input name="runDate" type="date" value="${date}" max="${localISODate(new Date())}" required></label>
+        </div>
+        <div class="cl-items">${itemsHtml}</div>
+        <label class="field" style="margin-top:12px;">Notes / observations<textarea name="notes" rows="3" placeholder="Anything the office should know…">${esc(run ? run.notes||'' : '')}</textarea></label>
+        <div class="cl-actions">
+          ${cl.emailTo ? `<button type="submit" class="btn primary" name="submitAction" value="email">Complete &amp; email to OCEANHUB</button>` : ''}
+          <button type="submit" class="btn ${cl.emailTo ? 'ghost' : 'primary'}" name="submitAction" value="save">${cl.emailTo ? 'Save only' : 'Save'}</button>
+          <button type="button" class="btn" data-action="print-checklist">Print</button>
+          ${state.clSaved ? `<span class="cl-saved">Saved ✓</span>` : ''}
+        </div>
+      </form>
+      <div class="cl-recent">
+        <h3>Recent ${esc(checklistPillLabel(cl).toLowerCase())} entries</h3>
+        ${recent.length===0 ? `<div class="empty-note" style="padding:12px 0;">No entries logged yet.</div>` : recent.map(r=>{ const p = runProgress(r); return `
+          <div class="cl-entry ${r.period===period ? 'open' : ''}">
+            <div class="cl-entry-head">
+              <div class="cl-entry-title">${r.date ? fmtDate(r.date) : checklistPeriodLabel(r.period)} — ${esc(r.completedBy || 'Unnamed crew')}</div>
+              <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; justify-content:flex-end;">
+                <span class="stamp ${r.status==='completed' ? 'completed' : 'due-soon'}">${p.done}/${p.total} ${cl.items.some(i=>i.type==='task') ? 'checked' : 'counted'}</span>
+                ${r.period!==period ? `<button type="button" class="btn small ghost" data-action="cl-open" data-period="${esc(r.period)}">Open</button>` : ''}
+                ${admin ? `<button type="button" class="btn small danger" data-action="delete-checklist-run" data-id="${r.id}">Delete</button>` : ''}
+              </div>
+            </div>
+            ${r.frequency!=='daily' ? `<div class="cl-hint" style="margin-top:3px;">${checklistPeriodLabel(r.period)}</div>` : ''}
+            ${r.notes ? `<div class="cl-entry-notes">${esc(r.notes)}</div>` : ''}
+          </div>`; }).join('')}
+      </div>`;
+  }
 
   const templates = admin ? `
     <div class="cl-section">
@@ -1268,19 +1405,19 @@ function renderChecklists(){
         <thead><tr><th>Checklist</th><th>Frequency</th><th class="num">Tasks</th><th class="num">Stock items</th><th>Vessels</th><th>Email to</th><th></th></tr></thead>
         <tbody>
           ${state.allChecklists.length===0 ? `<tr><td colspan="7"><div class="empty-note">No checklists yet. Use &ldquo;+ New checklist&rdquo;, or &ldquo;Import standard lists&rdquo; to load the OCEANHUB daily, weekly and monthly lists and stock guide.</div></td></tr>` :
-            state.allChecklists.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(cl=>{
-              const items = cl.items||[];
-              const vnames = cl.allVessels ? 'All vessels' : (cl.vesselIds||[]).map(id=>{ const v = state.allVessels.find(x=>x.id===id); return v ? esc(v.name) : ''; }).filter(Boolean).join(', ') || '<span style="color:var(--ink-soft);">None</span>';
+            state.allChecklists.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(t=>{
+              const items = t.items||[];
+              const vnames = t.allVessels ? 'All vessels' : (t.vesselIds||[]).map(id=>{ const v = state.allVessels.find(x=>x.id===id); return v ? esc(v.name) : ''; }).filter(Boolean).join(', ') || '<span style="color:var(--ink-soft);">None</span>';
               return `<tr>
-                <td><b>${esc(cl.name)}</b>${cl.description ? `<div style="color:var(--ink-soft); font-size:11.5px;">${esc(cl.description)}</div>` : ''}</td>
-                <td>${freqName(cl.frequency)}</td>
+                <td><b>${esc(t.name)}</b></td>
+                <td>${freqName(t.frequency)}</td>
                 <td class="num">${items.filter(i=>i.type==='task').length}</td>
                 <td class="num">${items.filter(i=>i.type==='stock').length}</td>
                 <td>${vnames}</td>
-                <td style="font-size:12px;">${cl.emailTo ? esc(cl.emailTo) : '<span style="color:var(--ink-soft);">—</span>'}</td>
+                <td style="font-size:12px;">${t.emailTo ? esc(t.emailTo) : '<span style="color:var(--ink-soft);">—</span>'}</td>
                 <td style="white-space:nowrap;">
-                  <button class="btn small ghost" data-action="edit-checklist" data-id="${cl.id}">Edit</button>
-                  <button class="btn small danger" data-action="delete-checklist" data-id="${cl.id}">Delete</button>
+                  <button class="btn small ghost" data-action="edit-checklist" data-id="${t.id}">Edit</button>
+                  <button class="btn small danger" data-action="delete-checklist" data-id="${t.id}">Delete</button>
                 </td>
               </tr>`;
             }).join('')}
@@ -1299,73 +1436,102 @@ function renderChecklists(){
         ${admin ? `<button class="btn primary" data-action="add-checklist">+ New checklist</button>` : ''}
       </div>
     </div>
-    ${vesselFilter}
+    ${vesselPicker}
+    <div class="cl-card">
+      ${list.length ? `<div class="subtabs">${list.map(c=>`<button type="button" class="subtab ${c.id===(cl&&cl.id)?'active':''}" data-action="cl-pick" data-checklist-id="${c.id}">${esc(checklistPillLabel(c))}${checklistIsDue(c, vesselId) ? '<span class="cl-due" title="Due"></span>' : ''}</button>`).join('')}</div>` : ''}
+      ${card}
+    </div>
 
-    <h2 class="section-title" style="font-size:18px;">Due this period</h2>
-    <p class="section-sub">Today's daily checks, this week's weekly checks and this month's monthly checks.</p>
-    <div class="table-wrap"><table>
-      <thead><tr><th>Checklist</th><th>Vessel</th><th>Period</th><th>Status</th><th>Last saved</th><th></th></tr></thead>
-      <tbody>
-        ${assignments.length===0 ? `<tr><td colspan="6"><div class="empty-note">${admin ? 'No checklists assigned to vessels yet.' : 'No checklists have been assigned to your vessels yet.'}</div></td></tr>` :
-          assignments.map(a=>{ const pg = a.run ? runProgress(a.run) : null; return `<tr>
-            <td><b>${esc(a.cl.name)}</b><div style="color:var(--ink-soft); font-size:11.5px;">${freqName(a.cl.frequency)}</div></td>
-            <td>${esc(vesselName(a.vesselId))}</td>
-            <td>${checklistPeriodLabel(a.period)}</td>
-            <td>${checklistRunStamp(a.run)}${pg ? `<div class="cl-hint" style="margin-top:4px;">${pg.done}/${pg.total} done</div>` : ''}</td>
-            <td class="num" style="font-size:12px;">${a.run ? fmtDateTime(a.run.updatedAt) + (a.run.completedBy ? `<div style="color:var(--ink-soft);">${esc(a.run.completedBy)}</div>` : '') : '—'}</td>
-            <td><button class="btn small ${a.run && a.run.status==='completed' ? 'ghost' : 'primary'}" data-action="open-checklist-run" data-checklist-id="${a.cl.id}" data-vessel-id="${a.vesselId}" data-period="${a.period}">${!a.run ? 'Start' : a.run.status==='completed' ? 'View' : 'Continue'}</button></td>
-          </tr>`; }).join('')}
-      </tbody>
-    </table></div>
-
+    ${stock.length ? `
     <div class="cl-section">
-      <h2 class="section-title">Stock levels</h2>
-      <p class="section-sub">Latest count recorded in a checklist for each stock item, against its par (what should be on hand). Items at or below their minimum, or below par when no minimum is set, are flagged as low.</p>
+      <h2 class="section-title">Stock levels${state.vessels.length>1 ? ` — ${esc(vesselName(vesselId))}` : ''}</h2>
+      <p class="section-sub">Latest count recorded for each stock item, against its par (what should be on hand). Items at or below their minimum, or below par when no minimum is set, are flagged as low.</p>
       <div class="table-wrap"><table>
-        <thead><tr><th>Item</th><th>Vessel</th><th class="num">On hand</th><th class="num">Par</th><th class="num">Min</th><th class="num">Change</th><th>Last counted</th><th>Status</th></tr></thead>
+        <thead><tr><th>Item</th><th class="num">On hand</th><th class="num">Par</th><th class="num">Min</th><th class="num">Change</th><th>Last counted</th><th>Status</th></tr></thead>
         <tbody>
-          ${stock.length===0 ? `<tr><td colspan="8"><div class="empty-note">No stock items on any checklist yet.</div></td></tr>` :
-            stock.map(r=>{
-              const diff = r.qty!=null && r.prevQty!=null ? r.qty - r.prevQty : null;
-              return `<tr>
-                <td><b>${esc(r.label)}</b><div style="color:var(--ink-soft); font-size:11.5px;">${esc(r.checklistName)}</div></td>
-                <td>${esc(vesselName(r.vesselId))}</td>
-                <td class="num"><b>${r.qty==null ? '—' : r.qty.toLocaleString()}</b> ${esc(r.unit)}</td>
-                <td class="num">${r.par==null ? '—' : r.par.toLocaleString()}</td>
-                <td class="num">${r.min==null ? '—' : r.min.toLocaleString()}</td>
-                <td class="num" style="${diff<0 ? 'color:var(--signal-red);' : diff>0 ? 'color:var(--seafoam);' : ''}">${diff==null ? '—' : (diff>0?'+':'') + diff.toLocaleString()}</td>
-                <td class="num" style="font-size:12px;">${r.date ? fmtDateTime(r.date) : 'Never'}</td>
-                <td>${stockStamp(r.status)}</td>
-              </tr>`;
-            }).join('')}
+          ${stock.map(r=>{
+            const diff = r.qty!=null && r.prevQty!=null ? r.qty - r.prevQty : null;
+            return `<tr>
+              <td><b>${esc(r.label)}</b><div style="color:var(--ink-soft); font-size:11.5px;">${esc(r.checklistName)}</div></td>
+              <td class="num"><b>${r.qty==null ? '—' : r.qty.toLocaleString()}</b> ${esc(r.unit)}</td>
+              <td class="num">${r.par==null ? '—' : r.par.toLocaleString()}</td>
+              <td class="num">${r.min==null ? '—' : r.min.toLocaleString()}</td>
+              <td class="num" style="${diff<0 ? 'color:var(--signal-red);' : diff>0 ? 'color:var(--seafoam);' : ''}">${diff==null ? '—' : (diff>0?'+':'') + diff.toLocaleString()}</td>
+              <td class="num" style="font-size:12px;">${r.date ? fmtDateTime(r.date) : 'Never'}</td>
+              <td>${stockStamp(r.status)}</td>
+            </tr>`;
+          }).join('')}
         </tbody>
       </table></div>
-    </div>
+    </div>` : ''}
 
     ${templates}
-
-    <div class="cl-section">
-      <h2 class="section-title">Recent submissions</h2>
-      <p class="section-sub">The last 25 checklists saved, newest first.</p>
-      <div class="table-wrap"><table>
-        <thead><tr><th>Checklist</th><th>Vessel</th><th>Date</th><th>Status</th><th>Saved</th><th></th></tr></thead>
-        <tbody>
-          ${recent.length===0 ? `<tr><td colspan="6"><div class="empty-note">Nothing submitted yet.</div></td></tr>` :
-            recent.map(r=>{ const pg = runProgress(r); return `<tr>
-              <td><b>${esc(r.checklistName || '—')}</b><div style="color:var(--ink-soft); font-size:11.5px;">${freqName(r.frequency)}</div></td>
-              <td>${esc(vesselName(r.vesselId))}</td>
-              <td>${r.date ? fmtDate(r.date) : checklistPeriodLabel(r.period)}${r.frequency!=='daily' ? `<div class="cl-hint">${checklistPeriodLabel(r.period)}</div>` : ''}</td>
-              <td>${checklistRunStamp(r)}<div class="cl-hint" style="margin-top:4px;">${pg.done}/${pg.total} done</div></td>
-              <td class="num" style="font-size:12px;">${fmtDateTime(r.updatedAt)}${r.completedBy ? `<div style="color:var(--ink-soft);">${esc(r.completedBy)}</div>` : ''}${r.notes ? `<div style="color:var(--ink-soft);  max-width:240px;">${esc(r.notes)}</div>` : ''}</td>
-              <td style="white-space:nowrap;">
-                <button class="btn small ghost" data-action="open-checklist-run" data-checklist-id="${r.checklistId}" data-vessel-id="${r.vesselId}" data-period="${r.period}">Open</button>
-                ${admin ? `<button class="btn small danger" data-action="delete-checklist-run" data-id="${r.id}">Delete</button>` : ''}
-              </td>
-            </tr>`; }).join('')}
-        </tbody>
-      </table></div>
-    </div>
   `;
+}
+
+function attachChecklistPageEvents(){
+  const sel = document.getElementById('clVesselSelect');
+  if(sel) sel.addEventListener('change', ()=>{
+    if(!confirmDiscardChecklist()){ sel.value = state.clView.vesselId; return; }
+    state.clView = { vesselId: sel.value, checklistId:null, period:null };
+    state.clSaved = false;
+    render();
+  });
+  const form = document.getElementById('clForm');
+  if(!form) return;
+  const markDirty = ()=>{ state.clDirty = true; const s = form.querySelector('.cl-saved'); if(s){ s.remove(); state.clSaved = false; } };
+  form.addEventListener('input', markDirty);
+  form.addEventListener('change', markDirty);
+  form.addEventListener('submit', submitChecklistRun);
+}
+
+async function submitChecklistRun(e){
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const view = resolveChecklistView();
+  const { vesselId, cl, period } = view;
+  if(!cl) return;
+  const items = checklistRunItems({ checklistId:cl.id, vesselId, period });
+  const entries = items.map(it=>{
+    const base = { itemId:it.id, label:it.label, type:it.type, unit:it.unit||'', par:it.par==null ? '' : it.par, min:it.min==null ? '' : it.min };
+    if(it.type==='heading') return base;
+    if(it.type==='stock'){
+      const raw = fd.get('qty_' + it.id);
+      return { ...base, qty: raw==='' || raw==null ? '' : Number(raw)||0 };
+    }
+    return { ...base, done: fd.get('done_' + it.id) === '1' };
+  });
+  const complete = entries.every(en => en.type==='heading' ? true : en.type==='stock' ? en.qty!=='' : en.done);
+  /* the chosen date decides which day / week / month this entry counts for */
+  const date = fd.get('runDate') || localISODate(new Date());
+  const newPeriod = checklistPeriod(cl.frequency, date);
+  if(newPeriod !== period && findChecklistRun(cl.id, vesselId, newPeriod)
+    && !confirm(`There's already a ${freqName(cl.frequency).toLowerCase()} entry saved for ${checklistPeriodLabel(newPeriod)}. Replace it with this one?`)) return;
+  const completedBy = String(fd.get('completedBy')||'').trim();
+  try{ if(completedBy) localStorage.setItem(CREW_NAME_KEY, completedBy); }catch(err){}
+  const data = {
+    checklistId:cl.id, checklistName:cl.name, frequency:cl.frequency,
+    vesselId, period:newPeriod, date, entries,
+    status: complete ? 'completed' : 'in-progress',
+    completedBy, notes:fd.get('notes')||'',
+    updatedAt:new Date().toISOString(),
+    updatedByRole: session ? session.role : ''
+  };
+  const saved = await persistArray('checklistRuns', fresh => {
+    const same = r => r.checklistId===data.checklistId && r.vesselId===data.vesselId;
+    /* a changed date moves the entry to its new period */
+    const prev = fresh.find(r=> same(r) && r.period===period);
+    const rest = fresh.filter(r=> !(same(r) && (r.period===period || r.period===data.period)));
+    return [...rest, { ...(prev||{}), id: prev ? prev.id : uid('cr'), ...data }];
+  });
+  if(!saved){ alert("Couldn't save the checklist — check your connection and try again."); return; }
+  state.clDirty = false;
+  state.clSaved = true;
+  state.clView.period = data.period === checklistPeriod(cl.frequency) ? null : data.period;
+  render();
+  if(e.submitter && e.submitter.value==='email' && cl.emailTo){
+    window.location.href = checklistEmail(cl, data);
+  }
 }
 
 function checklistItemRow(it){
@@ -1488,78 +1654,6 @@ function checklistRunItems(modal){
   });
   return items;
 }
-function checklistRunTitle(modal){
-  const cl = state.allChecklists.find(c=>c.id===modal.checklistId);
-  const run = findChecklistRun(modal.checklistId, modal.vesselId, modal.period);
-  return esc(cl ? cl.name : (run && run.checklistName) || 'Checklist');
-}
-function checklistRunActions(modal){
-  const cl = state.allChecklists.find(c=>c.id===modal.checklistId);
-  return `
-    <button type="button" class="btn ghost" data-action="close-modal">Cancel</button>
-    <button type="button" class="btn ghost" data-action="print-checklist">Print</button>
-    <button type="submit" class="btn${cl && cl.emailTo ? '' : ' primary'}" name="submitAction" value="save">Save</button>
-    ${cl && cl.emailTo ? `<button type="submit" class="btn primary" name="submitAction" value="email">Complete &amp; email</button>` : ''}
-  `;
-}
-function checklistRunForm(modal){
-  const cl = state.allChecklists.find(c=>c.id===modal.checklistId);
-  const run = findChecklistRun(modal.checklistId, modal.vesselId, modal.period);
-  const freq = cl ? cl.frequency : run && run.frequency;
-  const entryOf = id => run ? (run.entries||[]).find(en=>en.itemId===id) : null;
-  const items = checklistRunItems(modal);
-  const date = run && run.date ? run.date
-    : modal.period === checklistPeriod(freq) ? localISODate(new Date()) : periodStartDate(modal.period);
-  let crew = run ? run.completedBy || '' : '';
-  if(!run){ try{ crew = localStorage.getItem(CREW_NAME_KEY) || ''; }catch(e){} }
-  /* last count from any earlier run on this vessel, shown as a reference */
-  const lastCount = id => {
-    const prev = state.checklistRuns
-      .filter(r=>r.vesselId===modal.vesselId && !(r.checklistId===modal.checklistId && r.period===modal.period))
-      .map(r=>({ r, en:(r.entries||[]).find(en=>en.itemId===id) }))
-      .filter(x=>x.en && x.en.qty!=='' && x.en.qty!=null)
-      .sort((a,b)=> String(b.r.updatedAt||'').localeCompare(String(a.r.updatedAt||'')))[0];
-    return prev ? prev.en.qty : null;
-  };
-  const hasHeadings = items.some(it=>it.type==='heading');
-  const itemHtml = it=>{
-    if(it.type==='heading') return `<div class="cl-run-heading">${esc(it.label)}</div>`;
-    const en = entryOf(it.id);
-    if(it.type==='stock'){
-      const lc = lastCount(it.id);
-      const hints = [it.par!=='' && it.par!=null ? `Par ${esc(it.par)}` : '', it.min!=='' && it.min!=null ? `Min ${esc(it.min)}` : '', lc!=null ? `last count ${esc(lc)}` : ''].filter(Boolean).join(' · ');
-      return `
-        <div class="cl-run-item">
-          <div style="flex:1; min-width:0;">${esc(it.label)}${it.unit ? ` <span class="cl-hint">(${esc(it.unit)})</span>` : ''}
-            ${hints ? `<div class="cl-hint">${hints}</div>` : ''}
-          </div>
-          <input class="cl-qty" type="number" min="0" step="any" inputmode="decimal" name="qty_${esc(it.id)}" value="${en && en.qty!=='' && en.qty!=null ? esc(en.qty) : ''}" placeholder="Count">
-        </div>`;
-    }
-    return `<div class="cl-run-item"><label><input type="checkbox" name="done_${esc(it.id)}" value="1" ${en && en.done ? 'checked' : ''}> ${esc(it.label)}</label></div>`;
-  };
-  /* without headings, keep tasks and stock counts in their own sections */
-  const body = hasHeadings ? items.map(itemHtml).join('') : [
-    items.some(i=>i.type!=='stock') ? `<div class="cl-run-heading">Tasks</div>` + items.filter(i=>i.type!=='stock').map(itemHtml).join('') : '',
-    items.some(i=>i.type==='stock') ? `<div class="cl-run-heading">Stock count</div>` + items.filter(i=>i.type==='stock').map(itemHtml).join('') : ''
-  ].join('');
-  return `
-    <p style="margin:-10px 0 14px; color:var(--ink-soft); font-size:13px;">
-      ${esc(vesselName(modal.vesselId))} · ${freqName(freq)} · ${checklistPeriodLabel(modal.period)}
-      ${run ? `<br><span style="font-size:12px;">Last saved ${fmtDateTime(run.updatedAt)}${run.completedBy ? ` by ${esc(run.completedBy)}` : ''}</span>` : ''}
-    </p>
-    ${cl && cl.description ? `<p style="font-size:13px; margin:0 0 12px; white-space:pre-line;">${esc(cl.description)}</p>` : ''}
-    ${!cl ? `<p style="font-size:12px; color:var(--brass); margin:0 0 12px;">This checklist has been deleted; showing what was recorded.</p>` : ''}
-    ${fieldRow(
-      `<label class="field">Crew member<input name="completedBy" value="${esc(crew)}" placeholder="Name"></label>`,
-      `<label class="field">Date<input name="runDate" type="date" value="${date}" max="${localISODate(new Date())}" required></label>`
-    )}
-    ${body}
-    <label class="field" style="margin-top:14px;">Notes / observations<textarea name="notes" rows="2" placeholder="Anything the office should know…">${esc(run ? run.notes||'' : '')}</textarea></label>
-    <p style="font-size:12px; color:var(--ink-soft); margin:-4px 0 0;">You can save part-way and come back; it's marked completed once every task is ticked and every stock item counted.</p>
-  `;
-}
-
 function checklistEmail(cl, run){
   const v = state.allVessels.find(x=>x.id===run.vesselId) || {};
   const subject = `OCEANHUB — ${v.name || 'Vessel'} — ${run.checklistName} — ${run.date}`;
@@ -2621,7 +2715,7 @@ function renderModal(){
   const root = document.getElementById('modalRoot');
   const modal = state.modal;
   if(!modal){ root.innerHTML=''; return; }
-  let title = '', body = '', actions = null;
+  let title = '', body = '';
   const cancelBtn = `<button type="button" class="btn ghost" data-action="close-modal">Cancel</button>`;
   const saveBtn = `<button type="submit" class="btn primary">Save</button>`;
 
@@ -2655,7 +2749,6 @@ function renderModal(){
   else if(modal.type==='company'){ title = modal.data ? 'Edit company' : 'Add company'; body = companyForm(modal.data); }
   else if(modal.type==='contractor'){ title = modal.data ? 'Edit contractor' : 'Add contractor'; body = contractorForm(modal.data); }
   else if(modal.type==='checklist'){ title = modal.data ? 'Edit checklist' : 'New checklist'; body = checklistForm(modal.data); }
-  else if(modal.type==='checklist-run'){ title = checklistRunTitle(modal); body = checklistRunForm(modal); actions = checklistRunActions(modal); }
   else if(modal.type==='checklist-import'){ title = 'Import standard checklists'; body = checklistImportForm(); }
   else if(modal.type==='contractor-payment'){ title = modal.data ? 'Edit payment' : 'Add payment'; body = contractorPaymentForm(modal.data, modal.data ? null : lastTravelDefaults(modal.id)); }
 
@@ -2665,7 +2758,7 @@ function renderModal(){
         <form id="modalForm">
           <h3>${title}</h3>
           ${body}
-          <div class="modal-actions">${actions || cancelBtn + saveBtn}</div>
+          <div class="modal-actions">${cancelBtn}${saveBtn}</div>
         </form>
       </div>
     </div>
@@ -2683,11 +2776,6 @@ function attachModalEvents(){
   const form = document.getElementById('modalForm');
   if(form) form.addEventListener('submit', handleFormSubmit);
   wireChecklistItemEditor();
-  document.querySelectorAll('[data-action="print-checklist"]').forEach(b=>b.addEventListener('click', ()=>{
-    document.body.classList.add('print-modal');
-    window.addEventListener('afterprint', ()=> document.body.classList.remove('print-modal'), { once:true });
-    window.print();
-  }));
   const photoInput = document.getElementById('vesselPhotoInput');
   if(photoInput){
     photoInput.addEventListener('change', async (e)=>{
@@ -3055,7 +3143,7 @@ async function handleFormSubmit(e){
   if(e.target.flushPendingExpense) e.target.flushPendingExpense();
   const fd = new FormData(e.target);
   const modal = state.modal;
-  let targetKey = null, mutateFn = null, nextModal = null, emailAfterSave = null;
+  let targetKey = null, mutateFn = null, nextModal = null;
 
   if(modal.type==='vessel'){
     const data = { name:fd.get('name'), type:fd.get('type'), reg:fd.get('reg'), status:fd.get('status'), engineHours:Number(fd.get('engineHours'))||0, notes:fd.get('notes')||'', photo:fd.get('photo')||'', ownerName:fd.get('ownerName')||'', ownerPhone:fd.get('ownerPhone')||'', ownerEmail:fd.get('ownerEmail')||'' };
@@ -3304,48 +3392,6 @@ async function handleFormSubmit(e){
       ? fresh.map(c=> c.id===editId ? { ...c, ...data } : c)
       : [...fresh, { id:uid('cl'), createdDate:localISODate(new Date()), ...data }];
   }
-  else if(modal.type==='checklist-run'){
-    const items = checklistRunItems(modal);
-    const entries = items.map(it=>{
-      const base = { itemId:it.id, label:it.label, type:it.type, unit:it.unit||'', par:it.par==null ? '' : it.par, min:it.min==null ? '' : it.min };
-      if(it.type==='heading') return base;
-      if(it.type==='stock'){
-        const raw = fd.get('qty_' + it.id);
-        return { ...base, qty: raw==='' || raw==null ? '' : Number(raw)||0 };
-      }
-      return { ...base, done: fd.get('done_' + it.id) === '1' };
-    });
-    const complete = entries.every(en => en.type==='heading' ? true : en.type==='stock' ? en.qty!=='' : en.done);
-    const cl = state.allChecklists.find(c=>c.id===modal.checklistId);
-    const existing = findChecklistRun(modal.checklistId, modal.vesselId, modal.period);
-    const frequency = cl ? cl.frequency : (existing ? existing.frequency : 'daily');
-    /* the chosen date decides which day / week / month this submission counts for */
-    const date = fd.get('runDate') || localISODate(new Date());
-    const period = checklistPeriod(frequency, date);
-    if(period !== modal.period && findChecklistRun(modal.checklistId, modal.vesselId, period)
-      && !confirm(`There's already a ${freqName(frequency).toLowerCase()} checklist saved for ${checklistPeriodLabel(period)}. Replace it with this one?`)) return;
-    const completedBy = String(fd.get('completedBy')||'').trim();
-    try{ if(completedBy) localStorage.setItem(CREW_NAME_KEY, completedBy); }catch(e){}
-    const data = {
-      checklistId:modal.checklistId, checklistName: cl ? cl.name : (existing ? existing.checklistName : ''),
-      frequency, vesselId:modal.vesselId, period, date, entries,
-      status: complete ? 'completed' : 'in-progress',
-      completedBy, notes:fd.get('notes')||'',
-      updatedAt:new Date().toISOString(),
-      updatedByRole: session ? session.role : ''
-    };
-    targetKey = 'checklistRuns';
-    mutateFn = fresh => {
-      const same = r => r.checklistId===data.checklistId && r.vesselId===data.vesselId;
-      /* a changed date moves the record to its new period */
-      const prev = fresh.find(r=> same(r) && r.period===modal.period);
-      const rest = fresh.filter(r=> !(same(r) && (r.period===modal.period || r.period===data.period)));
-      return [...rest, { ...(prev||{}), id: prev ? prev.id : uid('cr'), ...data }];
-    };
-    if(e.submitter && e.submitter.value==='email' && cl && cl.emailTo){
-      emailAfterSave = checklistEmail(cl, data);
-    }
-  }
   else if(modal.type==='checklist-import'){
     const lists = fd.getAll('lists');
     const allVessels = fd.get('allVessels') === '1';
@@ -3369,7 +3415,6 @@ async function handleFormSubmit(e){
   }
   state.modal = nextModal;
   render();
-  if(emailAfterSave) window.location.href = emailAfterSave;
 }
 
 /* ============================= GLOBAL ACTIONS ============================= */
@@ -3476,8 +3521,8 @@ function attachContentEvents(){
           }
           break;
         }
-        case 'open-checklists': state.activeTab = 'checklists'; render(); window.scrollTo(0,0); break;
-        case 'back-to-dashboard': state.activeTab = 'dashboard'; render(); break;
+        case 'open-checklists': state.activeTab = 'checklists'; state.clSaved = false; render(); window.scrollTo(0,0); break;
+        case 'back-to-dashboard': if(confirmDiscardChecklist()){ state.activeTab = 'dashboard'; render(); } break;
         case 'add-checklist': state.modal = { type:'checklist', data:null }; renderModal(); break;
         case 'import-checklists': state.modal = { type:'checklist-import' }; renderModal(); break;
         case 'edit-checklist': state.modal = { type:'checklist', data: state.allChecklists.find(c=>c.id===id) }; renderModal(); break;
@@ -3487,9 +3532,21 @@ function attachContentEvents(){
             render();
           }
           break;
-        case 'open-checklist-run':
-          state.modal = { type:'checklist-run', checklistId:el.dataset.checklistId, vesselId:el.dataset.vesselId, period:el.dataset.period };
-          renderModal();
+        case 'cl-pick':
+          if(el.dataset.checklistId !== state.clView.checklistId && confirmDiscardChecklist()){
+            state.clView.checklistId = el.dataset.checklistId; state.clView.period = null; state.clSaved = false; render();
+          }
+          break;
+        case 'cl-open':
+          if(confirmDiscardChecklist()){ state.clView.period = el.dataset.period; state.clSaved = false; render(); }
+          break;
+        case 'cl-current':
+          if(confirmDiscardChecklist()){ state.clView.period = null; state.clSaved = false; render(); }
+          break;
+        case 'print-checklist':
+          document.body.classList.add('print-checklist');
+          window.addEventListener('afterprint', ()=> document.body.classList.remove('print-checklist'), { once:true });
+          window.print();
           break;
         case 'delete-checklist-run':
           if(confirm('Delete this checklist submission?')){
@@ -3517,8 +3574,7 @@ function attachContentEvents(){
   if(fv) fv.addEventListener('change', ()=>{ state.filters.vessel=fv.value; render(); });
   if(fc) fc.addEventListener('change', ()=>{ state.filters.category=fc.value; render(); });
   if(fs) fs.addEventListener('change', ()=>{ state.filters.status=fs.value; render(); });
-  const fcv = document.getElementById('filterChecklistVessel');
-  if(fcv) fcv.addEventListener('change', ()=>{ state.filters.clVessel=fcv.value; render(); });
+  attachChecklistPageEvents();
 }
 
 /* ============================= RENDER DISPATCH ============================= */
