@@ -128,6 +128,7 @@
   nav.tabs button:hover{color:var(--ink);}
   nav.tabs button.active{color:var(--navy); border-bottom-color:var(--navy-light);}
   nav.tabs button svg{width:15px;height:15px;}
+  .nav-badge{background:var(--navy-light); color:#00272a; font-size:10.5px; font-weight:800; border-radius:999px; padding:1px 7px; margin-left:2px;}
 
   main{padding-top:24px;}
   h2.section-title{
@@ -302,6 +303,12 @@
   .cl-run-item .cl-qty{width:88px; flex-shrink:0; text-align:right;}
   .stock-qty{flex:0 0 auto; min-width:34px; text-align:center; font-size:12px; font-weight:800; font-variant-numeric:tabular-nums; color:var(--navy); background:var(--brand-tint); border:1px solid var(--border); border-radius:7px; padding:3px 7px; line-height:1.3;}
   .cl-actions{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:4px;}
+  .date-field{position:relative; display:flex;}
+  .date-field .df-text{flex:1; min-width:0; width:100%; padding-right:40px; font-variant-numeric:tabular-nums;}
+  .date-field .df-native{position:absolute; left:0; bottom:0; width:1px; height:1px; opacity:0; border:0; padding:0; pointer-events:none;}
+  .date-field .df-btn{position:absolute; right:4px; top:50%; transform:translateY(-50%); width:32px; height:32px; display:flex; align-items:center; justify-content:center; background:none; border:none; border-radius:6px; color:var(--ink-soft); cursor:pointer;}
+  .date-field .df-btn:hover{background:var(--paper-2); color:var(--navy);}
+  .date-field .df-btn svg{width:17px; height:17px;}
   .cl-meta-row{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
   .cl-meta-row input{min-width:0; width:100%;}
   .cl-saved{font-size:13px; font-weight:700; color:var(--seafoam);}
@@ -804,8 +811,54 @@ function fmtCurrency(n){
 }
 function fmtDate(iso){
   if(!iso) return '—';
-  const dt = new Date(iso+'T00:00:00');
-  return dt.toLocaleDateString('en-ZA', {day:'2-digit', month:'short', year:'numeric'});
+  const [y, m, d] = String(iso).slice(0,10).split('-');
+  return d && m && y ? `${d}/${m}/${y}` : String(iso);
+}
+/* dd/mm/yyyy ⇄ yyyy-mm-dd for the date fields; '' when not a real date */
+function dmyToIso(text){
+  const m = /^\s*(\d{1,2})\/(\d{1,2})\/(\d{4})\s*$/.exec(text || '');
+  if(!m) return '';
+  const d = Number(m[1]), mo = Number(m[2]), y = Number(m[3]);
+  const dt = new Date(y, mo-1, d);
+  if(dt.getFullYear()!==y || dt.getMonth()!==mo-1 || dt.getDate()!==d) return '';
+  return `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+}
+/* A dd/mm/yyyy text box with a calendar button. The ISO value is submitted under
+   `name` from a hidden input, so form handlers read the same yyyy-mm-dd as before. */
+function dateField(name, iso, opts){
+  opts = opts || {};
+  return `<span class="date-field">`
+    + `<input type="text" class="df-text" inputmode="numeric" placeholder="dd/mm/yyyy" autocomplete="off" value="${iso ? fmtDate(iso) : ''}" ${opts.required ? 'required' : ''} ${opts.max ? `data-max="${opts.max}"` : ''}>`
+    + `<input type="date" class="df-native" tabindex="-1" aria-hidden="true" value="${esc(iso||'')}" ${opts.max ? `max="${opts.max}"` : ''}>`
+    + `<input type="hidden" name="${name}" value="${esc(iso||'')}">`
+    + `<button type="button" class="df-btn" title="Pick a date" aria-label="Pick a date"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></button>`
+    + `</span>`;
+}
+/* One set of listeners for every date field, wherever it's rendered. */
+function wireDateFields(){
+  const parts = el => { const f = el.closest('.date-field'); return f && { f, text:f.querySelector('.df-text'), native:f.querySelector('.df-native'), hidden:f.querySelector('input[type=hidden]') }; };
+  const check = p => {
+    const iso = dmyToIso(p.text.value);
+    const max = p.text.dataset.max;
+    p.text.setCustomValidity(p.text.value.trim() && !iso ? 'Enter a date as dd/mm/yyyy.'
+      : iso && max && iso > max ? `Date can't be after ${fmtDate(max)}.` : '');
+    p.hidden.value = iso;
+    if(iso) p.native.value = iso;
+  };
+  document.addEventListener('input', e=>{ if(e.target.classList && e.target.classList.contains('df-text')) check(parts(e.target)); });
+  document.addEventListener('change', e=>{
+    if(!e.target.classList || !e.target.classList.contains('df-native')) return;
+    const p = parts(e.target);
+    p.text.value = e.target.value ? fmtDate(e.target.value) : '';
+    check(p);
+    p.text.dispatchEvent(new Event('input', { bubbles:true }));
+  });
+  document.addEventListener('click', e=>{
+    const btn = e.target.closest && e.target.closest('.df-btn');
+    if(!btn) return;
+    const native = parts(btn).native;
+    try{ native.showPicker(); }catch(err){ native.focus(); native.click(); }
+  });
 }
 function daysUntil(iso){
   const today = new Date(); today.setHours(0,0,0,0);
@@ -971,7 +1024,7 @@ function renderHeaderMeta(){
     : session.role === 'admin' ? 'Admin'
     : esc((currentCompany() || {}).name || 'Owner / Operator');
   const n = state.vessels.length;
-  el.innerHTML = `Log date <span class="clock">${now.toLocaleDateString('en-ZA',{day:'2-digit',month:'short',year:'numeric'})}</span><br>`
+  el.innerHTML = `Log date <span class="clock">${fmtDate(localISODate(now))}</span><br>`
     + `${n} vessel${n===1?'':'s'} ${session && session.role==='owner' ? 'in your account' : 'on register'}`
     + (who ? ` · <span class="clock">${who}</span>` : '');
 }
@@ -981,6 +1034,7 @@ const TABS = [
   { id:'dashboard', label:'Dashboard', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>' },
   { id:'vessels', label:'Vessels', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l1.5-6h15L21 17"/><path d="M6 11V6h8l3 5"/><path d="M2 20c2 1.5 4 1.5 6 0s4-1.5 6 0 4 1.5 6 0"/></svg>' },
   { id:'maintenance', label:'Maintenance', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a4 4 0 1 0-5.4 5.4L2 19v3h3l7.3-7.3a4 4 0 0 0 5.4-5.4l-2.8 2.8-2-2z"/></svg>' },
+  { id:'checklists', label:'Checklists', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 3v2h6V3"/><path d="m9 11 1.5 1.5L13.5 9.5"/><path d="M9 16h6"/></svg>' },
   { id:'crew', label:'Crew', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20c0-3.5 3-6 6.5-6s6.5 2.5 6.5 6"/><circle cx="18" cy="8" r="2.6"/><path d="M15.5 14.3c2.9.4 5 2.6 5 5.7"/></svg>' },
 ];
 const ADMIN_TABS = [
@@ -994,8 +1048,9 @@ function navTabs(){
 }
 function renderNav(){
   const nav = document.getElementById('tabNav');
-  nav.innerHTML = navTabs().map(t=>`<button class="${(state.activeTab===t.id || (state.activeTab==='checklists' && t.id==='dashboard'))?'active':''}" data-tab="${t.id}">${t.icon}${t.label}</button>`).join('');
-  nav.querySelectorAll('button').forEach(b=>b.addEventListener('click', ()=>{ if(!confirmDiscardChecklist()) return; state.activeTab = b.dataset.tab; render(); }));
+  const clDue = checklistAssignments().filter(a=>!a.run || a.run.status!=='completed').length;
+  nav.innerHTML = navTabs().map(t=>`<button class="${state.activeTab===t.id?'active':''}" data-tab="${t.id}">${t.icon}${t.label}${t.id==='checklists' && clDue ? `<span class="nav-badge">${clDue}</span>` : ''}</button>`).join('');
+  nav.querySelectorAll('button').forEach(b=>b.addEventListener('click', ()=>{ if(!confirmDiscardChecklist()) return; state.activeTab = b.dataset.tab; state.clSaved = false; render(); }));
 }
 
 /* ============================= DASHBOARD ============================= */
@@ -1027,7 +1082,6 @@ function renderDashboard(){
         <p class="section-sub" style="margin-bottom:0;">Overview across the register — maintenance and crew certification.</p>
       </div>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        <button class="btn primary" data-action="open-checklists">Checklists${clOutstanding ? ` (${clOutstanding} due)` : ''}</button>
         <button class="btn ghost" data-action="logout">Sign out</button>
       </div>
     </div>
@@ -1258,7 +1312,7 @@ function checklistRunStamp(run){
 function fmtDateTime(iso){
   if(!iso) return '—';
   const dt = new Date(iso);
-  return dt.toLocaleDateString('en-ZA', {day:'2-digit', month:'short'}) + ' ' + dt.toLocaleTimeString('en-ZA', {hour:'2-digit', minute:'2-digit'});
+  return fmtDate(localISODate(dt)) + ' ' + dt.toLocaleTimeString('en-ZA', {hour:'2-digit', minute:'2-digit', hour12:false});
 }
 
 /* Checklists page: one card per vessel with a pill per checklist (Daily / Weekly /
@@ -1363,7 +1417,7 @@ function renderChecklists(){
         </div>
         <div class="cl-meta-row">
           <label class="field">Crew member<input name="completedBy" value="${esc(crew)}" placeholder="Name"></label>
-          <label class="field">Date<input name="runDate" type="date" value="${date}" max="${localISODate(new Date())}" required></label>
+          <label class="field">Date${dateField('runDate', date, { required:true, max:localISODate(new Date()) })}</label>
         </div>
         <div class="cl-items">${itemsHtml}</div>
         <label class="field" style="margin-top:12px;">Notes / observations<textarea name="notes" rows="3" placeholder="Anything the office should know…">${esc(run ? run.notes||'' : '')}</textarea></label>
@@ -1432,7 +1486,6 @@ function renderChecklists(){
         <p class="section-sub" style="margin-bottom:0;">Daily, weekly and monthly checks for each vessel, with stock counts.</p>
       </div>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        <button class="btn ghost" data-action="back-to-dashboard">&larr; Dashboard</button>
         ${admin ? `<button class="btn primary" data-action="add-checklist">+ New checklist</button>` : ''}
       </div>
     </div>
@@ -1656,7 +1709,7 @@ function checklistRunItems(modal){
 }
 function checklistEmail(cl, run){
   const v = state.allVessels.find(x=>x.id===run.vesselId) || {};
-  const subject = `OCEANHUB — ${v.name || 'Vessel'} — ${run.checklistName} — ${run.date}`;
+  const subject = `OCEANHUB — ${v.name || 'Vessel'} — ${run.checklistName} — ${fmtDate(run.date)}`;
   const entries = run.entries || [];
   const tasks = entries.filter(en=>en.type==='task');
   const stock = entries.filter(en=>en.type==='stock');
@@ -1919,7 +1972,7 @@ function tenderMaintenanceForm(m){
         <option value="unscheduled" ${m.category==='unscheduled'?'selected':''}>Unscheduled</option>
         <option value="daily" ${m.category==='daily'?'selected':''}>Daily</option>
       </select></label>`,
-      `<label class="field">Due date<input name="dueDate" type="date" value="${m.dueDate}" required></label>`
+      `<label class="field">Due date${dateField('dueDate', m.dueDate, { required:true })}</label>`
     )}
     ${fieldRow(
       `<label class="field">Priority<select name="priority">
@@ -2179,7 +2232,7 @@ function maintenanceForm(m){
       </select></label>`
     )}
     ${fieldRow(
-      `<label class="field">Due date<input name="dueDate" type="date" value="${m.dueDate}" required></label>`,
+      `<label class="field">Due date${dateField('dueDate', m.dueDate, { required:true })}</label>`,
       `<label class="field">Priority<select name="priority">
         <option value="low" ${m.priority==='low'?'selected':''}>Low</option>
         <option value="medium" ${m.priority==='medium'?'selected':''}>Medium</option>
@@ -2217,7 +2270,7 @@ function qualForm(q){
   q = q || { name:'', expiry:'' };
   return `
     <label class="field">Qualification / certificate name<input name="name" value="${esc(q.name)}" placeholder="e.g. STCW Basic Safety Training" required></label>
-    <label class="field">Expiry date<input name="expiry" type="date" value="${q.expiry||''}" required></label>
+    <label class="field">Expiry date${dateField('expiry', q.expiry, { required:true })}</label>
   `;
 }
 
@@ -2460,7 +2513,7 @@ function contractorPaymentForm(p, defaults){
 
     <div class="mini-row" style="padding:4px 0 14px; border-top:1px dashed var(--paper-line); margin-top:2px;"><span>Total payment amount</span><b id="payTotalAmount">${fmtCurrency(total)}</b></div>
 
-    <label class="field">Date<input name="date" type="date" value="${esc(p.date||'')}"></label>
+    <label class="field">Date${dateField('date', p.date)}</label>
     <label class="field">Status<select name="status">
       <option value="outstanding" ${p.status==='outstanding'?'selected':''}>Outstanding</option>
       <option value="paid" ${p.status==='paid'?'selected':''}>Paid</option>
@@ -2600,7 +2653,7 @@ async function sendContractorStatement(id, channel){
   if(outstanding.length === 0){ alert('No outstanding payments for this contractor.'); return; }
 
   const total = outstanding.reduce((s,p)=>s+(Number(p.amount)||0),0);
-  const todayStr = new Date().toLocaleDateString('en-ZA', {day:'2-digit', month:'short', year:'numeric'});
+  const todayStr = fmtDate(localISODate(new Date()));
 
   let doc;
   try{
@@ -2635,7 +2688,7 @@ async function sendContractorStatement(id, channel){
       if(expenses.length) desc += ` + expenses: ${expenses.map(x=>`${x.description||'Expense'} ${fmtCurrency(x.amount||0)}`).join(', ')}`;
       const lines = doc.splitTextToSize(desc, 108);
       doc.text(lines, 14, y);
-      doc.text(p.date || '', 130, y);
+      doc.text(p.date ? fmtDate(p.date) : '', 130, y);
       doc.text(fmtCurrency(p.amount), 170, y);
       y += Math.max(6, lines.length * 6);
       if(y > 270){ doc.addPage(); y = 20; }
@@ -3405,9 +3458,16 @@ async function handleFormSubmit(e){
       monthly:{ name:'Monthly checklist', frequency:'monthly', description:'General yacht best-practice monthly checks.' },
       stock:{ name:'Stock guide', frequency:fd.get('stockFrequency') || 'weekly', description:'Exterior maintenance locker. Count what is on hand; par is what should be there.' }
     };
-    const created = lists.map(k=>({ id:uid('cl'), createdDate:localISODate(new Date()), ...meta[k], emailTo, allVessels, vesselIds, items: standardChecklistItems(k) }));
+    /* skip any list a chosen vessel already has, so importing twice can't duplicate it */
+    const overlaps = cl => allVessels || cl.allVessels || (cl.vesselIds||[]).some(id => vesselIds.includes(id));
+    const alreadyHas = k => state.allChecklists.some(cl => cl.name === meta[k].name && overlaps(cl));
+    const skipped = lists.filter(alreadyHas);
+    const toImport = lists.filter(k => !alreadyHas(k));
+    if(toImport.length === 0){ alert('Those vessels already have these lists, so nothing was imported.'); return; }
+    if(skipped.length) alert(`Skipped ${skipped.map(k=>meta[k].name).join(', ')} — already set up for the chosen vessel(s).`);
+    const created = toImport.map(k=>({ id:uid('cl'), createdDate:localISODate(new Date()), ...meta[k], emailTo, allVessels, vesselIds, items: standardChecklistItems(k) }));
     targetKey = 'checklists';
-    mutateFn = fresh => [...fresh, ...created];
+    mutateFn = fresh => [...fresh, ...created.filter(c => !fresh.some(x => x.name === c.name && (c.allVessels || x.allVessels || (x.vesselIds||[]).some(id => c.vesselIds.includes(id)))))];
   }
 
   if(targetKey && mutateFn){
@@ -3521,8 +3581,6 @@ function attachContentEvents(){
           }
           break;
         }
-        case 'open-checklists': state.activeTab = 'checklists'; state.clSaved = false; render(); window.scrollTo(0,0); break;
-        case 'back-to-dashboard': if(confirmDiscardChecklist()){ state.activeTab = 'dashboard'; render(); } break;
         case 'add-checklist': state.modal = { type:'checklist', data:null }; renderModal(); break;
         case 'import-checklists': state.modal = { type:'checklist-import' }; renderModal(); break;
         case 'edit-checklist': state.modal = { type:'checklist', data: state.allChecklists.find(c=>c.id===id) }; renderModal(); break;
@@ -3590,8 +3648,7 @@ function render(){
   applyScoping();
   renderHeaderMeta();
   renderNav();
-  /* Checklists has no nav tab — it's opened from the dashboard button. */
-  const allowed = navTabs().map(t=>t.id).concat('checklists');
+  const allowed = navTabs().map(t=>t.id);
   if(!allowed.includes(state.activeTab)) state.activeTab = 'dashboard';
   const main = document.getElementById('mainContent');
   switch(state.activeTab){
@@ -3625,6 +3682,7 @@ document.getElementById('themeToggle').addEventListener('click', ()=>{
   renderThemeToggle();
 });
 renderThemeToggle();
+wireDateFields();
 
 bootstrap();
 
