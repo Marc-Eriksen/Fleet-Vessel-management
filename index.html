@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>OCEANHUB — Vessel Manager</title>
-<meta name="theme-color" content="#0B2436">
+<meta name="theme-color" content="#026b71">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
@@ -12,282 +12,285 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="OCEANHUB">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Space+Mono:wght@400;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script>
   try{ if(localStorage.getItem('oceanhub_theme')==='dark') document.documentElement.dataset.theme='dark'; }catch(e){}
 </script>
 <style>
+  /* Colours and type follow the OCEANHUB Vessel Manager app: system font, teal brand,
+     warm-grey surfaces. Token names are kept from the original theme:
+     navy = brand teal, brass = warning amber, seafoam = good green, signal-red = critical. */
   :root{
-    --navy-deep:#0B2436;
-    --navy:#123A52;
-    --navy-light:#1C4E6B;
-    --paper:#F1E9D8;
-    --paper-2:#EBE0C9;
-    --paper-line:#D9CBB0;
-    --brass:#B8862E;
-    --brass-light:#D9A94A;
-    --signal-red:#A3372E;
-    --seafoam:#2F6E62;
-    --ink:#1C2B2E;
-    --ink-soft:#5A6B6E;
-    --white-card:#FFFFFF;
-    --shadow: 0 2px 8px rgba(11,36,54,0.12);
-    --page-bg:#FFFFFF;
-    --field-bg:#FFFFFF;
-    --heading:var(--navy-deep);
-    --accent:var(--navy);
+    color-scheme:light;
+    --font:system-ui,-apple-system,"Segoe UI",sans-serif;
+    --navy-deep:#014c50;
+    --navy:#026b71;
+    --navy-light:#0aafb8;
+    --brand-tint:#e8f7f7;
+    --paper:#f9f9f7;
+    --paper-2:#f3f3ef;
+    --paper-line:#e1e0d9;
+    --border:rgba(11,11,11,0.10);
+    --brass:#8a5b00;
+    --brass-bg:rgba(250,178,25,0.16);
+    --signal-red:#d03b3b;
+    --seafoam:#006300;
+    --ink:#0b0b0b;
+    --ink-soft:#52514e;
+    --ink-muted:#898781;
+    --white-card:#ffffff;
+    --shadow:none;
+    --page-bg:#f9f9f7;
+    --field-bg:#fcfcfb;
+    --heading:#0b0b0b;
+    --accent:#026b71;
   }
   /* Night mode — toggled from the header switch, remembered per device. */
   :root[data-theme="dark"]{
     color-scheme:dark;
-    --paper:#1A2C37;
-    --paper-2:#1C2F3A;
-    --paper-line:#2C4250;
-    --signal-red:#E0675B;
-    --seafoam:#5FB3A1;
-    --brass:#C9973A;
-    --ink:#E6E1D6;
-    --ink-soft:#9FB0B6;
-    --white-card:#15252F;
-    --shadow: 0 2px 10px rgba(0,0,0,0.45);
-    --page-bg:#0D1920;
-    --field-bg:#0F1E27;
-    --heading:#F1E9D8;
-    --accent:#8FB8CF;
+    --navy:#34abb2;
+    --navy-light:#61cbd1;
+    --brand-tint:#183739;
+    --paper:#1a1a19;
+    --paper-2:#262625;
+    --paper-line:#2c2c2a;
+    --border:rgba(255,255,255,0.10);
+    --brass:#fab219;
+    --signal-red:#e66767;
+    --seafoam:#0ca30c;
+    --ink:#ffffff;
+    --ink-soft:#c3c2b7;
+    --white-card:#222221;
+    --page-bg:#0d0d0d;
+    --field-bg:#1a1a19;
+    --heading:#ffffff;
+    --accent:#34abb2;
   }
   *{box-sizing:border-box;}
   body{
     margin:0;
-    font-family:'Inter',system-ui,sans-serif;
+    font-family:var(--font);
+    -webkit-font-smoothing:antialiased;
     background: var(--page-bg);
     color: var(--ink);
   }
+  button, input, select, textarea{font-family:inherit;}
   .wrap{max-width:1180px;margin:0 auto;padding:0 24px 80px;}
 
   /* ===== Header ===== */
   header.top{
-    background: linear-gradient(180deg, var(--navy-deep), var(--navy));
-    color:#EFE7D6;
+    background:linear-gradient(135deg, #026b71 0%, #014c50 100%);
+    color:#fff;
     position:relative;
     overflow:hidden;
-    border-bottom:3px solid var(--brass);
+    box-shadow:0 2px 10px rgba(0,0,0,0.15);
     padding-top:env(safe-area-inset-top);
   }
   header.top .contour{
-    position:absolute; inset:0; opacity:0.14; pointer-events:none;
+    position:absolute; inset:0; opacity:0.10; pointer-events:none;
   }
   header.top .inner{
-    position:relative; max-width:1180px; margin:0 auto; padding:28px 24px 22px;
-    display:flex; align-items:flex-end; justify-content:space-between; flex-wrap:wrap; gap:12px;
+    position:relative; max-width:1180px; margin:0 auto; padding:22px 24px 18px;
+    display:flex; align-items:center; flex-wrap:wrap; gap:12px 18px;
   }
-  .brandmark{display:flex; align-items:center; gap:14px;}
+  .brandmark{display:flex; align-items:center; gap:11px; margin-right:auto;}
+  .brandmark img{border-radius:50%; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,0.25);}
   .brandmark svg{flex-shrink:0;}
   .brand-title{
-    font-family:'Inter',sans-serif; font-weight:700;
-    font-size:30px; letter-spacing:4px; line-height:1.1; margin:0; color:#F6EFDE;
+    font-weight:800; font-size:24px; letter-spacing:0.5px; line-height:1; margin:0; color:#fff;
   }
-  .brand-hub{color:#7EC8EA;}
+  .brand-hub{color:#0aafb8;}
   .brand-sub{
-    font-family:'Inter',sans-serif; font-size:14px; font-weight:500; letter-spacing:0.5px;
-    color: var(--brass-light); margin:2px 0 0;
+    font-size:11px; letter-spacing:1.5px; text-transform:uppercase; opacity:0.75; color:#fff; margin:4px 0 0;
   }
   .header-meta{
-    font-family:'Space Mono',monospace; font-size:12px; color:#B9C7CE; text-align:right;
+    font-size:12.5px; color:rgba(255,255,255,0.85); text-align:right; font-variant-numeric:tabular-nums;
   }
   .theme-toggle{
-    position:absolute; top:14px; right:24px; display:flex; align-items:center; gap:7px;
-    font-family:'Inter',sans-serif; font-size:12px; font-weight:600; letter-spacing:0.3px;
-    color:#F6EFDE; background:rgba(246,239,222,0.08); border:1px solid rgba(246,239,222,0.28);
-    border-radius:999px; padding:5px 12px 5px 9px; cursor:pointer;
+    display:flex; align-items:center; gap:7px;
+    font-size:12px; font-weight:600;
+    color:#fff; background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.25);
+    border-radius:8px; padding:6px 11px 6px 9px; cursor:pointer;
   }
-  .theme-toggle:hover{background:rgba(246,239,222,0.16);}
-  .theme-toggle svg{width:15px; height:15px; color:var(--brass-light);}
-  .header-meta .clock{color:var(--brass-light); font-weight:700;}
+  .theme-toggle:hover{background:rgba(255,255,255,0.2);}
+  .theme-toggle svg{width:15px; height:15px; color:#fff;}
+  .header-meta .clock{color:#fff; font-weight:700;}
 
   nav.tabs{
-    display:flex; gap:2px; background:var(--navy-deep); padding:0 24px;
-    max-width:1180px; margin:0 auto; flex-wrap:wrap;
+    display:flex; gap:2px; background:var(--field-bg); padding:0 24px;
+    border-bottom:1px solid var(--border);
+    max-width:none; margin:0 auto; flex-wrap:wrap;
   }
   nav.tabs button{
-    font-family:'Inter',sans-serif; font-size:13.5px; font-weight:600; letter-spacing:0.3px;
-    color:#A9BCC5; background:transparent; border:none; padding:13px 18px;
+    font-size:13px; font-weight:600;
+    color:var(--ink-soft); background:transparent; border:none; padding:12px 14px;
     cursor:pointer; border-bottom:3px solid transparent; display:flex; align-items:center; gap:7px;
   }
-  nav.tabs button:hover{color:#F6EFDE;}
-  nav.tabs button.active{color:#F6EFDE; border-bottom-color:var(--brass);}
+  nav.tabs button:hover{color:var(--ink);}
+  nav.tabs button.active{color:var(--navy); border-bottom-color:var(--navy-light);}
   nav.tabs button svg{width:15px;height:15px;}
 
-  main{padding-top:28px;}
+  main{padding-top:24px;}
   h2.section-title{
-    font-family:'Libre Baskerville',serif; font-size:22px; margin:0 0 4px; color:var(--heading);
+    font-size:20px; font-weight:800; margin:0 0 4px; color:var(--heading);
   }
-  p.section-sub{ margin:0 0 20px; color:var(--ink-soft); font-size:13.5px; }
+  p.section-sub{ margin:0 0 18px; color:var(--ink-soft); font-size:13px; }
 
   /* ===== Cards / KPIs ===== */
-  .kpi-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:14px; margin-bottom:28px;}
+  .kpi-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; margin-bottom:26px;}
   .kpi{
-    background:var(--white-card); border:1px solid var(--paper-line); border-radius:6px;
-    padding:16px 18px; box-shadow:var(--shadow); position:relative;
+    background:var(--white-card); border:1px solid var(--border); border-radius:10px;
+    padding:12px 14px; position:relative;
   }
-  .kpi .label{font-size:11px; text-transform:uppercase; letter-spacing:1.2px; color:var(--ink-soft); font-weight:600;}
-  .kpi .value{font-family:'Space Mono',monospace; font-size:28px; font-weight:700; margin-top:6px; color:var(--heading);}
+  .kpi .label{font-size:11.5px; text-transform:uppercase; letter-spacing:0.6px; color:var(--ink-muted); font-weight:700;}
+  .kpi .value{font-size:26px; font-weight:800; margin-top:4px; color:var(--heading); font-variant-numeric:tabular-nums;}
   .kpi.alert .value{color:var(--signal-red);}
   .kpi.warn .value{color:var(--brass);}
   .kpi.good .value{color:var(--seafoam);}
 
-  .card-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(270px,1fr)); gap:16px;}
+  .card-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(270px,1fr)); gap:14px;}
   .card{
-    background:var(--white-card); border:1px solid var(--paper-line); border-radius:6px;
-    box-shadow:var(--shadow); padding:16px 18px; cursor:pointer; transition:transform .12s;
+    background:var(--white-card); border:1px solid var(--border); border-radius:12px;
+    padding:16px; cursor:pointer; transition:transform .12s;
   }
   .card:hover{transform:translateY(-2px);}
   .card .card-top{display:flex; justify-content:space-between; align-items:flex-start; gap:8px;}
-  .card h3{font-family:'Libre Baskerville',serif; font-size:17px; margin:0 0 2px; color:var(--heading);}
-  .card .meta-line{font-size:12px; color:var(--ink-soft); font-family:'Space Mono',monospace;}
-  .card .card-stats{display:flex; gap:18px; margin-top:12px; padding-top:12px; border-top:1px dashed var(--paper-line);}
-  .card .stat{font-size:11px; color:var(--ink-soft);}
-  .card .stat b{display:block; font-family:'Space Mono',monospace; font-size:15px; color:var(--accent); font-weight:700;}
+  .card h3{font-size:16px; font-weight:700; margin:0 0 2px; color:var(--heading);}
+  .card .meta-line{font-size:12px; color:var(--ink-soft);}
+  .card .card-stats{display:flex; gap:18px; margin-top:12px; padding-top:12px; border-top:1px solid var(--paper-line);}
+  .card .stat{font-size:11px; color:var(--ink-muted);}
+  .card .stat b{display:block; font-size:15px; color:var(--navy); font-weight:800; font-variant-numeric:tabular-nums;}
 
-  /* ===== Status stamps ===== */
+  /* ===== Status pills ===== */
   .stamp{
-    display:inline-block; font-family:'Space Mono',monospace; font-size:10px; font-weight:700;
-    letter-spacing:1.2px; text-transform:uppercase; padding:3px 9px; border-radius:3px;
-    border:1.5px solid currentColor; transform:rotate(-2deg); white-space:nowrap;
+    display:inline-flex; align-items:center; font-size:11.5px; font-weight:700;
+    padding:3px 9px; border-radius:999px; border:1px solid transparent; white-space:nowrap;
   }
-  .stamp.overdue{color:var(--signal-red); background:rgba(163,55,46,0.07);}
-  .stamp.due-soon{color:var(--brass); background:rgba(184,134,46,0.08);}
-  .stamp.upcoming{color:var(--accent); background:rgba(18,58,82,0.06);}
-  .stamp.completed{color:var(--seafoam); background:rgba(47,110,98,0.08); transform:rotate(0);}
-  .stamp.active{color:var(--seafoam); background:rgba(47,110,98,0.08);}
-  .stamp.docked{color:var(--accent); background:rgba(18,58,82,0.06);}
-  .stamp.in-maintenance{color:var(--brass); background:rgba(184,134,46,0.08);}
-  .stamp.valid{color:var(--seafoam);}
-  .stamp.advisory{color:var(--brass);}
-  .stamp.red-alert{color:#fff; background:var(--signal-red); border-color:var(--signal-red);}
-  .stamp.expired{color:var(--signal-red);}
+  .stamp.overdue, .stamp.expired, .stamp.pay-outstanding{background:rgba(208,59,59,0.14); color:var(--signal-red); border-color:rgba(208,59,59,0.35);}
+  .stamp.red-alert{background:var(--signal-red); color:#fff; border-color:var(--signal-red);}
+  .stamp.due-soon, .stamp.advisory, .stamp.in-maintenance, .stamp.bill-invoiced{background:var(--brass-bg); color:var(--brass); border-color:rgba(250,178,25,0.4);}
+  .stamp.completed, .stamp.active, .stamp.valid, .stamp.bill-paid, .stamp.pay-paid{background:rgba(12,163,12,0.12); color:var(--seafoam); border-color:rgba(12,163,12,0.3);}
+  .stamp.upcoming, .stamp.docked, .stamp.bill-quoted{background:var(--brand-tint); color:var(--navy); border-color:var(--border);}
 
   /* ===== Table ===== */
-  .table-wrap{background:var(--white-card); border:1px solid var(--paper-line); border-radius:6px; box-shadow:var(--shadow); overflow-x:auto;}
-  table{width:100%; border-collapse:collapse; font-size:13.5px;}
+  .table-wrap{background:var(--white-card); border:1px solid var(--border); border-radius:12px; overflow-x:auto;}
+  table{width:100%; border-collapse:collapse; font-size:13px;}
   thead th{
-    text-align:left; font-size:10.5px; text-transform:uppercase; letter-spacing:1px; color:var(--ink-soft);
-    padding:12px 14px; border-bottom:1.5px solid var(--paper-line); font-weight:700; white-space:nowrap;
+    text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:0.4px; color:var(--ink-muted);
+    padding:11px 12px; border-bottom:1px solid var(--paper-line); font-weight:700; white-space:nowrap;
   }
-  tbody td{padding:11px 14px; border-bottom:1px solid var(--paper-line); vertical-align:middle;}
+  tbody td{padding:10px 12px; border-bottom:1px solid var(--paper-line); vertical-align:middle;}
   tbody tr:last-child td{border-bottom:none;}
-  tbody tr:hover{background:rgba(184,134,46,0.05);}
-  td.num, th.num{font-family:'Space Mono',monospace;}
+  tbody tr:hover{background:var(--paper-2);}
+  td.num, th.num{font-variant-numeric:tabular-nums;}
 
   /* ===== Buttons ===== */
   .btn{
-    font-family:'Inter',sans-serif; font-size:13px; font-weight:600; padding:8px 15px; border-radius:5px;
-    border:1.5px solid var(--accent); background:transparent; color:var(--accent); cursor:pointer;
+    font-size:13.5px; font-weight:700; padding:9px 15px; border-radius:9px;
+    border:1px solid var(--navy); background:transparent; color:var(--navy); cursor:pointer;
   }
-  .btn:hover{background:var(--navy); color:#F6EFDE;}
-  .btn.primary{background:var(--brass); border-color:var(--brass); color:#2A1E08;}
-  .btn.primary:hover{background:var(--brass-light); border-color:var(--brass-light);}
+  .btn:hover{background:var(--brand-tint);}
+  .btn.primary{background:var(--navy); border-color:var(--navy); color:#fff;}
+  .btn.primary:hover{background:var(--navy-deep); border-color:var(--navy-deep);}
   .btn.danger{border-color:var(--signal-red); color:var(--signal-red);}
   .btn.danger:hover{background:var(--signal-red); color:#fff;}
-  .btn.small{padding:5px 10px; font-size:12px;}
-  .btn.ghost{border-color:var(--paper-line); color:var(--ink-soft);}
-  .btn.ghost:hover{background:var(--paper-2); color:var(--ink);}
+  .btn.small{padding:6px 10px; font-size:12px; border-radius:7px;}
+  .btn.ghost{border-color:var(--border); color:var(--ink); background:var(--field-bg);}
+  .btn.ghost:hover{background:var(--paper-2);}
   .toolbar{display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:16px;}
   .filters{display:flex; gap:8px; flex-wrap:wrap;}
   select, input, textarea{
-    font-family:'Inter',sans-serif; font-size:13px; padding:8px 10px; border:1.5px solid var(--paper-line);
-    border-radius:5px; background:var(--field-bg); color:var(--ink);
+    font-size:14px; padding:9px 10px; border:1px solid var(--border);
+    border-radius:8px; background:var(--field-bg); color:var(--ink);
   }
-  select:focus, input:focus, textarea:focus{outline:2px solid var(--brass-light); border-color:var(--brass);}
-  label.field{display:flex; flex-direction:column; gap:4px; font-size:12px; font-weight:600; color:var(--ink-soft); margin-bottom:12px;}
+  input[type=checkbox]{accent-color:var(--navy);}
+  select:focus, input:focus, textarea:focus{outline:2px solid var(--navy-light); outline-offset:0; border-color:var(--navy);}
+  label.field{display:flex; flex-direction:column; gap:4px; font-size:12.5px; font-weight:600; color:var(--ink-soft); margin-bottom:12px;}
   .field-row{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
 
   /* ===== Timeline (dashboard) ===== */
-  .timeline{background:var(--white-card); border:1px solid var(--paper-line); border-radius:6px; box-shadow:var(--shadow); padding:6px 0;}
-  .tl-item{display:flex; align-items:center; gap:14px; padding:12px 18px; border-bottom:1px solid var(--paper-line);}
+  .timeline{background:var(--white-card); border:1px solid var(--border); border-radius:12px; padding:4px 0;}
+  .tl-item{display:flex; align-items:center; gap:14px; padding:11px 16px; border-bottom:1px solid var(--paper-line);}
   .tl-item:last-child{border-bottom:none;}
-  .tl-date{font-family:'Space Mono',monospace; font-size:12px; color:var(--accent); width:82px; flex-shrink:0;}
+  .tl-date{font-size:12px; font-weight:600; color:var(--navy); width:86px; flex-shrink:0; font-variant-numeric:tabular-nums;}
   .tl-body{flex:1; min-width:0;}
-  .tl-title{font-size:13.5px; font-weight:600; color:var(--ink);}
-  .tl-sub{font-size:11.5px; color:var(--ink-soft); margin-top:1px;}
-  .empty-note{padding:24px; text-align:center; color:var(--ink-soft); font-size:13px;}
+  .tl-title{font-size:13.5px; font-weight:700; color:var(--ink);}
+  .tl-sub{font-size:12px; color:var(--ink-soft); margin-top:1px;}
+  .empty-note{padding:22px; text-align:center; color:var(--ink-muted); font-size:13px;}
 
   /* ===== Crew ===== */
   .qual-chip{
-    display:inline-flex; align-items:center; gap:6px; font-size:11.5px; padding:5px 10px; border-radius:14px;
-    border:1px solid var(--paper-line); background:var(--paper-2); margin:3px 5px 3px 0;
+    display:inline-flex; align-items:center; gap:6px; font-size:11.5px; padding:5px 10px; border-radius:999px;
+    border:1px solid var(--border); background:var(--paper-2); margin:3px 5px 3px 0;
   }
   .qual-dot{width:7px;height:7px;border-radius:50%; flex-shrink:0;}
-  .qual-dot.valid{background:var(--seafoam);}
-  .qual-dot.advisory{background:var(--brass);}
+  .qual-dot.valid{background:#0ca30c;}
+  .qual-dot.advisory{background:#fab219;}
   .qual-dot.red-alert{background:var(--signal-red);}
   .qual-dot.expired{background:var(--signal-red);}
 
   /* ===== Modal ===== */
   .modal-overlay{
-    position:fixed; inset:0; background:rgba(11,36,54,0.55); display:flex; align-items:flex-start;
+    position:fixed; inset:0; background:rgba(0,0,0,0.5); display:flex; align-items:flex-start;
     justify-content:center; padding:40px 16px; overflow-y:auto; z-index:100;
   }
   .modal{
-    background:var(--white-card); border-radius:8px; max-width:560px; width:100%;
-    padding:26px 28px 24px; box-shadow:0 12px 40px rgba(0,0,0,0.3);
+    background:var(--white-card); border:1px solid var(--border); border-radius:12px; max-width:560px; width:100%;
+    padding:22px 24px 20px; box-shadow:0 12px 40px rgba(0,0,0,0.3);
   }
-  .modal h3{font-family:'Libre Baskerville',serif; margin:0 0 18px; color:var(--heading); font-size:19px;}
-  .modal .modal-actions{display:flex; justify-content:flex-end; gap:10px; margin-top:20px; padding-top:16px; border-top:1px dashed var(--paper-line);}
+  .modal h3{font-size:18px; font-weight:800; margin:0 0 16px; color:var(--heading);}
+  .modal .modal-actions{display:flex; justify-content:flex-end; flex-wrap:wrap; gap:8px; margin-top:18px; padding-top:14px; border-top:1px solid var(--paper-line);}
   .modal .close-x{position:absolute;}
   .modal-header-row{display:flex; justify-content:space-between; align-items:center;}
-
   .detail-section{margin-top:16px;}
-  .detail-section h4{font-size:12px; text-transform:uppercase; letter-spacing:1px; color:var(--ink-soft); margin:0 0 8px; border-bottom:1px solid var(--paper-line); padding-bottom:6px;}
+  .detail-section h4{font-size:11.5px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; color:var(--ink-muted); margin:0 0 8px; border-bottom:1px solid var(--paper-line); padding-bottom:6px;}
   .mini-row{display:flex; justify-content:space-between; align-items:center; padding:6px 0; font-size:13px;}
-
   .cost-total-bar{
-    background:var(--navy-deep); color:#F6EFDE; border-radius:6px; padding:16px 20px; margin-bottom:20px;
+    background:linear-gradient(135deg, #026b71 0%, #014c50 100%); color:#fff; border-radius:12px; padding:14px 18px; margin-bottom:20px;
     display:flex; gap:32px; flex-wrap:wrap; align-items:center;
   }
-  .cost-total-bar .ctb-item .label{font-size:10.5px; text-transform:uppercase; letter-spacing:1px; color:var(--brass-light);}
-  .cost-total-bar .ctb-item .value{font-family:'Space Mono',monospace; font-size:22px; font-weight:700;}
+  .cost-total-bar .ctb-item .label{font-size:11px; text-transform:uppercase; letter-spacing:0.6px; font-weight:700; color:rgba(255,255,255,0.75);}
+  .cost-total-bar .ctb-item .value{font-size:22px; font-weight:800; font-variant-numeric:tabular-nums;}
 
   /* ===== Login gate ===== */
   .login-wrap{max-width:370px; margin:46px auto 0;}
   .login-roles{display:flex; gap:8px; margin:14px 0 18px;}
   .login-role{
-    flex:1; font-family:'Inter',sans-serif; font-size:13px; font-weight:600; padding:11px 8px;
-    border-radius:5px; border:1.5px solid var(--paper-line); background:var(--field-bg); color:var(--ink-soft); cursor:pointer;
+    flex:1; font-size:13px; font-weight:700; padding:10px 8px;
+    border-radius:999px; border:1px solid var(--border); background:var(--field-bg); color:var(--ink-soft); cursor:pointer;
   }
   .login-role:hover{color:var(--ink);}
-  .login-role.active{border-color:var(--brass); background:var(--brass); color:#2A1E08;}
+  .login-role.active{border-color:var(--navy); background:var(--navy); color:#fff;}
   .login-error{color:var(--signal-red); font-size:13px; min-height:18px; margin:2px 0 8px;}
 
   /* ===== Companies / vessel assignment ===== */
   .vessel-check-grid{display:flex; flex-direction:column; gap:7px; margin-bottom:8px;}
   .vessel-check{display:flex; align-items:center; gap:9px; font-size:13px; font-weight:500; color:var(--ink);}
   .vessel-check input{width:auto;}
-  .pw-mask{font-family:'Space Mono',monospace; letter-spacing:1px;}
+  .pw-mask{font-family:ui-monospace,monospace; letter-spacing:1px;}
 
   /* ===== Sub-tabs (billing filter) ===== */
   .subtabs{display:flex; gap:6px; flex-wrap:wrap; margin:0 0 16px;}
   .subtab{
-    font-family:'Inter',sans-serif; font-size:12.5px; font-weight:600; padding:7px 13px;
-    border-radius:5px; border:1.5px solid var(--paper-line); background:var(--field-bg); color:var(--ink-soft); cursor:pointer;
+    font-size:12.5px; font-weight:700; padding:7px 13px;
+    border-radius:999px; border:1px solid var(--border); background:var(--field-bg); color:var(--ink-soft); cursor:pointer;
   }
   .subtab:hover{color:var(--ink);}
-  .subtab.active{border-color:var(--navy); background:var(--navy); color:#F6EFDE;}
+  .subtab.active{border-color:var(--navy); background:var(--navy); color:#fff;}
   .subtab .cnt{opacity:0.7; font-weight:700; margin-left:5px;}
-  .stamp.bill-quoted{color:var(--accent); background:rgba(18,58,82,0.06);}
-  .stamp.bill-invoiced{color:var(--brass); background:rgba(184,134,46,0.09);}
-  .stamp.bill-paid{color:var(--seafoam); background:rgba(47,110,98,0.09);}
-  .stamp.pay-outstanding{color:var(--signal-red); background:rgba(163,55,46,0.07);}
-  .stamp.pay-paid{color:var(--seafoam); background:rgba(47,110,98,0.09);}
 
   /* ===== Checklists ===== */
-  .cl-item-row{display:grid; grid-template-columns:1fr 92px 74px 70px auto; gap:6px; align-items:center; margin-bottom:6px;}
+  .cl-item-row{display:grid; grid-template-columns:1fr 96px 62px 56px 56px auto; gap:6px; align-items:center; margin-bottom:6px;}
   .cl-item-row input, .cl-item-row select{min-width:0; width:100%;}
-  .cl-item-row.task .cl-stock-only{visibility:hidden;}
+  .cl-item-row{align-items:end;}
+  .cl-mini{display:flex; flex-direction:column; gap:2px; min-width:0;}
+  .cl-mini span{font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:var(--ink-soft);}
+  .cl-item-row.task .cl-stock-only, .cl-item-row.heading .cl-stock-only{visibility:hidden;}
+  .cl-item-row.heading .cl-label{font-weight:700; text-transform:uppercase; letter-spacing:0.5px; font-size:12px;}
+  .cl-run-heading{font-size:11.5px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; color:var(--ink-muted); margin:16px 0 2px; padding-bottom:5px; border-bottom:1px solid var(--paper-line);}
   .cl-run-item{display:flex; justify-content:space-between; align-items:center; gap:12px; padding:9px 0; border-bottom:1px solid var(--paper-line); font-size:13.5px;}
   .cl-run-item:last-child{border-bottom:none;}
   .cl-run-item label{display:flex; align-items:center; gap:10px; cursor:pointer; flex:1; min-width:0;}
-  .cl-run-item input[type=checkbox]{width:20px; height:20px; flex-shrink:0;}
+  .cl-run-item input[type=checkbox]{width:19px; height:19px; flex-shrink:0;}
   .cl-run-item .cl-qty{width:96px; flex-shrink:0; text-align:right;}
   .cl-hint{font-size:11px; color:var(--ink-soft); font-weight:400;}
   .cl-section{margin-top:28px;}
@@ -297,8 +300,8 @@
     .wrap{padding:0 14px 60px;}
     header.top .inner{padding:20px 14px 16px; flex-direction:column; align-items:flex-start;}
     .header-meta{text-align:left;}
-    .brand-title{font-size:24px;}
-    .theme-toggle{top:12px; right:14px; padding:7px;}
+    .brand-title{font-size:21px;}
+    .theme-toggle{position:absolute; top:12px; right:14px; padding:7px;}
     .theme-toggle .tt-label{display:none;}
 
     nav.tabs{padding:0 8px; flex-wrap:nowrap; overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none;}
@@ -316,14 +319,16 @@
     .card-stats{flex-wrap:wrap; row-gap:10px;}
 
     .field-row{grid-template-columns:1fr;}
-    .cl-item-row{grid-template-columns:1fr 1fr; padding-bottom:8px; margin-bottom:8px; border-bottom:1px dashed var(--paper-line);}
+    .cl-item-row{grid-template-columns:1fr 1fr 1fr; padding-bottom:8px; margin-bottom:8px; border-bottom:1px dashed var(--paper-line);}
     .cl-item-row .cl-label{grid-column:1 / -1;}
-    .cl-item-row.task .cl-stock-only{display:none;}
+    .cl-item-row.task .cl-stock-only, .cl-item-row.heading .cl-stock-only{display:none;}
+    .cl-item-row select{grid-column:1 / 3;}
+    .cl-item-row.stock select{grid-column:auto;}
     input, select, textarea{font-size:16px;}
     .btn{min-height:40px;}
 
     .modal-overlay{padding:20px 10px;}
-    .modal{padding:20px 18px 18px; border-radius:6px;}
+    .modal{padding:20px 18px 18px; border-radius:12px;}
 
     .cost-total-bar{gap:18px; padding:14px 16px;}
     .cost-total-bar .ctb-item .value{font-size:19px;}
@@ -334,6 +339,13 @@
 
     .tl-item{padding:11px 14px; gap:10px;}
     .tl-date{width:66px; font-size:11px;}
+  }
+  /* Printing a checklist: only the open dialog goes to paper. */
+  @media print{
+    body.print-modal header.top, body.print-modal nav.tabs, body.print-modal .wrap, body.print-modal .modal-actions{display:none !important;}
+    body.print-modal{background:#fff; color:#000;}
+    body.print-modal .modal-overlay{position:static; background:none; padding:0; overflow:visible;}
+    body.print-modal .modal{box-shadow:none; max-width:none; padding:0;}
   }
 </style>
 </head>
@@ -1021,24 +1033,123 @@ function renderDashboard(){
   `;
 }
 
+/* Standard OCEANHUB lists, taken from the single-vessel Vessel Manager app (Riva 58 Capri).
+   Lines starting with "## " are section headings; stock lines are "<par> x <item>". */
+const STANDARD_CHECKLISTS = {
+  "daily": [
+    "## Exterior & Hull",
+    "Rinse and dry vessel, including blading of teak and windows",
+    "Ensure all exterior covers are secured",
+    "Make sure no water has collected underneath covers — dry if necessary",
+    "Scrub water line with soap and rinse with water",
+    "If teak is dirty, scrub with diluted Simple Green, rinse with water and blade after",
+    "If stainless is dirty or fading, apply Starclean wet polish, rinse off and dry",
+    "If water is not beading off windows, apply RainX",
+    "## Engine Room & Systems",
+    "Check battery voltage",
+    "Check all bilges and clean if necessary",
+    "Run engines for 15 minutes — check for leaks, coolant level, oil level etc (normal start-up procedure)",
+    "Drain water from fuel filters and fuel pre-filters, port & starboard (MAN daily check)",
+    "Run generator for 15 minutes — carry out the same checks as for the engines",
+    "NB!! Test all carbon monoxide (CO) detectors before starting the generator, and again after 8 hours of continuous running (Cummins Onan requirement)",
+    "Check generator raw water strainer, exhaust system and mounting bolts for leaks, blockage or looseness",
+    "While the generator is running, test all 220V equipment",
+    "Test all 12V equipment",
+    "NB!! Test all bilge pumps",
+    "## Interior",
+    "Check interior for dampness and cleanliness",
+    "Flush each toilet three times",
+    "Run each tap for 15 seconds",
+    "## Williams Turbojet Tender",
+    "Check kill cord for wear and confirm it detaches and stops the engine (manual: check at the start of each day)",
+    "Check raw water filter is clean and clear of debris",
+    "Check bilge for fuel or water contamination",
+    "Ensure engine bay hatch and all access hatches are closed and latched securely",
+    "Ensure towing valve is set to the open position",
+    "Rinse tender with fresh water after use"
+  ],
+  "weekly": [
+    "Check house & engine start battery voltage / condition",
+    "Test bilge pumps (manual & automatic) on both engines",
+    "Inspect through-hull fittings & seacocks",
+    "Check fire extinguisher pressure gauges",
+    "Test navigation lights",
+    "Check steering system / hydraulic fluid level",
+    "Inspect life jackets & safety equipment accessibility",
+    "Clean raw water strainers",
+    "Check fuel level & log approximate consumption",
+    "Wash down decks & check for chafe on lines/covers"
+  ],
+  "monthly": [
+    "Full engine room inspection: hoses, belts, clamps, wiring",
+    "Check sacrificial zinc anodes condition",
+    "Test generator under load (if fitted)",
+    "Check freshwater system & tanks for leaks/odour",
+    "Inspect hull (visible areas) for fouling or damage",
+    "Test bilge high-water alarm",
+    "Check emergency equipment: flares, EPIRB battery/expiry, life raft service date",
+    "Review engine oil & coolant level trend over the month",
+    "Check air conditioning / refrigeration system",
+    "Check all safety equipment expiry dates"
+  ],
+  "stock": [
+    "## Cleaning Chemicals & Solutions",
+    "5 x Powerpine boat wash",
+    "4 x Black streak remover",
+    "5 x Starclean wet polish",
+    "4 x Vinyl cleaner and polisher",
+    "4 x Vinyl brite protectant",
+    "5 x Boat guard",
+    "4 x Waterproofing",
+    "4 x Mildew stain remover",
+    "2 x Rust stain remover",
+    "2 x 5L Simple Green",
+    "4 x RainX",
+    "## Brushes & Blades",
+    "2 x Extending handles",
+    "2 x Medium blue brushes",
+    "2 x Medium yellow brushes",
+    "2 x Medium white brushes",
+    "2 x Teak blades",
+    "2 x Window blades",
+    "5 x Tooth brushes",
+    "## Cloths & Consumables",
+    "4 x Shammy mops",
+    "6 x Shammies",
+    "2 x Bags of rags",
+    "50 x Polishing pads",
+    "200 x Microfibres",
+    "## Tools & Equipment",
+    "4 x Buckets",
+    "1 x Hose pipe and fittings"
+  ]
+};
+
 /* ============================= CHECKLISTS ============================= */
 /* Admin builds checklist templates (daily / weekly / monthly) made of tasks to tick
-   off and stock items to count, and assigns them to vessels. Admin and owners fill
-   them in per vessel per period; each submission is one record in checklistRuns,
-   keyed by checklist + vessel + period, so re-opening the same period edits it.
-   Stock levels are the latest count recorded for each stock item on each vessel. */
+   off, stock items to count and section headings, and assigns them to vessels. Admin
+   and owners fill them in per vessel per period; each submission is one record in
+   checklistRuns, keyed by checklist + vessel + period, so re-opening the same period
+   edits it. Stock levels are the latest count recorded for each stock item on each vessel. */
 const CHECKLIST_FREQS = [ { id:'daily', label:'Daily' }, { id:'weekly', label:'Weekly' }, { id:'monthly', label:'Monthly' } ];
 function freqName(f){ return ({ daily:'Daily', weekly:'Weekly', monthly:'Monthly' })[f] || f; }
+const CREW_NAME_KEY = 'oceanhub_crew_name';
 
 function localISODate(d){
   return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 }
-/* Period key for "now": a date for daily, the Monday of the week for weekly, YYYY-MM for monthly. */
-function checklistPeriod(freq, now){
-  const d = now ? new Date(now) : new Date();
+/* Period key for a date (default now): the date for daily, the Monday of the week
+   for weekly, YYYY-MM for monthly. A 'YYYY-MM-DD' string is read as a local date. */
+function checklistPeriod(freq, when){
+  const d = typeof when === 'string' ? new Date(when + 'T00:00:00') : when ? new Date(when) : new Date();
   if(freq === 'monthly') return localISODate(d).slice(0,7);
   if(freq === 'weekly'){ d.setDate(d.getDate() - ((d.getDay()+6)%7)); return 'W' + localISODate(d); }
   return localISODate(d);
+}
+function periodStartDate(period){
+  if(period.charAt(0) === 'W') return period.slice(1);
+  if(period.length === 7) return period + '-01';
+  return period;
 }
 function checklistPeriodLabel(period){
   if(!period) return '—';
@@ -1058,6 +1169,13 @@ function checklistVesselIds(cl){
 function findChecklistRun(checklistId, vesselId, period){
   return state.allChecklistRuns.find(r=>r.checklistId===checklistId && r.vesselId===vesselId && r.period===period) || null;
 }
+function numOrNull(v){ return v==='' || v==null ? null : Number(v); }
+/* Ticked tasks + counted stock items, out of all non-heading items. */
+function runProgress(run){
+  const items = (run.entries||[]).filter(en=>en.type!=='heading');
+  const done = items.filter(en=> en.type==='stock' ? en.qty!=='' && en.qty!=null : en.done).length;
+  return { done, total: items.length };
+}
 /* Every (checklist, vessel) pair due in the current period, with its run if started. */
 function checklistAssignments(vesselFilter){
   const out = [];
@@ -1070,6 +1188,13 @@ function checklistAssignments(vesselFilter){
   });
   const order = { daily:0, weekly:1, monthly:2 };
   return out.sort((a,b)=> (order[a.cl.frequency]-order[b.cl.frequency]) || vesselName(a.vesselId).localeCompare(vesselName(b.vesselId)) || a.cl.name.localeCompare(b.cl.name));
+}
+/* Low = at or below the minimum (or below par when no minimum is set). */
+function stockStatus(qty, par, min){
+  if(qty==null) return 'none';
+  if(min!=null ? qty <= min : par!=null && qty < par) return 'low';
+  if(par!=null && qty < par) return 'below-par';
+  return 'ok';
 }
 /* Latest recorded count for each stock item on each vessel (plus the count before it). */
 function stockRows(vesselFilter){
@@ -1085,14 +1210,20 @@ function stockRows(vesselFilter){
           .sort((a,b)=> String(b.r.updatedAt||'').localeCompare(String(a.r.updatedAt||'')));
         const last = counts[0], prev = counts[1];
         const qty = last ? Number(last.en.qty) : null;
-        const min = it.min==='' || it.min==null ? null : Number(it.min);
-        rows.push({ vesselId:vid, checklistName:cl.name, label:it.label, unit:it.unit||'', min, qty,
+        const par = numOrNull(it.par), min = numOrNull(it.min);
+        const status = stockStatus(qty, par, min);
+        rows.push({ vesselId:vid, checklistName:cl.name, label:it.label, unit:it.unit||'', par, min, qty,
           prevQty: prev ? Number(prev.en.qty) : null, date: last ? last.r.updatedAt : null,
-          low: qty!=null && min!=null && qty <= min });
+          status, low: status==='low' });
       });
     });
   });
-  return rows.sort((a,b)=> (b.low - a.low) || vesselName(a.vesselId).localeCompare(vesselName(b.vesselId)) || a.label.localeCompare(b.label));
+  const rank = { low:0, 'below-par':1, none:2, ok:3 };
+  return rows.sort((a,b)=> (rank[a.status]-rank[b.status]) || vesselName(a.vesselId).localeCompare(vesselName(b.vesselId)) || a.label.localeCompare(b.label));
+}
+function stockStamp(status){
+  return ({ low:'<span class="stamp overdue">Low</span>', 'below-par':'<span class="stamp due-soon">Below par</span>',
+    ok:'<span class="stamp completed">OK</span>', none:'<span class="stamp upcoming">No count</span>' })[status];
 }
 function checklistRunStamp(run){
   if(!run) return '<span class="stamp overdue">Not started</span>';
@@ -1126,21 +1257,27 @@ function renderChecklists(){
 
   const templates = admin ? `
     <div class="cl-section">
-      <h2 class="section-title">Checklist templates</h2>
-      <p class="section-sub">The checklists you've created and the vessels they apply to. Owners see the ones assigned to their vessels.</p>
+      <div class="toolbar" style="margin-bottom:0;">
+        <div>
+          <h2 class="section-title">Checklist templates</h2>
+          <p class="section-sub">The checklists you've created and the vessels they apply to. Owners see the ones assigned to their vessels.</p>
+        </div>
+        <button class="btn" data-action="import-checklists">Import standard lists</button>
+      </div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Checklist</th><th>Frequency</th><th class="num">Tasks</th><th class="num">Stock items</th><th>Vessels</th><th></th></tr></thead>
+        <thead><tr><th>Checklist</th><th>Frequency</th><th class="num">Tasks</th><th class="num">Stock items</th><th>Vessels</th><th>Email to</th><th></th></tr></thead>
         <tbody>
-          ${state.allChecklists.length===0 ? `<tr><td colspan="6"><div class="empty-note">No checklists yet. Use &ldquo;+ New checklist&rdquo; to create one.</div></td></tr>` :
+          ${state.allChecklists.length===0 ? `<tr><td colspan="7"><div class="empty-note">No checklists yet. Use &ldquo;+ New checklist&rdquo;, or &ldquo;Import standard lists&rdquo; to load the OCEANHUB daily, weekly and monthly lists and stock guide.</div></td></tr>` :
             state.allChecklists.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(cl=>{
               const items = cl.items||[];
               const vnames = cl.allVessels ? 'All vessels' : (cl.vesselIds||[]).map(id=>{ const v = state.allVessels.find(x=>x.id===id); return v ? esc(v.name) : ''; }).filter(Boolean).join(', ') || '<span style="color:var(--ink-soft);">None</span>';
               return `<tr>
                 <td><b>${esc(cl.name)}</b>${cl.description ? `<div style="color:var(--ink-soft); font-size:11.5px;">${esc(cl.description)}</div>` : ''}</td>
                 <td>${freqName(cl.frequency)}</td>
-                <td class="num">${items.filter(i=>i.type!=='stock').length}</td>
+                <td class="num">${items.filter(i=>i.type==='task').length}</td>
                 <td class="num">${items.filter(i=>i.type==='stock').length}</td>
                 <td>${vnames}</td>
+                <td style="font-size:12px;">${cl.emailTo ? esc(cl.emailTo) : '<span style="color:var(--ink-soft);">—</span>'}</td>
                 <td style="white-space:nowrap;">
                   <button class="btn small ghost" data-action="edit-checklist" data-id="${cl.id}">Edit</button>
                   <button class="btn small danger" data-action="delete-checklist" data-id="${cl.id}">Delete</button>
@@ -1170,34 +1307,35 @@ function renderChecklists(){
       <thead><tr><th>Checklist</th><th>Vessel</th><th>Period</th><th>Status</th><th>Last saved</th><th></th></tr></thead>
       <tbody>
         ${assignments.length===0 ? `<tr><td colspan="6"><div class="empty-note">${admin ? 'No checklists assigned to vessels yet.' : 'No checklists have been assigned to your vessels yet.'}</div></td></tr>` :
-          assignments.map(a=>`<tr>
+          assignments.map(a=>{ const pg = a.run ? runProgress(a.run) : null; return `<tr>
             <td><b>${esc(a.cl.name)}</b><div style="color:var(--ink-soft); font-size:11.5px;">${freqName(a.cl.frequency)}</div></td>
             <td>${esc(vesselName(a.vesselId))}</td>
             <td>${checklistPeriodLabel(a.period)}</td>
-            <td>${checklistRunStamp(a.run)}</td>
+            <td>${checklistRunStamp(a.run)}${pg ? `<div class="cl-hint" style="margin-top:4px;">${pg.done}/${pg.total} done</div>` : ''}</td>
             <td class="num" style="font-size:12px;">${a.run ? fmtDateTime(a.run.updatedAt) + (a.run.completedBy ? `<div style="color:var(--ink-soft);">${esc(a.run.completedBy)}</div>` : '') : '—'}</td>
             <td><button class="btn small ${a.run && a.run.status==='completed' ? 'ghost' : 'primary'}" data-action="open-checklist-run" data-checklist-id="${a.cl.id}" data-vessel-id="${a.vesselId}" data-period="${a.period}">${!a.run ? 'Start' : a.run.status==='completed' ? 'View' : 'Continue'}</button></td>
-          </tr>`).join('')}
+          </tr>`; }).join('')}
       </tbody>
     </table></div>
 
     <div class="cl-section">
       <h2 class="section-title">Stock levels</h2>
-      <p class="section-sub">Latest count recorded in a checklist for each stock item. Items at or below their minimum are flagged.</p>
+      <p class="section-sub">Latest count recorded in a checklist for each stock item, against its par (what should be on hand). Items at or below their minimum, or below par when no minimum is set, are flagged as low.</p>
       <div class="table-wrap"><table>
-        <thead><tr><th>Item</th><th>Vessel</th><th class="num">On hand</th><th class="num">Min</th><th class="num">Change</th><th>Last counted</th><th>Status</th></tr></thead>
+        <thead><tr><th>Item</th><th>Vessel</th><th class="num">On hand</th><th class="num">Par</th><th class="num">Min</th><th class="num">Change</th><th>Last counted</th><th>Status</th></tr></thead>
         <tbody>
-          ${stock.length===0 ? `<tr><td colspan="7"><div class="empty-note">No stock items on any checklist yet.</div></td></tr>` :
+          ${stock.length===0 ? `<tr><td colspan="8"><div class="empty-note">No stock items on any checklist yet.</div></td></tr>` :
             stock.map(r=>{
               const diff = r.qty!=null && r.prevQty!=null ? r.qty - r.prevQty : null;
               return `<tr>
                 <td><b>${esc(r.label)}</b><div style="color:var(--ink-soft); font-size:11.5px;">${esc(r.checklistName)}</div></td>
                 <td>${esc(vesselName(r.vesselId))}</td>
                 <td class="num"><b>${r.qty==null ? '—' : r.qty.toLocaleString()}</b> ${esc(r.unit)}</td>
+                <td class="num">${r.par==null ? '—' : r.par.toLocaleString()}</td>
                 <td class="num">${r.min==null ? '—' : r.min.toLocaleString()}</td>
                 <td class="num" style="${diff<0 ? 'color:var(--signal-red);' : diff>0 ? 'color:var(--seafoam);' : ''}">${diff==null ? '—' : (diff>0?'+':'') + diff.toLocaleString()}</td>
                 <td class="num" style="font-size:12px;">${r.date ? fmtDateTime(r.date) : 'Never'}</td>
-                <td>${r.qty==null ? '<span class="stamp upcoming">No count</span>' : r.low ? '<span class="stamp overdue">Low</span>' : '<span class="stamp completed">OK</span>'}</td>
+                <td>${stockStamp(r.status)}</td>
               </tr>`;
             }).join('')}
         </tbody>
@@ -1210,20 +1348,20 @@ function renderChecklists(){
       <h2 class="section-title">Recent submissions</h2>
       <p class="section-sub">The last 25 checklists saved, newest first.</p>
       <div class="table-wrap"><table>
-        <thead><tr><th>Checklist</th><th>Vessel</th><th>Period</th><th>Status</th><th>Saved</th><th></th></tr></thead>
+        <thead><tr><th>Checklist</th><th>Vessel</th><th>Date</th><th>Status</th><th>Saved</th><th></th></tr></thead>
         <tbody>
           ${recent.length===0 ? `<tr><td colspan="6"><div class="empty-note">Nothing submitted yet.</div></td></tr>` :
-            recent.map(r=>`<tr>
+            recent.map(r=>{ const pg = runProgress(r); return `<tr>
               <td><b>${esc(r.checklistName || '—')}</b><div style="color:var(--ink-soft); font-size:11.5px;">${freqName(r.frequency)}</div></td>
               <td>${esc(vesselName(r.vesselId))}</td>
-              <td>${checklistPeriodLabel(r.period)}</td>
-              <td>${checklistRunStamp(r)}</td>
-              <td class="num" style="font-size:12px;">${fmtDateTime(r.updatedAt)}${r.completedBy ? `<div style="color:var(--ink-soft);">${esc(r.completedBy)}</div>` : ''}</td>
+              <td>${r.date ? fmtDate(r.date) : checklistPeriodLabel(r.period)}${r.frequency!=='daily' ? `<div class="cl-hint">${checklistPeriodLabel(r.period)}</div>` : ''}</td>
+              <td>${checklistRunStamp(r)}<div class="cl-hint" style="margin-top:4px;">${pg.done}/${pg.total} done</div></td>
+              <td class="num" style="font-size:12px;">${fmtDateTime(r.updatedAt)}${r.completedBy ? `<div style="color:var(--ink-soft);">${esc(r.completedBy)}</div>` : ''}${r.notes ? `<div style="color:var(--ink-soft);  max-width:240px;">${esc(r.notes)}</div>` : ''}</td>
               <td style="white-space:nowrap;">
                 <button class="btn small ghost" data-action="open-checklist-run" data-checklist-id="${r.checklistId}" data-vessel-id="${r.vesselId}" data-period="${r.period}">Open</button>
                 ${admin ? `<button class="btn small danger" data-action="delete-checklist-run" data-id="${r.id}">Delete</button>` : ''}
               </td>
-            </tr>`).join('')}
+            </tr>`; }).join('')}
         </tbody>
       </table></div>
     </div>
@@ -1231,58 +1369,99 @@ function renderChecklists(){
 }
 
 function checklistItemRow(it){
-  const stock = it.type==='stock';
+  const type = it.type==='stock' || it.type==='heading' ? it.type : 'task';
+  const placeholder = { task:'e.g. Check bilge pumps', stock:'e.g. Engine oil', heading:'Section heading, e.g. Engine Room' }[type];
   return `
-    <div class="cl-item-row ${stock?'stock':'task'}">
+    <div class="cl-item-row ${type}">
       <input type="hidden" name="itemId" value="${esc(it.id||'')}">
-      <input class="cl-label" name="itemLabel" value="${esc(it.label||'')}" placeholder="${stock ? 'e.g. Engine oil' : 'e.g. Check bilge pumps'}">
+      <input class="cl-label" name="itemLabel" value="${esc(it.label||'')}" placeholder="${placeholder}">
       <select name="itemType" data-item-type>
-        <option value="task" ${!stock?'selected':''}>Task</option>
-        <option value="stock" ${stock?'selected':''}>Stock</option>
+        <option value="task" ${type==='task'?'selected':''}>Task</option>
+        <option value="stock" ${type==='stock'?'selected':''}>Stock</option>
+        <option value="heading" ${type==='heading'?'selected':''}>Heading</option>
       </select>
-      <input class="cl-stock-only" name="itemUnit" value="${esc(it.unit||'')}" placeholder="Unit">
-      <input class="cl-stock-only" name="itemMin" type="number" min="0" step="any" value="${it.min==null ? '' : esc(it.min)}" placeholder="Min">
+      <label class="cl-mini cl-stock-only"><span>Unit</span><input name="itemUnit" value="${esc(it.unit||'')}" placeholder="e.g. L"></label>
+      <label class="cl-mini cl-stock-only" title="Quantity that should be on hand"><span>Par</span><input name="itemPar" type="number" min="0" step="any" value="${it.par==null ? '' : esc(it.par)}"></label>
+      <label class="cl-mini cl-stock-only" title="Flagged low at or below this"><span>Min</span><input name="itemMin" type="number" min="0" step="any" value="${it.min==null ? '' : esc(it.min)}"></label>
       <button type="button" class="btn small danger" data-remove-item title="Remove">&times;</button>
     </div>`;
 }
 
-function checklistForm(cl){
-  cl = cl || { name:'', frequency:'daily', description:'', allVessels:false, vesselIds:[], items:[{ type:'task' }] };
-  const assigned = new Set(cl.vesselIds || []);
+function checklistVesselPicker(allVessels, vesselIds){
+  const assigned = new Set(vesselIds || []);
   return `
-    <label class="field">Checklist name<input name="name" value="${esc(cl.name)}" placeholder="e.g. Pre-departure check" required></label>
-    ${fieldRow(
-      `<label class="field">Frequency<select name="frequency">${CHECKLIST_FREQS.map(f=>`<option value="${f.id}" ${cl.frequency===f.id?'selected':''}>${f.label}</option>`).join('')}</select></label>`,
-      `<label class="field">Description<input name="description" value="${esc(cl.description||'')}" placeholder="optional"></label>`
-    )}
-
-    <div class="detail-section" style="margin-top:4px;"><h4>Items</h4></div>
-    <p style="font-size:12px; color:var(--ink-soft); margin-top:-2px;">Tasks are ticked off. Stock items ask for a count each time, and are flagged as low at or below the minimum.</p>
-    <div id="clItems">${(cl.items||[]).map(checklistItemRow).join('')}</div>
-    <div style="display:flex; gap:8px; margin:4px 0 12px;">
-      <button type="button" class="btn small" data-add-item="task">+ Add task</button>
-      <button type="button" class="btn small" data-add-item="stock">+ Add stock item</button>
-    </div>
-
-    <div class="detail-section" style="margin-top:4px;"><h4>Vessels</h4></div>
     <div class="vessel-check-grid">
-      <label class="vessel-check"><input type="checkbox" name="allVessels" value="1" id="clAllVessels" ${cl.allVessels?'checked':''}> <b>All vessels</b> <span style="color:var(--ink-soft); font-size:11px;">including ones added later</span></label>
-      <div id="clVesselList" style="display:${cl.allVessels?'none':'flex'}; flex-direction:column; gap:7px;">
+      <label class="vessel-check"><input type="checkbox" name="allVessels" value="1" id="clAllVessels" ${allVessels?'checked':''}> <b>All vessels</b> <span style="color:var(--ink-soft); font-size:11px;">including ones added later</span></label>
+      <div id="clVesselList" style="display:${allVessels?'none':'flex'}; flex-direction:column; gap:7px;">
         ${state.allVessels.length === 0
           ? '<p style="font-size:12px; color:var(--ink-soft);">No vessels on the register yet.</p>'
           : state.allVessels.map(v=>`<label class="vessel-check"><input type="checkbox" name="vesselIds" value="${v.id}" ${assigned.has(v.id)?'checked':''}> ${esc(v.name)} <span style="color:var(--ink-soft); font-size:11px;">${esc(v.reg||'')}</span></label>`).join('')}
       </div>
+    </div>`;
+}
+
+function checklistForm(cl){
+  cl = cl || { name:'', frequency:'daily', description:'', emailTo:'', allVessels:false, vesselIds:[], items:[{ type:'task' }] };
+  return `
+    <label class="field">Checklist name<input name="name" value="${esc(cl.name)}" placeholder="e.g. Pre-departure check" required></label>
+    ${fieldRow(
+      `<label class="field">Frequency<select name="frequency">${CHECKLIST_FREQS.map(f=>`<option value="${f.id}" ${cl.frequency===f.id?'selected':''}>${f.label}</option>`).join('')}</select></label>`,
+      `<label class="field">Email completed checklists to<input name="emailTo" type="email" value="${esc(cl.emailTo||'')}" placeholder="optional"></label>`
+    )}
+    <label class="field">Description / instructions<textarea name="description" rows="2" placeholder="optional — shown at the top of the checklist">${esc(cl.description||'')}</textarea></label>
+
+    <div class="detail-section" style="margin-top:4px;"><h4>Items</h4></div>
+    <p style="font-size:12px; color:var(--ink-soft); margin-top:-2px;">Tasks are ticked off. Stock items ask for a count each time: <b>par</b> is what should be on hand, and the item is flagged low at or below <b>min</b> (or below par if no min is set). Headings group the list into sections.</p>
+    <div id="clItems">${(cl.items||[]).map(checklistItemRow).join('')}</div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin:4px 0 12px;">
+      <button type="button" class="btn small" data-add-item="task">+ Add task</button>
+      <button type="button" class="btn small" data-add-item="stock">+ Add stock item</button>
+      <button type="button" class="btn small ghost" data-add-item="heading">+ Add heading</button>
     </div>
+
+    <div class="detail-section" style="margin-top:4px;"><h4>Vessels</h4></div>
+    ${checklistVesselPicker(cl.allVessels, cl.vesselIds)}
   `;
 }
 
+function checklistImportForm(){
+  const n = k => STANDARD_CHECKLISTS[k].filter(i=>!i.startsWith('## ')).length;
+  return `
+    <p style="font-size:13px; color:var(--ink-soft); margin:-8px 0 14px;">Creates checklist templates from the standard OCEANHUB lists (from the Riva 58 Capri Vessel Manager). You can edit them afterwards.</p>
+    <div class="vessel-check-grid">
+      <label class="vessel-check"><input type="checkbox" name="lists" value="daily" checked> Daily checklist <span class="cl-hint">${n('daily')} tasks in 4 sections</span></label>
+      <label class="vessel-check"><input type="checkbox" name="lists" value="weekly" checked> Weekly checklist <span class="cl-hint">${n('weekly')} tasks</span></label>
+      <label class="vessel-check"><input type="checkbox" name="lists" value="monthly" checked> Monthly checklist <span class="cl-hint">${n('monthly')} tasks</span></label>
+      <label class="vessel-check"><input type="checkbox" name="lists" value="stock" checked> Stock guide <span class="cl-hint">${n('stock')} items with par quantities</span></label>
+    </div>
+    ${fieldRow(
+      `<label class="field">Count stock<select name="stockFrequency">${CHECKLIST_FREQS.map(f=>`<option value="${f.id}" ${f.id==='weekly'?'selected':''}>${f.label}</option>`).join('')}</select></label>`,
+      `<label class="field">Email completed checklists to<input name="emailTo" type="email" value="thor@oceanhub.co.za" placeholder="optional"></label>`
+    )}
+    <div class="detail-section" style="margin-top:4px;"><h4>Vessels</h4></div>
+    ${checklistVesselPicker(false, [])}
+  `;
+}
+/* Turn the standard text lists into template items: "## X" → heading, "5 x Item" → stock with par 5. */
+function standardChecklistItems(key){
+  return STANDARD_CHECKLISTS[key].map(line=>{
+    if(line.startsWith('## ')) return { id:uid('ci'), type:'heading', label:line.slice(3), unit:'', par:'', min:'' };
+    if(key === 'stock'){
+      const m = /^(\d+)\s*[x×]\s*(.+)$/i.exec(line.trim());
+      return { id:uid('ci'), type:'stock', label: m ? m[2] : line, unit:'', par: m ? Number(m[1]) : '', min:'' };
+    }
+    return { id:uid('ci'), type:'task', label:line, unit:'', par:'', min:'' };
+  });
+}
+
 function wireChecklistItemEditor(){
+  const all = document.getElementById('clAllVessels');
+  if(all) all.addEventListener('change', ()=>{ document.getElementById('clVesselList').style.display = all.checked ? 'none' : 'flex'; });
   const list = document.getElementById('clItems');
   if(!list) return;
   const wireRow = row=>{
     row.querySelector('[data-item-type]').addEventListener('change', e=>{
-      row.classList.toggle('stock', e.target.value==='stock');
-      row.classList.toggle('task', e.target.value!=='stock');
+      ['task','stock','heading'].forEach(t=> row.classList.toggle(t, e.target.value===t));
     });
     row.querySelector('[data-remove-item]').addEventListener('click', ()=> row.remove());
   };
@@ -1295,8 +1474,6 @@ function wireChecklistItemEditor(){
     wireRow(row);
     row.querySelector('[name="itemLabel"]').focus();
   }));
-  const all = document.getElementById('clAllVessels');
-  if(all) all.addEventListener('change', ()=>{ document.getElementById('clVesselList').style.display = all.checked ? 'none' : 'flex'; });
 }
 
 /* Items to show in a run: the template's current items, plus any item recorded in
@@ -1307,7 +1484,7 @@ function checklistRunItems(modal){
   const items = cl ? (cl.items||[]).slice() : [];
   const ids = new Set(items.map(i=>i.id));
   (run ? run.entries : []).forEach(en=>{
-    if(!ids.has(en.itemId)) items.push({ id:en.itemId, label:en.label, type:en.type, unit:en.unit, min:en.min });
+    if(!ids.has(en.itemId)) items.push({ id:en.itemId, label:en.label, type:en.type, unit:en.unit, par:en.par, min:en.min });
   });
   return items;
 }
@@ -1316,12 +1493,25 @@ function checklistRunTitle(modal){
   const run = findChecklistRun(modal.checklistId, modal.vesselId, modal.period);
   return esc(cl ? cl.name : (run && run.checklistName) || 'Checklist');
 }
+function checklistRunActions(modal){
+  const cl = state.allChecklists.find(c=>c.id===modal.checklistId);
+  return `
+    <button type="button" class="btn ghost" data-action="close-modal">Cancel</button>
+    <button type="button" class="btn ghost" data-action="print-checklist">Print</button>
+    <button type="submit" class="btn${cl && cl.emailTo ? '' : ' primary'}" name="submitAction" value="save">Save</button>
+    ${cl && cl.emailTo ? `<button type="submit" class="btn primary" name="submitAction" value="email">Complete &amp; email</button>` : ''}
+  `;
+}
 function checklistRunForm(modal){
   const cl = state.allChecklists.find(c=>c.id===modal.checklistId);
   const run = findChecklistRun(modal.checklistId, modal.vesselId, modal.period);
+  const freq = cl ? cl.frequency : run && run.frequency;
   const entryOf = id => run ? (run.entries||[]).find(en=>en.itemId===id) : null;
   const items = checklistRunItems(modal);
-  const tasks = items.filter(i=>i.type!=='stock'), stockItems = items.filter(i=>i.type==='stock');
+  const date = run && run.date ? run.date
+    : modal.period === checklistPeriod(freq) ? localISODate(new Date()) : periodStartDate(modal.period);
+  let crew = run ? run.completedBy || '' : '';
+  if(!run){ try{ crew = localStorage.getItem(CREW_NAME_KEY) || ''; }catch(e){} }
   /* last count from any earlier run on this vessel, shown as a reference */
   const lastCount = id => {
     const prev = state.checklistRuns
@@ -1331,33 +1521,71 @@ function checklistRunForm(modal){
       .sort((a,b)=> String(b.r.updatedAt||'').localeCompare(String(a.r.updatedAt||'')))[0];
     return prev ? prev.en.qty : null;
   };
-  return `
-    <p style="margin:-10px 0 14px; color:var(--ink-soft); font-size:13px;">
-      ${esc(vesselName(modal.vesselId))} · ${freqName(cl ? cl.frequency : run && run.frequency)} · ${checklistPeriodLabel(modal.period)}
-      ${run ? `<br><span style="font-size:12px;">Last saved ${fmtDateTime(run.updatedAt)}${run.completedBy ? ` by ${esc(run.completedBy)}` : ''}</span>` : ''}
-    </p>
-    ${cl && cl.description ? `<p style="font-size:13px; margin:0 0 12px;">${esc(cl.description)}</p>` : ''}
-    ${!cl ? `<p style="font-size:12px; color:var(--brass); margin:0 0 12px;">This checklist has been deleted; showing what was recorded.</p>` : ''}
-    ${tasks.length ? `
-      <div class="detail-section" style="margin-top:0;"><h4>Tasks</h4></div>
-      ${tasks.map(it=>{ const en = entryOf(it.id); return `
-        <div class="cl-run-item"><label><input type="checkbox" name="done_${esc(it.id)}" value="1" ${en && en.done ? 'checked' : ''}> ${esc(it.label)}</label></div>`; }).join('')}
-    ` : ''}
-    ${stockItems.length ? `
-      <div class="detail-section"><h4>Stock count</h4></div>
-      ${stockItems.map(it=>{ const en = entryOf(it.id); const lc = lastCount(it.id); return `
+  const hasHeadings = items.some(it=>it.type==='heading');
+  const itemHtml = it=>{
+    if(it.type==='heading') return `<div class="cl-run-heading">${esc(it.label)}</div>`;
+    const en = entryOf(it.id);
+    if(it.type==='stock'){
+      const lc = lastCount(it.id);
+      const hints = [it.par!=='' && it.par!=null ? `Par ${esc(it.par)}` : '', it.min!=='' && it.min!=null ? `Min ${esc(it.min)}` : '', lc!=null ? `last count ${esc(lc)}` : ''].filter(Boolean).join(' · ');
+      return `
         <div class="cl-run-item">
           <div style="flex:1; min-width:0;">${esc(it.label)}${it.unit ? ` <span class="cl-hint">(${esc(it.unit)})</span>` : ''}
-            <div class="cl-hint">${it.min!=='' && it.min!=null ? `Min ${esc(it.min)}` : 'No minimum'}${lc!=null ? ` · last count ${esc(lc)}` : ''}</div>
+            ${hints ? `<div class="cl-hint">${hints}</div>` : ''}
           </div>
-          <input class="cl-qty" type="number" min="0" step="any" inputmode="decimal" name="qty_${esc(it.id)}" value="${en && en.qty!=='' && en.qty!=null ? esc(en.qty) : ''}" placeholder="On hand">
-        </div>`; }).join('')}
-    ` : ''}
-    <div class="detail-section"><h4>Sign-off</h4></div>
-    <label class="field">Completed by<input name="completedBy" value="${esc(run ? run.completedBy||'' : '')}" placeholder="Name"></label>
-    <label class="field">Notes<textarea name="notes" rows="2">${esc(run ? run.notes||'' : '')}</textarea></label>
+          <input class="cl-qty" type="number" min="0" step="any" inputmode="decimal" name="qty_${esc(it.id)}" value="${en && en.qty!=='' && en.qty!=null ? esc(en.qty) : ''}" placeholder="Count">
+        </div>`;
+    }
+    return `<div class="cl-run-item"><label><input type="checkbox" name="done_${esc(it.id)}" value="1" ${en && en.done ? 'checked' : ''}> ${esc(it.label)}</label></div>`;
+  };
+  /* without headings, keep tasks and stock counts in their own sections */
+  const body = hasHeadings ? items.map(itemHtml).join('') : [
+    items.some(i=>i.type!=='stock') ? `<div class="cl-run-heading">Tasks</div>` + items.filter(i=>i.type!=='stock').map(itemHtml).join('') : '',
+    items.some(i=>i.type==='stock') ? `<div class="cl-run-heading">Stock count</div>` + items.filter(i=>i.type==='stock').map(itemHtml).join('') : ''
+  ].join('');
+  return `
+    <p style="margin:-10px 0 14px; color:var(--ink-soft); font-size:13px;">
+      ${esc(vesselName(modal.vesselId))} · ${freqName(freq)} · ${checklistPeriodLabel(modal.period)}
+      ${run ? `<br><span style="font-size:12px;">Last saved ${fmtDateTime(run.updatedAt)}${run.completedBy ? ` by ${esc(run.completedBy)}` : ''}</span>` : ''}
+    </p>
+    ${cl && cl.description ? `<p style="font-size:13px; margin:0 0 12px; white-space:pre-line;">${esc(cl.description)}</p>` : ''}
+    ${!cl ? `<p style="font-size:12px; color:var(--brass); margin:0 0 12px;">This checklist has been deleted; showing what was recorded.</p>` : ''}
+    ${fieldRow(
+      `<label class="field">Crew member<input name="completedBy" value="${esc(crew)}" placeholder="Name"></label>`,
+      `<label class="field">Date<input name="runDate" type="date" value="${date}" max="${localISODate(new Date())}" required></label>`
+    )}
+    ${body}
+    <label class="field" style="margin-top:14px;">Notes / observations<textarea name="notes" rows="2" placeholder="Anything the office should know…">${esc(run ? run.notes||'' : '')}</textarea></label>
     <p style="font-size:12px; color:var(--ink-soft); margin:-4px 0 0;">You can save part-way and come back; it's marked completed once every task is ticked and every stock item counted.</p>
   `;
+}
+
+function checklistEmail(cl, run){
+  const v = state.allVessels.find(x=>x.id===run.vesselId) || {};
+  const subject = `OCEANHUB — ${v.name || 'Vessel'} — ${run.checklistName} — ${run.date}`;
+  const entries = run.entries || [];
+  const tasks = entries.filter(en=>en.type==='task');
+  const stock = entries.filter(en=>en.type==='stock');
+  const done = tasks.filter(en=>en.done), notDone = tasks.filter(en=>!en.done);
+  let body = `${v.name || ''}${v.type ? ` (${v.type}${v.reg ? ' · ' + v.reg : ''})` : ''}\n`;
+  body += `${run.checklistName} — ${fmtDate(run.date)}\nCrew: ${run.completedBy || '—'}\n`;
+  if(v.engineHours != null) body += `Engine hours: ${Number(v.engineHours).toLocaleString()} hrs\n`;
+  if(tasks.length){
+    body += `\nChecked (${done.length}/${tasks.length}):\n` + (done.map(en=>'  [x] ' + en.label).join('\n') || '  (none)');
+    if(notDone.length) body += `\n\nNot completed:\n` + notDone.map(en=>'  [ ] ' + en.label).join('\n');
+  }
+  if(stock.length){
+    body += `\n\nStock count:\n` + stock.map(en=>{
+      const qty = en.qty==='' || en.qty==null ? null : Number(en.qty);
+      const status = stockStatus(qty, numOrNull(en.par), numOrNull(en.min));
+      return `  ${en.label}: ${qty==null ? 'not counted' : qty + (en.unit ? ' ' + en.unit : '')}`
+        + (en.par!=='' && en.par!=null ? ` (par ${en.par})` : '')
+        + (status==='low' ? ' — LOW' : status==='below-par' ? ' — below par' : '');
+    }).join('\n');
+  }
+  if(run.notes) body += `\n\nNotes:\n${run.notes}`;
+  body += `\n\n— Sent from OCEANHUB Vessel Manager`;
+  return mailtoLink(cl.emailTo, '', subject, body);
 }
 
 /* ============================= VESSELS ============================= */
@@ -2393,7 +2621,7 @@ function renderModal(){
   const root = document.getElementById('modalRoot');
   const modal = state.modal;
   if(!modal){ root.innerHTML=''; return; }
-  let title = '', body = '';
+  let title = '', body = '', actions = null;
   const cancelBtn = `<button type="button" class="btn ghost" data-action="close-modal">Cancel</button>`;
   const saveBtn = `<button type="submit" class="btn primary">Save</button>`;
 
@@ -2427,7 +2655,8 @@ function renderModal(){
   else if(modal.type==='company'){ title = modal.data ? 'Edit company' : 'Add company'; body = companyForm(modal.data); }
   else if(modal.type==='contractor'){ title = modal.data ? 'Edit contractor' : 'Add contractor'; body = contractorForm(modal.data); }
   else if(modal.type==='checklist'){ title = modal.data ? 'Edit checklist' : 'New checklist'; body = checklistForm(modal.data); }
-  else if(modal.type==='checklist-run'){ title = checklistRunTitle(modal); body = checklistRunForm(modal); }
+  else if(modal.type==='checklist-run'){ title = checklistRunTitle(modal); body = checklistRunForm(modal); actions = checklistRunActions(modal); }
+  else if(modal.type==='checklist-import'){ title = 'Import standard checklists'; body = checklistImportForm(); }
   else if(modal.type==='contractor-payment'){ title = modal.data ? 'Edit payment' : 'Add payment'; body = contractorPaymentForm(modal.data, modal.data ? null : lastTravelDefaults(modal.id)); }
 
   root.innerHTML = `
@@ -2436,7 +2665,7 @@ function renderModal(){
         <form id="modalForm">
           <h3>${title}</h3>
           ${body}
-          <div class="modal-actions">${cancelBtn}${saveBtn}</div>
+          <div class="modal-actions">${actions || cancelBtn + saveBtn}</div>
         </form>
       </div>
     </div>
@@ -2454,6 +2683,11 @@ function attachModalEvents(){
   const form = document.getElementById('modalForm');
   if(form) form.addEventListener('submit', handleFormSubmit);
   wireChecklistItemEditor();
+  document.querySelectorAll('[data-action="print-checklist"]').forEach(b=>b.addEventListener('click', ()=>{
+    document.body.classList.add('print-modal');
+    window.addEventListener('afterprint', ()=> document.body.classList.remove('print-modal'), { once:true });
+    window.print();
+  }));
   const photoInput = document.getElementById('vesselPhotoInput');
   if(photoInput){
     photoInput.addEventListener('change', async (e)=>{
@@ -2821,7 +3055,7 @@ async function handleFormSubmit(e){
   if(e.target.flushPendingExpense) e.target.flushPendingExpense();
   const fd = new FormData(e.target);
   const modal = state.modal;
-  let targetKey = null, mutateFn = null, nextModal = null;
+  let targetKey = null, mutateFn = null, nextModal = null, emailAfterSave = null;
 
   if(modal.type==='vessel'){
     const data = { name:fd.get('name'), type:fd.get('type'), reg:fd.get('reg'), status:fd.get('status'), engineHours:Number(fd.get('engineHours'))||0, notes:fd.get('notes')||'', photo:fd.get('photo')||'', ownerName:fd.get('ownerName')||'', ownerPhone:fd.get('ownerPhone')||'', ownerEmail:fd.get('ownerEmail')||'' };
@@ -3050,17 +3284,20 @@ async function handleFormSubmit(e){
   }
 
   else if(modal.type==='checklist'){
-    const labels = fd.getAll('itemLabel'), types = fd.getAll('itemType'), units = fd.getAll('itemUnit'), mins = fd.getAll('itemMin'), ids = fd.getAll('itemId');
-    const items = labels.map((label, i)=>({
-      id: ids[i] || uid('ci'), label: String(label).trim(), type: types[i]==='stock' ? 'stock' : 'task',
-      unit: types[i]==='stock' ? String(units[i]||'').trim() : '',
-      min: types[i]==='stock' && mins[i]!=='' ? Number(mins[i])||0 : ''
-    })).filter(it => it.label);
+    const labels = fd.getAll('itemLabel'), types = fd.getAll('itemType'), units = fd.getAll('itemUnit'), pars = fd.getAll('itemPar'), mins = fd.getAll('itemMin'), ids = fd.getAll('itemId');
+    const items = labels.map((label, i)=>{
+      const type = types[i]==='stock' || types[i]==='heading' ? types[i] : 'task';
+      const stock = type==='stock';
+      return { id: ids[i] || uid('ci'), label: String(label).trim(), type,
+        unit: stock ? String(units[i]||'').trim() : '',
+        par: stock && pars[i]!=='' ? Number(pars[i])||0 : '',
+        min: stock && mins[i]!=='' ? Number(mins[i])||0 : '' };
+    }).filter(it => it.label);
     const allVessels = fd.get('allVessels') === '1';
     const vesselIds = allVessels ? [] : fd.getAll('vesselIds');
-    if(items.length === 0){ alert('Add at least one task or stock item.'); return; }
+    if(!items.some(it=>it.type!=='heading')){ alert('Add at least one task or stock item.'); return; }
     if(!allVessels && vesselIds.length === 0){ alert('Choose at least one vessel, or tick "All vessels".'); return; }
-    const data = { name:fd.get('name'), frequency:fd.get('frequency'), description:fd.get('description')||'', allVessels, vesselIds, items };
+    const data = { name:fd.get('name'), frequency:fd.get('frequency'), description:fd.get('description')||'', emailTo:String(fd.get('emailTo')||'').trim(), allVessels, vesselIds, items };
     const editId = modal.data ? modal.data.id : null;
     targetKey = 'checklists';
     mutateFn = fresh => editId
@@ -3070,31 +3307,61 @@ async function handleFormSubmit(e){
   else if(modal.type==='checklist-run'){
     const items = checklistRunItems(modal);
     const entries = items.map(it=>{
-      const base = { itemId:it.id, label:it.label, type:it.type, unit:it.unit||'', min:it.min==null ? '' : it.min };
+      const base = { itemId:it.id, label:it.label, type:it.type, unit:it.unit||'', par:it.par==null ? '' : it.par, min:it.min==null ? '' : it.min };
+      if(it.type==='heading') return base;
       if(it.type==='stock'){
         const raw = fd.get('qty_' + it.id);
         return { ...base, qty: raw==='' || raw==null ? '' : Number(raw)||0 };
       }
       return { ...base, done: fd.get('done_' + it.id) === '1' };
     });
-    const complete = entries.every(en => en.type==='stock' ? en.qty!=='' : en.done);
+    const complete = entries.every(en => en.type==='heading' ? true : en.type==='stock' ? en.qty!=='' : en.done);
     const cl = state.allChecklists.find(c=>c.id===modal.checklistId);
     const existing = findChecklistRun(modal.checklistId, modal.vesselId, modal.period);
+    const frequency = cl ? cl.frequency : (existing ? existing.frequency : 'daily');
+    /* the chosen date decides which day / week / month this submission counts for */
+    const date = fd.get('runDate') || localISODate(new Date());
+    const period = checklistPeriod(frequency, date);
+    if(period !== modal.period && findChecklistRun(modal.checklistId, modal.vesselId, period)
+      && !confirm(`There's already a ${freqName(frequency).toLowerCase()} checklist saved for ${checklistPeriodLabel(period)}. Replace it with this one?`)) return;
+    const completedBy = String(fd.get('completedBy')||'').trim();
+    try{ if(completedBy) localStorage.setItem(CREW_NAME_KEY, completedBy); }catch(e){}
     const data = {
       checklistId:modal.checklistId, checklistName: cl ? cl.name : (existing ? existing.checklistName : ''),
-      frequency: cl ? cl.frequency : (existing ? existing.frequency : ''),
-      vesselId:modal.vesselId, period:modal.period, entries,
+      frequency, vesselId:modal.vesselId, period, date, entries,
       status: complete ? 'completed' : 'in-progress',
-      completedBy:fd.get('completedBy')||'', notes:fd.get('notes')||'',
+      completedBy, notes:fd.get('notes')||'',
       updatedAt:new Date().toISOString(),
       updatedByRole: session ? session.role : ''
     };
     targetKey = 'checklistRuns';
     mutateFn = fresh => {
-      const i = fresh.findIndex(r=>r.checklistId===data.checklistId && r.vesselId===data.vesselId && r.period===data.period);
-      if(i === -1) return [...fresh, { id:uid('cr'), ...data }];
-      const copy = fresh.slice(); copy[i] = { ...copy[i], ...data }; return copy;
+      const same = r => r.checklistId===data.checklistId && r.vesselId===data.vesselId;
+      /* a changed date moves the record to its new period */
+      const prev = fresh.find(r=> same(r) && r.period===modal.period);
+      const rest = fresh.filter(r=> !(same(r) && (r.period===modal.period || r.period===data.period)));
+      return [...rest, { ...(prev||{}), id: prev ? prev.id : uid('cr'), ...data }];
     };
+    if(e.submitter && e.submitter.value==='email' && cl && cl.emailTo){
+      emailAfterSave = checklistEmail(cl, data);
+    }
+  }
+  else if(modal.type==='checklist-import'){
+    const lists = fd.getAll('lists');
+    const allVessels = fd.get('allVessels') === '1';
+    const vesselIds = allVessels ? [] : fd.getAll('vesselIds');
+    if(lists.length === 0){ alert('Choose at least one list to import.'); return; }
+    if(!allVessels && vesselIds.length === 0){ alert('Choose at least one vessel, or tick "All vessels".'); return; }
+    const emailTo = String(fd.get('emailTo')||'').trim();
+    const meta = {
+      daily:{ name:'Daily checklist', frequency:'daily', description:"OCEANHUB daily routine. The Williams Turbojet section covers the tender's start-of-day and pre-use checks; Engine Room & Systems includes the Cummins Onan generator's daily checks and mandatory CO detector test." },
+      weekly:{ name:'Weekly checklist', frequency:'weekly', description:'General yacht best-practice weekly checks.' },
+      monthly:{ name:'Monthly checklist', frequency:'monthly', description:'General yacht best-practice monthly checks.' },
+      stock:{ name:'Stock guide', frequency:fd.get('stockFrequency') || 'weekly', description:'Exterior maintenance locker. Count what is on hand; par is what should be there.' }
+    };
+    const created = lists.map(k=>({ id:uid('cl'), createdDate:localISODate(new Date()), ...meta[k], emailTo, allVessels, vesselIds, items: standardChecklistItems(k) }));
+    targetKey = 'checklists';
+    mutateFn = fresh => [...fresh, ...created];
   }
 
   if(targetKey && mutateFn){
@@ -3102,6 +3369,7 @@ async function handleFormSubmit(e){
   }
   state.modal = nextModal;
   render();
+  if(emailAfterSave) window.location.href = emailAfterSave;
 }
 
 /* ============================= GLOBAL ACTIONS ============================= */
@@ -3211,6 +3479,7 @@ function attachContentEvents(){
         case 'open-checklists': state.activeTab = 'checklists'; render(); window.scrollTo(0,0); break;
         case 'back-to-dashboard': state.activeTab = 'dashboard'; render(); break;
         case 'add-checklist': state.modal = { type:'checklist', data:null }; renderModal(); break;
+        case 'import-checklists': state.modal = { type:'checklist-import' }; renderModal(); break;
         case 'edit-checklist': state.modal = { type:'checklist', data: state.allChecklists.find(c=>c.id===id) }; renderModal(); break;
         case 'delete-checklist':
           if(confirm('Delete this checklist? Past submissions and stock counts are kept.')){
