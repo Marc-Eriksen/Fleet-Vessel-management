@@ -2772,6 +2772,13 @@ function maintenanceForm(m){
   `;
 }
 
+/* Qualification names already used across all crew (admin's full list), offered as a
+   template when adding crew so owners only fill in expiry dates. */
+function qualTemplateNames(){
+  return [...new Set(state.allCrew.flatMap(c=>(c.quals||[]).map(q=>String(q.name||'').trim())).filter(Boolean))]
+    .sort((a,b)=>a.localeCompare(b));
+}
+
 function crewForm(c){
   const isEdit = !!c;
   c = c || { name:'', role:'', vesselId:state.vessels[0]?.id||'', email:'', phone:'' };
@@ -2785,14 +2792,28 @@ function crewForm(c){
       `<label class="field">Email<input name="email" type="email" value="${esc(c.email||'')}" placeholder="crew@example.com"></label>`,
       `<label class="field">Phone / WhatsApp<input name="phone" type="tel" value="${esc(c.phone||'')}" placeholder="+27 82 000 0000"></label>`
     )}
-    ${!isEdit ? `<p style="font-size:12px; color:var(--ink-soft); margin-top:-4px;">You can add qualifications once the crew member is saved.</p>` : ''}
+    ${!isEdit ? crewQualTemplate() : ''}
+  `;
+}
+function crewQualTemplate(){
+  const names = qualTemplateNames();
+  if(!names.length) return `<p style="font-size:12px; color:var(--ink-soft); margin-top:-4px;">You can add qualifications once the crew member is saved.</p>`;
+  return `
+    <div class="detail-section" style="margin-top:4px;"><h4>Qualifications</h4></div>
+    <p style="font-size:12px; color:var(--ink-soft); margin-top:-4px;">Enter the expiry date for each qualification this crew member holds. Leave the others blank. You can add more later.</p>
+    ${names.map((n,i)=>`
+      <label class="field">${esc(n)}
+        <input type="hidden" name="tqName_${i}" value="${esc(n)}">
+        ${dateField('tqExpiry_' + i, '')}
+      </label>`).join('')}
   `;
 }
 
 function qualForm(q){
   q = q || { name:'', expiry:'' };
   return `
-    <label class="field">Qualification / certificate name<input name="name" value="${esc(q.name)}" placeholder="e.g. STCW Basic Safety Training" required></label>
+    <label class="field">Qualification / certificate name<input name="name" value="${esc(q.name)}" placeholder="e.g. STCW Basic Safety Training" list="qualNames" autocomplete="off" required></label>
+    <datalist id="qualNames">${qualTemplateNames().map(n=>`<option value="${esc(n)}">`).join('')}</datalist>
     <label class="field">Expiry date${dateField('expiry', q.expiry, { required:true })}</label>
   `;
 }
@@ -3771,10 +3792,15 @@ async function handleFormSubmit(e){
   else if(modal.type==='crew'){
     const data = { name:fd.get('name'), role:fd.get('role'), vesselId:fd.get('vesselId'), email:fd.get('email')||'', phone:fd.get('phone')||'' };
     const editId = modal.data ? modal.data.id : null;
+    const quals = [];
+    for(let i=0; fd.has('tqName_' + i); i++){
+      const expiry = fd.get('tqExpiry_' + i);
+      if(expiry) quals.push({ id:uid('q'), name:fd.get('tqName_' + i), expiry });
+    }
     targetKey = 'crew';
     mutateFn = fresh => editId
       ? fresh.map(c=> c.id===editId ? { ...c, ...data } : c)
-      : [...fresh, { id:uid('c'), quals:[], documents:[], ...data }];
+      : [...fresh, { id:uid('c'), quals, documents:[], ...data }];
   }
   else if(modal.type==='qual'){
     const data = { name:fd.get('name'), expiry:fd.get('expiry') };
