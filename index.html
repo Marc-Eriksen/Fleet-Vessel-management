@@ -314,6 +314,24 @@
   .hrs-grid > label{min-width:0;}
   .hrs-grid input{width:100%; min-width:0;}
   .cl-card + .cl-card{margin-top:14px;}
+  .svc-units{display:grid; grid-template-columns:repeat(auto-fill, minmax(240px, 1fr)); gap:10px; margin-bottom:14px;}
+  .svc-unit{display:flex; flex-direction:column; gap:6px; text-align:left; background:var(--white-card); border:1px solid var(--border); border-radius:12px; padding:12px 14px; cursor:pointer; font:inherit; color:var(--ink); min-width:0;}
+  .svc-unit:hover{border-color:var(--navy-light);}
+  .svc-unit.active{border-color:var(--navy); box-shadow:0 0 0 1px var(--navy);}
+  .svc-unit-head{display:flex; justify-content:space-between; align-items:center; gap:8px; font-size:14px;}
+  .svc-note{background:var(--brand-tint); border:1px solid var(--border); border-radius:12px; padding:12px 14px; font-size:12.5px; line-height:1.5; color:var(--ink-muted); margin-bottom:14px;}
+  .svc-item{padding:12px 0; border-top:1px solid var(--border);}
+  .hrs-title + .svc-item, .cl-hint + .svc-item{border-top:none;}
+  .svc-head{display:flex; justify-content:space-between; align-items:flex-start; gap:10px;}
+  .svc-head .stamp{flex-shrink:0;}
+  .svc-title{font-weight:600; font-size:14px; margin-bottom:2px;}
+  .svc-tag{display:inline-block; font-size:10.5px; font-weight:700; padding:1px 7px; border-radius:999px; background:var(--brass-bg); color:var(--brass); vertical-align:1px; margin-left:4px;}
+  .svc-reason{font-size:12.5px; color:var(--ink-muted); margin-top:6px;}
+  .svc-scope{margin-top:8px; font-size:12.5px;}
+  .svc-scope summary{cursor:pointer; color:var(--navy); font-weight:600;}
+  .svc-scope ul{margin:6px 0 6px 18px; padding:0; line-height:1.55;}
+  .svc-actions{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;}
+  .svc-form-head{font-size:11px; font-weight:700; letter-spacing:0.06em; text-transform:uppercase; color:var(--ink-muted); margin:14px 0 8px; padding-top:12px; border-top:1px solid var(--border);}
   .hrs-table{font-size:13px;}
   .hrs-table th, .hrs-table td{padding:7px 6px;}
   .cl-meta-row{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
@@ -438,6 +456,11 @@ let state = {
   hourReadings: [],
   allHourReadings: [],
   hoursVesselId: null,
+  serviceLog: [],
+  allServiceLog: [],
+  maintView: 'tasks',
+  svcVesselId: null,
+  svcMeterId: null,
   hoursSaved: false,
   activeTab: 'dashboard',
   modal: null,
@@ -721,6 +744,7 @@ function applyScoping(){
   state.checklists = state.allChecklists.filter(cl => cl.allVessels || (cl.vesselIds || []).some(id => visible.has(id)));
   state.checklistRuns = state.allChecklistRuns.filter(r => visible.has(r.vesselId));
   state.hourReadings = state.allHourReadings.filter(r => visible.has(r.vesselId));
+  state.serviceLog = state.allServiceLog.filter(s => visible.has(s.vesselId));
 }
 
 function asArray(v){
@@ -750,6 +774,7 @@ function applyRemoteData(val){
   state.allChecklists = normalizeKey('checklists', val.checklists);
   state.allChecklistRuns = normalizeKey('checklistRuns', val.checklistRuns);
   state.allHourReadings = normalizeKey('hourReadings', val.hourReadings);
+  state.allServiceLog = normalizeKey('serviceLog', val.serviceLog);
   applyScoping();
 }
 
@@ -1086,10 +1111,13 @@ function renderDashboard(){
   state.crew.forEach(c=>c.quals.forEach(q=>{
     events.push({ date:q.expiry, kind:'Qualification', title:q.name, sub:`${c.name} (${c.role})`, status:qualStatus(q.expiry) });
   }));
-  events.sort((a,b)=> new Date(a.date) - new Date(b.date));
-  const upcoming = events.slice(0,10);
   const clOutstanding = checklistAssignments().filter(a=>!a.run || a.run.status!=='completed').length;
   const lowStock = stockRows().filter(r=>r.low).length;
+  const svcAlerts = serviceAlerts();
+  svcAlerts.forEach(a=> events.push({ date:a.d.dateDue && a.d.status!=='critical' ? a.d.dateDue : localISODate(new Date()), kind:'Service',
+    title:`${a.task.name}`, sub:`${a.vessel.name} — ${svcCap(a.meter.label)} · ${a.d.reason}`, status:SVC_STAMP[a.d.status], label:SVC_LABEL[a.d.status] }));
+  events.sort((a,b)=> new Date(a.date) - new Date(b.date));
+  const upcoming = events.slice(0,10);
 
   return `
     <div class="toolbar" style="margin-bottom:4px;">
@@ -1110,9 +1138,10 @@ function renderDashboard(){
       <div class="kpi ${qualsAdvisory>0?'warn':''}"><div class="label">Quals advisory (≤30 days)</div><div class="value">${qualsAdvisory}</div></div>
       <div class="kpi ${clOutstanding>0?'warn':''}"><div class="label">Checklists due</div><div class="value">${clOutstanding}</div></div>
       <div class="kpi ${lowStock>0?'alert':''}"><div class="label">Low stock items</div><div class="value">${lowStock}</div></div>
+      <div class="kpi ${svcAlerts.some(a=>a.d.status==='critical')?'alert':svcAlerts.length?'warn':''}"><div class="label">Service items due</div><div class="value">${svcAlerts.length}</div></div>
     </div>
     <h2 class="section-title" style="font-size:18px;">Upcoming events</h2>
-    <p class="section-sub">Merged view of maintenance due dates and certificate expiries.</p>
+    <p class="section-sub">Merged view of maintenance due dates, engine and equipment services, and certificate expiries.</p>
     <div class="timeline">
       ${upcoming.length===0 ? '<div class="empty-note">Nothing on the horizon.</div>' : upcoming.map(e=>`
         <div class="tl-item">
@@ -1121,7 +1150,7 @@ function renderDashboard(){
             <div class="tl-title">${esc(e.title)}</div>
             <div class="tl-sub">${e.kind} · ${esc(e.sub)}</div>
           </div>
-          <span class="stamp ${e.status}">${stampLabel(e.status)}</span>
+          <span class="stamp ${e.status}">${e.label || stampLabel(e.status)}</span>
         </div>
       `).join('')}
     </div>
@@ -1759,11 +1788,12 @@ function checklistEmail(cl, run){
 function vesselHourMeters(v){
   if(!v) return [];
   const meters = [];
-  (v.engines||[]).forEach(en=> meters.push({ id:'e:'+en.id, kind:'engine', label:`${en.label || 'Engine'} engine`, model:en.type, serial:en.serial, hours:Number(en.hours)||0 }));
-  (v.equipment||[]).forEach(eq=> meters.push({ id:'q:'+eq.id, kind:'equipment', label:eq.type || eq.label || 'Equipment', model:eq.label && eq.type ? eq.label : '', serial:eq.serial, hours:Number(eq.hours)||0 }));
+  const svc = x => ({ schedule:x.schedule || '', scheduleFrom:x.scheduleFrom || '', scheduleFromHours:Number(x.scheduleFromHours)||0 });
+  (v.engines||[]).forEach(en=> meters.push({ id:'e:'+en.id, kind:'engine', label:`${en.label || 'Engine'} engine`, model:en.type, serial:en.serial, hours:Number(en.hours)||0, ...svc(en) }));
+  (v.equipment||[]).forEach(eq=> meters.push({ id:'q:'+eq.id, kind:'equipment', label:eq.type || eq.label || 'Equipment', model:eq.label && eq.type ? eq.label : '', serial:eq.serial, specs:eq.specs || '', hours:Number(eq.hours)||0, ...svc(eq) }));
   (v.tenders||[]).forEach(t=> (t.engines||[]).forEach(en=> meters.push({ id:`t:${t.id}:${en.id}`, kind:'tender',
     label: (t.type || t.name || 'Tender') + ((t.engines||[]).length > 1 ? ` — ${en.label || 'engine'}` : ''),
-    model:[en.label, en.type].filter(Boolean).join(' · '), serial:en.serial, hours:Number(en.hours)||0 })));
+    model:[en.label, en.type].filter(Boolean).join(' · '), serial:en.serial, hours:Number(en.hours)||0, ...svc(en) })));
   return meters;
 }
 function meterHistory(vesselId, meterId){
@@ -2141,12 +2171,361 @@ function tenderMaintenanceForm(m){
   `;
 }
 
+/* ============================= SERVICE SCHEDULES ============================= */
+/* Manufacturer service schedules from the Vessel Manager app. Any hour meter (engine,
+   equipment or tender engine) can follow one, set on its Edit form. Each task counts
+   from the last time it was marked done (serviceLog), or from the meter's schedule
+   start date and hours until then. */
+const MAN_SCHEDULE_HOURS = [
+  [400,  ['M1','M2','M3']],
+  [800,  ['M1','M2']],
+  [1200, ['M1']],
+  [1600, ['M1','M2','M3']],
+  [2000, ['M1']],
+  [2400, ['M1','M2']],
+  [2800, ['M1','M3']],
+  [3200, ['M1','M2','M4']],
+  [3600, ['M1']],
+  [4000, ['M1','M2','M3']],
+  [4400, ['M1']],
+  [4800, ['M1','M2']],
+  [5200, ['M1','M3']],
+  [5600, ['M1','M2']],
+  [6000, ['M1','M4']],
+];
+
+const SERVICE_SCHEDULES = {
+  'man-v8-ng': {
+    name: 'MAN V8/V12 "New Generation" — Gold Standard',
+    mode: 'man',
+    dealerTag: 'MAN workshop',
+    note: 'Maintenance schedule reproduced from the MAN "On Board Service Book" — Gold Standard maintenance schedule for V8/V12/V12+ "New Generation" engines (V8-1200 · D2868 LE436). M1–M4 servicing should be carried out and stamped by a MAN-authorised workshop to keep the Gold Standard warranty valid; mark a service completed once the workshop confirms the work. The hour table runs to 6,000 hrs — beyond that, consult a MAN dealer.',
+    groups: { man: 'MAN service intervals' },
+    tasks: [
+      { id:'M1', group:'man', dealer:true, years:1, name:'M1 — Core Service', short:'Oil, filters, belts & inspection',
+        scope:[
+          'Check outside of engine for oil & coolant leaks',
+          'Check coolant level',
+          'Check concentration of antifreeze / anti-corrosion agent',
+          'Check engine alarms',
+          'Check operation of instruments',
+          'Check coolant hoses for leaks',
+          'Check fuel lines for leaks',
+          'Check condition of impeller',
+          'Check / retighten removable fasteners, hose clamps & pipe connections',
+          'Check condition of Poly-V belt',
+          'Visually inspect wiring harness for damage (do not open connections)',
+          'Check alignment of shaft system',
+          'Read out & delete diagnostic system memory (MMDS) and EDC system memory',
+          'Change engine oil*',
+          'Change engine oil filter cartridges',
+          'Change fuel filter cartridges†',
+          'Change cartridge of the fuel pre-filter†',
+          'Change air filter',
+          'Test drive / engine speed test with ship fully loaded'
+        ],
+        footnote:'* High-performance diesel engine oil per MAN plant standard M3277 only. † Change out earlier if heavy fuel soiling or high water content.' },
+      { id:'M2', group:'man', dealer:true, years:4, name:'M2 — Valve Clearance', short:'Valve clearance check/adjust',
+        scope:[
+          'Check and, if necessary, adjust valve clearance',
+          'V12+ engines only: change fibrous material separator (every second oil change) — not applicable to the V8-1200'
+        ] },
+      { id:'M3', group:'man', dealer:true, years:1, name:'M3 — Diagnostics', short:'Compression & high run-up test',
+        scope:[ 'Carry out compression test and high run-up test (TCOM, TRUP)' ] },
+      { id:'M4', group:'man', dealer:true, name:'M4 — Charge Air & Cooling System', short:'Turbo, coolers & coolant system',
+        scope:[
+          'Visual inspection of the turbocharger',
+          'Clean charge air cooler pipe bundle; pressure-test if necessary',
+          'Clean the heat exchanger plates',
+          'Change the coolant',
+          'Replace all hoses for coolant and sea water',
+          'Replace the water pump repair set with the sea water pump'
+        ] },
+      { id:'A', group:'man', dealer:true, years:4, timeOnly:true, name:'A — 4-Year Service', short:'Time-based only, regardless of hours',
+        scope:[
+          'Change coolant',
+          'Change all hoses for coolant and sea water',
+          'Clean heat exchanger (heat exchanger plates)',
+          'Clean charge air cooler (tube cluster)'
+        ] }
+    ]
+  },
+
+  'seakeeper-6': {
+    name: 'Seakeeper 6 — Scheduled Maintenance Plan',
+    mode: 'rolling',
+    dealerTag: 'Dealer',
+    note: 'Maintenance schedule reproduced from the Seakeeper Scheduled Maintenance Plan (TB-90426-9), filtered to the tasks that apply to the Seakeeper 6. Intervals are rolling — due the stated number of hours or months after the last time each task was done, whichever comes first. Items marked Dealer must be performed by a certified Seakeeper dealer.',
+    groups: { '200h':'Every 200 Hours or 3 Months', '1000h':'Every 1000 Hours or Annually', '2000h':'Every 2000 Hours' },
+    tasks: [
+      { id:'zinc',          group:'200h',  hours:200,  months:3,  dealer:false, name:'Replace zinc anode' },
+      { id:'manifold',      group:'1000h', hours:1000, months:12, dealer:false, name:'Inspect hydraulic manifold components and fittings' },
+      { id:'cylhose',       group:'1000h', hours:1000, months:12, dealer:false, name:'Inspect hydraulic cylinders and hoses' },
+      { id:'brakebush',     group:'1000h', hours:1000, months:12, dealer:false, name:'Inspect brake bushings' },
+      { id:'heatexinsp',    group:'1000h', hours:1000, months:12, dealer:false, name:'Inspect heat exchanger, cooling hoses and confirm proper glycol level' },
+      { id:'elec',          group:'1000h', hours:1000, months:12, dealer:false, name:'Inspect all electrical connections, cables & components' },
+      { id:'mount',         group:'1000h', hours:1000, months:12, dealer:false, name:'Inspect all mounting hardware/bolts' },
+      { id:'descale',       group:'1000h', hours:1000, months:12, dealer:false, name:'Clean/descale heat exchanger' },
+      { id:'seawaterflow',  group:'1000h', hours:1000, months:12, dealer:false, name:'Confirm proper seawater flow' },
+      { id:'oilpressure',   group:'1000h', hours:1000, months:12, dealer:true,  name:'Confirm hydraulic oil pressure' },
+      { id:'seawatervalve', group:'1000h', hours:1000, months:12, dealer:true,  name:'Inspect electric seawater valve' },
+      { id:'glycolflush',   group:'2000h', hours:2000, months:60, dealer:true,  name:'Flush the glycol cooling circuit' },
+      { id:'brakereplace',  group:'2000h', hours:2000, months:null, dealer:true, name:'Replace brake bushings' },
+      { id:'heatexreplace', group:'2000h', hours:2000, months:null, dealer:true, name:'Replace heat exchanger' }
+    ]
+  },
+
+  'williams-turbojet': {
+    name: 'Williams Turbojet — Inspection & Maintenance Table',
+    mode: 'rolling',
+    dealerTag: 'Repair Shop',
+    note: 'Maintenance schedule reproduced from the Williams Jet Tenders "Turbojet" Owner\'s Handbook (080450 Rev 21), Inspection & Maintenance Table. Many tasks use a shorter "first" interval the very first time (e.g. first oil change at 50 hrs/1 yr), then a longer recurring interval afterwards (e.g. every 100 hrs/1 yr) — once a task is marked completed it switches to the recurring interval. Items marked Repair Shop should be carried out by a qualified engineer; refer to the Rotax engine manual for all engine-related servicing.',
+    groups: { engine:'Engine', exhaust:'Exhaust System', cooling:'Cooling System', fuel:'Fuel System', engmgmt:'Engine Management System', airintake:'Air Intake System', electrical:'Electrical System', steering:'Steering System', propulsion:'Propulsion System', hull:'Hull & Body' },
+    tasks: [
+      { id:'oilfilter',        group:'engine', firstHours:50, firstMonths:12, hours:100, months:12, dealer:true,  name:'Engine oil and filter — replace' },
+      { id:'rubbermounts',     group:'engine', firstHours:50, firstMonths:12, hours:100, months:12, dealer:true,  name:'Rubber mounts — inspect' },
+      { id:'corrosion',        group:'engine', hours:10, months:12, dealer:false, name:'Corrosion protection — lubricate metallic components in engine compartment (every 10 hrs in salt water use)' },
+      { id:'ptoseal',          group:'engine', hours:200, months:null, dealer:true, name:'PTO seal and sleeve — replace' },
+      { id:'exhaustinsp',      group:'exhaust', firstHours:50, firstMonths:12, hours:100, months:12, dealer:false, name:'Exhaust system — inspect / clean' },
+      { id:'exhaustflush',     group:'exhaust', hours:100, months:12, dealer:false, name:'Exhaust system flushing — clean (also flush daily in salt or foul water use)' },
+      { id:'hoses',            group:'cooling', firstHours:50, firstMonths:12, hours:100, months:12, dealer:true, name:'Hoses and fasteners — inspect' },
+      { id:'coolantinsp',      group:'cooling', firstHours:50, firstMonths:12, hours:100, months:12, dealer:true, name:'Coolant — inspect' },
+      { id:'coolantreplace',   group:'cooling', hours:200, months:24, dealer:true, name:'Coolant — replace' },
+      { id:'throttlebody',     group:'fuel', firstHours:50, firstMonths:12, hours:100, months:12, dealer:true, name:'Throttle body — inspect' },
+      { id:'fuellines',        group:'fuel', firstHours:50, firstMonths:12, hours:100, months:12, dealer:true, name:'Fuel lines, connections, pressure relief valve & fuel system leak test — inspect' },
+      { id:'faultcodes',       group:'engmgmt', firstHours:50, firstMonths:12, hours:100, months:12, dealer:true, name:'Fault codes — inspect' },
+      { id:'airfilter',        group:'airintake', hours:100, months:12, dealer:true, name:'Air filter — inspect, replace if required' },
+      { id:'sparkplugsinsp',   group:'electrical', firstHours:50, firstMonths:12, hours:100, months:12, dealer:true, name:'Spark plugs — inspect' },
+      { id:'sparkplugsreplace',group:'electrical', hours:200, months:24, dealer:true, name:'Spark plugs — replace' },
+      { id:'ignitioncoils',    group:'electrical', firstHours:50, firstMonths:12, hours:100, months:12, dealer:true, name:'Ignition coils — inspect' },
+      { id:'elecconnections',  group:'electrical', firstHours:50, firstMonths:12, hours:100, months:12, dealer:true, name:'Electrical connections & fastening — visual inspection' },
+      { id:'monitoringbeeper', group:'electrical', firstHours:50, firstMonths:12, hours:100, months:12, dealer:true, name:'Monitoring beeper — inspect' },
+      { id:'cutoffswitch',     group:'electrical', firstHours:50, firstMonths:12, hours:100, months:12, dealer:true, name:'Engine cut-off switch — inspect' },
+      { id:'steeringcable',    group:'steering', firstHours:50, firstMonths:12, hours:100, months:12, dealer:true, name:'Steering cable and connections — inspect' },
+      { id:'steeringnozzle',   group:'steering', firstHours:50, firstMonths:12, hours:100, months:12, dealer:true, name:'Steering nozzle bushings — inspect' },
+      { id:'carbonring',       group:'propulsion', firstHours:50, firstMonths:12, hours:100, months:12, dealer:true, name:'Carbon ring and rubber boot (drive shaft) — inspect' },
+      { id:'shiftersystem',    group:'propulsion', firstHours:50, firstMonths:12, hours:100, months:12, dealer:true, name:'Shifter system, cable and connections — inspect' },
+      { id:'reversegate',      group:'propulsion', firstHours:50, firstMonths:12, hours:100, months:12, dealer:true, name:'Reverse gate — lubricate' },
+      { id:'driveshaftsplines',group:'propulsion', hours:100, months:12, dealer:true, name:'Drive shaft/impeller splines and PTO splines — inspect, lubricate' },
+      { id:'driveshaftlube',   group:'propulsion', hours:100, months:12, dealer:true, name:'Drive shaft — lubricate (corrosion protection)' },
+      { id:'impellerboot',     group:'propulsion', firstHours:50, firstMonths:12, hours:100, months:12, dealer:true, name:'Impeller boot — inspect' },
+      { id:'impellersealinsp', group:'propulsion', hours:100, months:12, dealer:true, name:'Impeller shaft seal, sleeve and O-ring — inspect' },
+      { id:'impellersealreplace', group:'propulsion', hours:200, months:null, dealer:true, name:'Impeller shaft seal, sleeve and O-ring — replace' },
+      { id:'impellerclearance',group:'propulsion', firstHours:50, firstMonths:12, hours:100, months:12, dealer:true, name:'Impeller and wear ring clearance — inspect' },
+      { id:'sacrificialanode', group:'propulsion', hours:null, months:1, dealer:false, name:'Sacrificial anode — inspect monthly (every 2 weeks in salt water) and change when necessary' },
+      { id:'ptoboot',          group:'propulsion', hours:100, months:null, dealer:true, name:'PTO boot — replace' },
+      { id:'rideplate',        group:'hull', hours:100, months:12, dealer:true, name:'Ride plate and water intake grates — inspect' }
+    ]
+  },
+
+  'onan-mdkb': {
+    name: 'Cummins Onan MDKBT / MDKBU — Periodic Maintenance',
+    mode: 'rolling',
+    dealerTag: 'Dealer',
+    note: 'Maintenance schedule reproduced from the Cummins Onan Marine Generator Set Operator Manual (981-0181, Issue 7), Table 2 "Periodic Maintenance Schedule" — using the MDKBT / MDKBU oil-change interval (every 350 hrs) rather than the 200 hr interval used by the rest of this generator family. Daily/8-hourly checks (general inspection, oil level and the carbon monoxide detector test) are in the Daily checklist instead. Intervals are rolling — due the stated hours or months after the last time each task was done, whichever comes first. Items marked Dealer must be performed by a qualified mechanic / authorised Cummins Onan dealer.',
+    groups: { routine:'Routine Inspection', lubrication:'Lubrication', fuel:'Fuel System', cooling:'Cooling System', dealer:'Dealer Service' },
+    tasks: [
+      { id:'genfuelfilterdrain', group:'routine', hours:100, months:1, dealer:false, name:'Drain water from fuel filter' },
+      { id:'genbatteryconn',     group:'routine', hours:100, months:1, dealer:false, name:'Check battery and battery connections' },
+      { id:'genvbelt',           group:'routine', hours:100, months:1, dealer:false, name:'Check V-belt tension (slippage, cracking, wear)' },
+      { id:'gensiphonbreak',     group:'routine', hours:100, months:1, dealer:false, name:'Check siphon break' },
+      { id:'genoilfilter',       group:'lubrication', firstHours:50, firstMonths:null, hours:350, months:12, dealer:false, name:'Change oil and filter (MDKBT / MDKBU interval)' },
+      { id:'genfuelfilterchange',group:'fuel', hours:500, months:12, dealer:false, name:'Change fuel filter' },
+      { id:'genzincanode',       group:'cooling', hours:500, months:12, dealer:false, name:'Inspect zinc anode' },
+      { id:'genrawwaterimpeller',group:'cooling', hours:500, months:12, dealer:false, name:'Replace raw water pump impeller' },
+      { id:'gencoolantreplace',  group:'cooling', hours:null, months:24, dealer:false, name:'Replace coolant, pressure cap and thermostat' },
+      { id:'genvalvelash',       group:'dealer', hours:800, months:null, dealer:true, name:'Adjust valve lash' },
+      { id:'genbearing',         group:'dealer', hours:2000, months:60, dealer:true, name:'Inspect generator bearing' }
+    ]
+  }
+};
+
+function isoAddDays(iso, days){
+  const d = new Date(iso + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return localISODate(d);
+}
+function isoDaysBetween(a, b){
+  return Math.round((new Date(b + 'T00:00:00') - new Date(a + 'T00:00:00')) / 86400000);
+}
+
+/* the last time a task was done, or the meter's schedule start if never */
+function serviceBaseline(vesselId, meter, taskId){
+  const done = state.serviceLog
+    .filter(s=>s.vesselId===vesselId && s.meterId===meter.id && s.taskId===taskId)
+    .sort((a,b)=> String(b.date).localeCompare(String(a.date)) || String(b.createdAt||'').localeCompare(String(a.createdAt||'')));
+  if(done.length) return { date:done[0].date, hours:Number(done[0].hours)||0, actualHours:Number(done[0].actualHours ?? done[0].hours)||0, times:done.length, last:done[0] };
+  const hrs = Number(meter.scheduleFromHours)||0;
+  return { date:meter.scheduleFrom || localISODate(new Date()), hours:hrs, actualHours:hrs, times:0, last:null };
+}
+
+/* Status levels follow the Vessel Manager app: due within 25 hrs or 14 days is critical,
+   within 75 hrs or 45 days is a warning, whichever trigger comes first. */
+function serviceDue(vesselId, meter, task){
+  const sched = SERVICE_SCHEDULES[meter.schedule];
+  const base = serviceBaseline(vesselId, meter, task.id);
+  let hourDue = null, dateDue = null, usingFirst = false, fallbackMsg = null;
+  if(sched.mode === 'man'){
+    if(!task.timeOnly){
+      const next = MAN_SCHEDULE_HOURS.find(([h, letters])=> letters.includes(task.id) && h > base.hours);
+      hourDue = next ? next[0] : null;
+    }
+    if(task.years) dateDue = isoAddDays(base.date, task.years === 1 ? 365 : 1461);
+    if(hourDue === null && dateDue === null) fallbackMsg = 'Beyond 6000 hr table — consult MAN dealer for continued schedule';
+  } else {
+    usingFirst = !(base.times > 0) && (task.firstHours != null || task.firstMonths != null);
+    const ivHours = usingFirst ? task.firstHours : task.hours;
+    const ivMonths = usingFirst ? task.firstMonths : task.months;
+    hourDue = ivHours != null ? base.hours + ivHours : null;
+    dateDue = ivMonths != null ? isoAddDays(base.date, Math.round(ivMonths * 30.44)) : null;
+    if(hourDue === null && dateDue === null) fallbackMsg = 'No interval defined — see manual';
+  }
+
+  const order = { good:0, warning:1, serious:2, critical:3 };
+  const worse = (a, b)=> order[b] > order[a] ? b : a;
+  const hoursRemaining = hourDue !== null ? Math.round((hourDue - meter.hours) * 10) / 10 : null;
+  const daysRemaining = dateDue !== null ? isoDaysBetween(localISODate(new Date()), dateDue) : null;
+  let status = 'good', reason = [];
+  if(hoursRemaining !== null){
+    if(hoursRemaining <= 0){ status = 'critical'; reason.push(Math.abs(hoursRemaining).toLocaleString() + ' hrs overdue'); }
+    else if(hoursRemaining <= 25){ status = worse(status, 'critical'); reason.push(hoursRemaining.toLocaleString() + ' hrs remaining'); }
+    else if(hoursRemaining <= 75){ status = worse(status, 'warning'); reason.push(hoursRemaining.toLocaleString() + ' hrs remaining'); }
+  }
+  if(daysRemaining !== null){
+    if(daysRemaining <= 0){ status = worse(status, 'critical'); reason.push(Math.abs(daysRemaining) + ' days overdue'); }
+    else if(daysRemaining <= 14){ status = worse(status, 'critical'); reason.push(daysRemaining + ' days remaining'); }
+    else if(daysRemaining <= 45){ status = worse(status, 'warning'); reason.push(daysRemaining + ' days remaining'); }
+  }
+  if(fallbackMsg){ status = 'serious'; reason = [fallbackMsg]; }
+  return { base, hourDue, dateDue, hoursRemaining, daysRemaining, usingFirst, status, reason: reason.join(' · ') || 'On track' };
+}
+const SVC_STAMP = { good:'completed', warning:'due-soon', serious:'due-soon', critical:'overdue' };
+const SVC_LABEL = { good:'On track', warning:'Due soon', serious:'Attention', critical:'Overdue / due now' };
+const SVC_RANK = { good:0, warning:1, serious:2, critical:3 };
+function serviceStamp(status){ return `<span class="stamp ${SVC_STAMP[status]}">${SVC_LABEL[status]}</span>`; }
+function serviceDueText(d){
+  return `${esc(d.reason)}${d.hourDue!==null ? ` · next due at ${d.hourDue.toLocaleString()} hrs` : ''}${d.dateDue ? ` (or by ${fmtDate(d.dateDue)})` : ''}`;
+}
+
+function scheduledMeters(v){ return vesselHourMeters(v).filter(m=> SERVICE_SCHEDULES[m.schedule]); }
+
+/* every task that isn't on track, across the visible vessels, most urgent first */
+function serviceAlerts(){
+  const out = [];
+  state.vessels.forEach(v=> scheduledMeters(v).forEach(m=>{
+    SERVICE_SCHEDULES[m.schedule].tasks.forEach(task=>{
+      const d = serviceDue(v.id, m, task);
+      if(d.status !== 'good') out.push({ vessel:v, meter:m, task, d });
+    });
+  }));
+  return out.sort((a,b)=> SVC_RANK[b.d.status] - SVC_RANK[a.d.status] || String(a.d.dateDue||'9').localeCompare(String(b.d.dateDue||'9')));
+}
+
+function renderServiceSchedules(){
+  const admin = isAdmin();
+  if(!state.vessels.some(v=>v.id===state.svcVesselId)){
+    const withSched = state.vessels.find(v=> scheduledMeters(v).length);
+    state.svcVesselId = withSched ? withSched.id : (state.vessels[0] ? state.vessels[0].id : null);
+  }
+  const v = state.vessels.find(x=>x.id===state.svcVesselId);
+  const picker = state.vessels.length > 1 ? `
+    <div class="filters" style="margin-bottom:14px;">
+      <select id="svcVesselSelect">
+        ${state.vessels.map(x=>`<option value="${x.id}" ${x.id===state.svcVesselId?'selected':''}>${esc(x.name)}${x.type ? ' — ' + esc(x.type) : ''}</option>`).join('')}
+      </select>
+    </div>` : '';
+  if(!v) return picker + `<div class="empty-note">No vessels assigned to your account yet.</div>`;
+  const meters = scheduledMeters(v);
+  if(meters.length === 0) return picker + `<div class="cl-card"><div class="empty-note">No service schedules set up for ${esc(v.name)} yet. Open the vessel under Vessels, edit an engine, tender engine or piece of equipment, and choose its service schedule.</div></div>`;
+  if(!meters.some(m=>m.id===state.svcMeterId)) state.svcMeterId = meters[0].id;
+  const m = meters.find(x=>x.id===state.svcMeterId);
+  const sched = SERVICE_SCHEDULES[m.schedule];
+
+  /* overview: each unit's most urgent task, as on the Vessel Manager dashboard */
+  const overview = meters.map(mm=>{
+    const ds = SERVICE_SCHEDULES[mm.schedule].tasks.map(t=>({ t, d:serviceDue(v.id, mm, t) }))
+      .sort((a,b)=> SVC_RANK[b.d.status] - SVC_RANK[a.d.status] || (a.d.hoursRemaining ?? 1e9) - (b.d.hoursRemaining ?? 1e9));
+    const top = ds[0];
+    const open = ds.filter(x=>x.d.status!=='good').length;
+    return `<button type="button" class="svc-unit ${mm.id===m.id?'active':''}" data-action="svc-unit" data-meter="${esc(mm.id)}">
+      <span class="svc-unit-head"><b>${esc(svcCap(mm.label))}</b>${serviceStamp(top.d.status)}</span>
+      <span class="cl-hint">${mm.hours.toLocaleString()} hrs · ${open ? `${open} item${open>1?'s need':' needs'} attention — ${esc(top.t.name)}` : `next: ${esc(top.t.name)}${top.d.hourDue!==null ? ` at ${top.d.hourDue.toLocaleString()} hrs` : ''}${top.d.dateDue ? ` or by ${fmtDate(top.d.dateDue)}` : ''}`}</span>
+    </button>`;
+  }).join('');
+
+  const groups = Object.keys(sched.groups).map((g, gi)=>{
+    const tasks = sched.tasks.filter(t=>t.group===g);
+    if(!tasks.length) return '';
+    return `
+    <div class="cl-card">
+      <h3 class="hrs-title">${esc(sched.mode==='man' ? svcCap(m.label) : sched.groups[g])}</h3>
+      ${gi===0 ? `<div class="cl-hint" style="font-size:12.5px; margin-bottom:6px;">${[m.model, m.serial ? 'S/N ' + m.serial : '', m.specs].filter(Boolean).map(esc).join(' · ')}${m.model||m.serial||m.specs ? ' · ' : ''}<b>${m.hours.toLocaleString()} hrs logged</b></div>` : ''}
+      ${tasks.map(t=>{
+        const d = serviceDue(v.id, m, t);
+        return `<div class="svc-item">
+          <div class="svc-head">
+            <div style="min-width:0;">
+              <div class="svc-title">${esc(t.name)}${t.dealer ? ` <span class="svc-tag">${esc(sched.dealerTag)}</span>` : ''}</div>
+              <div class="cl-hint" style="font-size:12px;">${t.short ? esc(t.short) + ' · ' : ''}${d.base.times ? 'last done' : 'counting from'} ${fmtDate(d.base.date)} @ ${d.base.actualHours.toLocaleString()} hrs${d.usingFirst ? ' · first-service interval' : ''}</div>
+            </div>
+            ${serviceStamp(d.status)}
+          </div>
+          <div class="svc-reason">${serviceDueText(d)}</div>
+          ${t.scope ? `<details class="svc-scope"><summary>What's included (${t.scope.length})</summary><ul>${t.scope.map(s=>`<li>${esc(s)}</li>`).join('')}</ul>${t.footnote ? `<div class="cl-hint">${esc(t.footnote)}</div>` : ''}</details>` : ''}
+          <div class="svc-actions">
+            <button type="button" class="btn small" data-action="svc-complete" data-task="${esc(t.id)}">Mark completed today</button>
+            ${admin && d.base.last ? `<button type="button" class="btn small ghost" data-action="svc-undo" data-id="${d.base.last.id}" title="Remove the last completion of this task">Undo last</button>` : ''}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }).join('');
+
+  return `${picker}
+    <div class="svc-units">${overview}</div>
+    <div class="svc-note">${esc(sched.note)}</div>
+    ${groups}`;
+}
+function svcCap(s){ s = String(s||''); return s.charAt(0).toUpperCase() + s.slice(1); }
+
+function attachServicePageEvents(){
+  const sel = document.getElementById('svcVesselSelect');
+  if(sel) sel.addEventListener('change', ()=>{ state.svcVesselId = sel.value; state.svcMeterId = null; render(); });
+}
+
+async function completeServiceTask(taskId){
+  const v = state.vessels.find(x=>x.id===state.svcVesselId);
+  const m = v && scheduledMeters(v).find(x=>x.id===state.svcMeterId);
+  if(!m) return;
+  const sched = SERVICE_SCHEDULES[m.schedule];
+  const task = sched.tasks.find(t=>t.id===taskId);
+  if(!task) return;
+  const who = task.dealer ? ` by ${sched.mode==='man' ? 'a MAN-authorised workshop' : sched.dealerTag==='Repair Shop' ? 'a repair shop' : 'an authorised dealer'}` : '';
+  if(!confirm(`Confirm: "${task.name}" on ${svcCap(m.label)} has been completed${who} today, at ${m.hours.toLocaleString()} hrs?\n\nLog the latest running hours first if they've changed.`)) return;
+  /* MAN: the service satisfies whichever hour checkpoint was next due, so an early or
+     late service doesn't shift the table. Rolling schedules count from the actual hours. */
+  const before = serviceDue(v.id, m, task);
+  const baseHours = sched.mode==='man' && before.hourDue !== null ? before.hourDue : m.hours;
+  const record = {
+    id:uid('sv'), vesselId:v.id, meterId:m.id, scheduleId:m.schedule, taskId:task.id, taskName:task.name,
+    date:localISODate(new Date()), hours:baseHours, actualHours:m.hours,
+    createdAt:new Date().toISOString(), loggedByRole: session ? session.role : ''
+  };
+  const saved = await persistArray('serviceLog', fresh => [...fresh, record]);
+  if(!saved){ alert("Couldn't save — check your connection and try again."); return; }
+  render();
+}
+
 /* ============================= MAINTENANCE ============================= */
 function renderMaintenance(){
   return `
     <h2 class="section-title">Maintenance planning</h2>
-    <p class="section-sub">Scheduled upkeep and unscheduled repairs across the fleet.</p>
-    ${renderMaintenanceTasks()}
+    <p class="section-sub">Scheduled upkeep and unscheduled repairs across the fleet, and manufacturer service schedules by running hours.</p>
+    <div class="subtabs">
+      <button type="button" class="subtab ${state.maintView!=='service'?'active':''}" data-action="maint-view" data-view="tasks">Tasks</button>
+      <button type="button" class="subtab ${state.maintView==='service'?'active':''}" data-action="maint-view" data-view="service">Service schedules${(n=>n?`<span class="cnt">${n}</span>`:'')(serviceAlerts().length)}</button>
+    </div>
+    ${state.maintView==='service' ? renderServiceSchedules() : renderMaintenanceTasks()}
   `;
 }
 
@@ -2440,6 +2819,22 @@ function vesselCostForm(){
   `;
 }
 
+function serviceScheduleFields(en){
+  return `
+    <div class="svc-form-head">Service schedule</div>
+    ${fieldRow(
+      `<label class="field">Schedule<select name="svcSchedule"><option value="">None</option>${Object.entries(SERVICE_SCHEDULES).map(([id, s])=>`<option value="${id}" ${en.schedule===id?'selected':''}>${esc(s.name)}</option>`).join('')}</select></label>`,
+      `<label class="field">Counting from${dateField('svcFrom', en.scheduleFrom || '', { max:localISODate(new Date()) })}</label>`
+    )}
+    <label class="field">Hours at that date<input name="svcFromHours" type="number" min="0" step="0.1" value="${en.scheduleFrom ? (Number(en.scheduleFromHours)||0) : ''}" placeholder="0"></label>
+    <div class="cl-hint" style="font-size:12px; margin:-4px 0 10px;">The handover or last full service. Each task counts from here until it's first marked completed under Maintenance → Service schedules. Leave the date blank to use today.</div>`;
+}
+function serviceScheduleData(fd, existing){
+  const schedule = fd.get('svcSchedule') || '';
+  if(!schedule) return { schedule:'' };
+  return { schedule, scheduleFrom: fd.get('svcFrom') || (existing && existing.scheduleFrom) || localISODate(new Date()), scheduleFromHours: Number(fd.get('svcFromHours'))||0 };
+}
+
 function vesselEngineForm(en, list){
   en = en || { label:'', type:'', serial:'', hours:'' };
   if(list === 'equipment') return `
@@ -2450,6 +2845,7 @@ function vesselEngineForm(en, list){
     )}
     <label class="field">Details<input name="engineSpecs" value="${esc(en.specs||'')}" placeholder="optional — e.g. 20 kVA · 230V · 50Hz"></label>
     <label class="field">Hours<input name="engineHrs" type="number" min="0" step="0.1" value="${en.hours || ''}" placeholder="e.g. 120"></label>
+    ${serviceScheduleFields(en)}
   `;
   return `
     <label class="field">Engine label<input name="engineLabel" value="${esc(en.label)}" placeholder="e.g. Port, Starboard, Center, Main"></label>
@@ -2458,6 +2854,7 @@ function vesselEngineForm(en, list){
       `<label class="field">Serial number<input name="engineSerial" value="${esc(en.serial)}" placeholder="e.g. YM6LY-002481" required></label>`
     )}
     <label class="field">Engine hours<input name="engineHrs" type="number" min="0" value="${en.hours || ''}" placeholder="e.g. 4820"></label>
+    ${serviceScheduleFields(en)}
   `;
 }
 
@@ -3412,6 +3809,7 @@ async function handleFormSubmit(e){
     const list = modal.list === 'equipment' ? 'equipment' : 'engines';
     const data = { label:fd.get('engineLabel')||'', type:fd.get('engineType'), serial:fd.get('engineSerial')||'', hours:Number(fd.get('engineHrs'))||0 };
     if(list === 'equipment') data.specs = fd.get('engineSpecs')||'';
+    Object.assign(data, serviceScheduleData(fd, modal.data));
     const vesselId = modal.id;
     const editEngineId = modal.data ? modal.data.id : null;
     targetKey = 'vessels';
@@ -3458,7 +3856,7 @@ async function handleFormSubmit(e){
     nextModal = editId ? { type:'view-tender', vesselId, tenderId: editId } : { type:'view-vessel', id: vesselId };
   }
   else if(modal.type==='tender-engine'){
-    const data = { label:fd.get('engineLabel')||'', type:fd.get('engineType'), serial:fd.get('engineSerial'), hours:Number(fd.get('engineHrs'))||0 };
+    const data = { label:fd.get('engineLabel')||'', type:fd.get('engineType'), serial:fd.get('engineSerial'), hours:Number(fd.get('engineHrs'))||0, ...serviceScheduleData(fd, modal.data) };
     const vesselId = modal.vesselId, tenderId = modal.tenderId;
     const editEngineId = modal.data ? modal.data.id : null;
     targetKey = 'vessels';
@@ -3772,6 +4170,15 @@ function attachContentEvents(){
           window.addEventListener('afterprint', ()=> document.body.classList.remove('print-checklist'), { once:true });
           window.print();
           break;
+        case 'maint-view': state.maintView = el.dataset.view; render(); break;
+        case 'svc-unit': state.svcMeterId = el.dataset.meter; render(); break;
+        case 'svc-complete': await completeServiceTask(el.dataset.task); break;
+        case 'svc-undo':
+          if(confirm('Remove the last completion of this task? It will count from the completion before it.')){
+            await persistArray('serviceLog', fresh => fresh.filter(s=>s.id!==id));
+            render();
+          }
+          break;
         case 'delete-hour-reading':
           if(confirm('Delete this reading? It removes every meter logged at the same time. Current hours on the vessel are not changed.')){
             await persistArray('hourReadings', fresh => fresh.filter(r=>r.id!==id));
@@ -3806,6 +4213,7 @@ function attachContentEvents(){
   if(fs) fs.addEventListener('change', ()=>{ state.filters.status=fs.value; render(); });
   attachChecklistPageEvents();
   attachHoursPageEvents();
+  attachServicePageEvents();
 }
 
 /* ============================= RENDER DISPATCH ============================= */
