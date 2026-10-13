@@ -777,6 +777,7 @@ function loadState(){
         firstLoadDone = true;
         render();
         resolve();
+        if(session.role === 'admin') moveInlineDocFiles();
       } else if(session && !state.modal && !state.clDirty){
         /* live update from another device/user — only refresh if nobody's mid-edit in a form */
         render();
@@ -812,6 +813,33 @@ function loadState(){
       reject(e);
     }
   });
+}
+
+/* One-off tidy-up for records saved before documents were stored separately: copy each
+   inline file to oceanhub/files, then drop it from the record. A file is only dropped
+   once its copy has been written, so a failure part-way just leaves it for next time. */
+let docMoveRunning = false;
+async function moveInlineDocFiles(){
+  if(docMoveRunning) return;
+  docMoveRunning = true;
+  try{
+    const inline = [
+      ...state.allVessels.flatMap(v=>[...(v.documents||[]), ...(v.tenders||[]).flatMap(t=>t.documents||[])]),
+      ...state.allCrew.flatMap(c=>c.documents||[])
+    ].filter(d=>d.dataUrl);
+    if(!inline.length) return;
+    const moved = new Set();
+    for(const d of inline){
+      try{ await storeDocFile(d.id, d.dataUrl); moved.add(d.id); }catch(e){ console.warn('Could not move document', d.id, e); }
+    }
+    if(!moved.size) return;
+    const strip = docs => (docs||[]).map(d=>{ if(!moved.has(d.id)) return d; const { dataUrl, ...rest } = d; return rest; });
+    await persistArray('vessels', fresh => fresh.map(v=>({ ...v, documents:strip(v.documents),
+      tenders:(v.tenders||[]).map(t=>({ ...t, documents:strip(t.documents) })) })));
+    await persistArray('crew', fresh => fresh.map(c=>({ ...c, documents:strip(c.documents) })));
+  }finally{
+    docMoveRunning = false;
+  }
 }
 
 /* Initial seed only — writes the whole dataset once when the database is empty. */
@@ -972,8 +1000,35 @@ function dataUrlToBlob(dataUrl){
   for(let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
   return new Blob([bytes], { type: mime });
 }
-function findStoredDocUrl(ds){
-  const pick = list => ((list || []).find(d => d.id === ds.docId) || {}).dataUrl;
+/* Document files live at oceanhub/files/<docId>, apart from the fleet records, so signing
+   in doesn't download every stored PDF and scan. A document record keeps its name and date;
+   records saved before this change may still carry the file inline as dataUrl. */
+const FILES_PATH = 'oceanhub/files/';
+function storeDocFile(docId, dataUrl){ return firebase.database().ref(FILES_PATH + docId).set({ dataUrl }); }
+function removeDocFiles(docs){
+  return Promise.all((docs || []).map(d => firebase.database().ref(FILES_PATH + d.id).remove().catch(()=>{})));
+}
+async function openDocument(ds){
+  const doc = findStoredDoc(ds);
+  if(!doc){ alert('That document has no file attached.'); return; }
+  if(doc.dataUrl){ openStoredDocument(doc.dataUrl); return; }
+  /* open the window now, while the tap still counts, so pop-up blockers allow it */
+  const win = window.open('', '_blank');
+  if(!win){ alert('Your browser blocked the document window — allow pop-ups for this site and try again.'); return; }
+  try{ win.document.body.innerHTML = '<p style="font:16px sans-serif; padding:24px;">Loading document…</p>'; }catch(e){}
+  try{
+    const file = (await firebase.database().ref(FILES_PATH + doc.id).once('value')).val();
+    if(!file || !file.dataUrl){ win.close(); alert('That document has no file attached.'); return; }
+    const url = URL.createObjectURL(dataUrlToBlob(file.dataUrl));
+    win.location.href = url;
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }catch(e){
+    win.close();
+    alert("Couldn't open that document — check your connection and try again.");
+  }
+}
+function findStoredDoc(ds){
+  const pick = list => (list || []).find(d => d.id === ds.docId) || null;
   if(ds.scope === 'crew'){
     const c = state.crew.find(x => x.id === ds.id) || (state.allCrew || []).find(x => x.id === ds.id);
     return pick(c && c.documents);
@@ -3419,7 +3474,7 @@ function attachModalEvents(){
     overlay.addEventListener('click', ()=>{ state.modal=null; render(); });
   }
   document.querySelectorAll('[data-action="close-modal"]').forEach(b=>b.addEventListener('click', (e)=>{ e.preventDefault(); state.modal=null; render(); }));
-  document.querySelectorAll('[data-action="view-doc"]').forEach(b=>b.addEventListener('click', (e)=>{ e.preventDefault(); openStoredDocument(findStoredDocUrl(b.dataset)); }));
+  document.querySelectorAll('[data-action="view-doc"]').forEach(b=>b.addEventListener('click', (e)=>{ e.preventDefault(); openDocument(b.dataset); }));
   const form = document.getElementById('modalForm');
   if(form) form.addEventListener('submit', handleFormSubmit);
   wireChecklistItemEditor();
@@ -3564,6 +3619,8 @@ function attachModalEvents(){
     if(confirm('Delete this vessel? Related maintenance and crew assignment records will remain but show as unassigned.')){
       const vesselId = b.dataset.id;
       state.modal = null;
+      const gone = state.allVessels.find(x=>x.id===vesselId) || {};
+      removeDocFiles([...(gone.documents||[]), ...(gone.tenders||[]).flatMap(t=>t.documents||[])]);
       await persistArray('vessels', fresh => fresh.filter(x=>x.id!==vesselId));
       render();
     }
@@ -3607,6 +3664,7 @@ function attachModalEvents(){
     if(!confirm('Remove this document? This cannot be undone.')) return;
     const vesselId = b.dataset.id, docId = b.dataset.docId;
     state.modal = { type:'view-vessel', id:vesselId };
+    removeDocFiles([{ id:docId }]);
     await persistArray('vessels', fresh => fresh.map(v=> v.id===vesselId ? { ...v, documents:(v.documents||[]).filter(d=>d.id!==docId) } : v));
     render();
   }));
@@ -3628,6 +3686,8 @@ function attachModalEvents(){
     if(!confirm('Delete this tender and all its records? This cannot be undone.')) return;
     const vesselId = b.dataset.id, tenderId = b.dataset.tenderId;
     state.modal = { type:'view-vessel', id:vesselId };
+    const v = state.allVessels.find(x=>x.id===vesselId);
+    removeDocFiles(((v && v.tenders || []).find(t=>t.id===tenderId) || {}).documents);
     await persistArray('vessels', fresh => fresh.map(v=> v.id===vesselId ? { ...v, tenders:(v.tenders||[]).filter(t=>t.id!==tenderId) } : v));
     render();
   }));
@@ -3701,6 +3761,7 @@ function attachModalEvents(){
     if(!confirm('Remove this document? This cannot be undone.')) return;
     const vesselId = b.dataset.id, tenderId = b.dataset.tenderId, docId = b.dataset.docId;
     state.modal = { type:'view-tender', vesselId, tenderId };
+    removeDocFiles([{ id:docId }]);
     await persistArray('vessels', fresh => fresh.map(v=>{
       if(v.id!==vesselId) return v;
       const tenders = (v.tenders||[]).map(t=> t.id===tenderId ? { ...t, documents:(t.documents||[]).filter(d=>d.id!==docId) } : t);
@@ -3883,7 +3944,9 @@ async function handleFormSubmit(e){
     const dataUrl = fd.get('docData');
     if(!dataUrl){ alert('Please choose a file first.'); return; }
     const vesselId = modal.id;
-    const docData = { id:uid('doc'), name:fd.get('docName'), fileName:fd.get('docFileName')||'', dataUrl, addedDate:new Date().toISOString().slice(0,10) };
+    const docData = { id:uid('doc'), name:fd.get('docName'), fileName:fd.get('docFileName')||'', addedDate:new Date().toISOString().slice(0,10) };
+    try{ await storeDocFile(docData.id, dataUrl); }
+    catch(err){ alert("Couldn't upload the document — check your connection and try again."); return; }
     targetKey = 'vessels';
     mutateFn = fresh => fresh.map(v=> v.id===vesselId ? { ...v, documents:[...(v.documents||[]), docData] } : v);
     nextModal = { type:'view-vessel', id: vesselId };
@@ -3892,7 +3955,9 @@ async function handleFormSubmit(e){
     const dataUrl = fd.get('docData');
     if(!dataUrl){ alert('Please choose a file first.'); return; }
     const crewId = modal.id;
-    const docData = { id:uid('doc'), name:fd.get('docName'), fileName:fd.get('docFileName')||'', dataUrl, addedDate:new Date().toISOString().slice(0,10) };
+    const docData = { id:uid('doc'), name:fd.get('docName'), fileName:fd.get('docFileName')||'', addedDate:new Date().toISOString().slice(0,10) };
+    try{ await storeDocFile(docData.id, dataUrl); }
+    catch(err){ alert("Couldn't upload the document — check your connection and try again."); return; }
     targetKey = 'crew';
     mutateFn = fresh => fresh.map(c=> c.id===crewId ? { ...c, documents:[...(c.documents||[]), docData] } : c);
   }
@@ -3954,7 +4019,9 @@ async function handleFormSubmit(e){
     const dataUrl = fd.get('docData');
     if(!dataUrl){ alert('Please choose a file first.'); return; }
     const vesselId = modal.vesselId, tenderId = modal.tenderId;
-    const docData = { id:uid('doc'), name:fd.get('docName'), fileName:fd.get('docFileName')||'', dataUrl, addedDate:new Date().toISOString().slice(0,10) };
+    const docData = { id:uid('doc'), name:fd.get('docName'), fileName:fd.get('docFileName')||'', addedDate:new Date().toISOString().slice(0,10) };
+    try{ await storeDocFile(docData.id, dataUrl); }
+    catch(err){ alert("Couldn't upload the document — check your connection and try again."); return; }
     targetKey = 'vessels';
     mutateFn = fresh => fresh.map(v=>{
       if(v.id!==vesselId) return v;
@@ -4168,6 +4235,7 @@ function attachContentEvents(){
         case 'edit-crew': state.modal = { type:'crew', data: state.crew.find(c=>c.id===id) }; renderModal(); break;
         case 'delete-crew':
           if(confirm('Remove this crew member?')){
+            removeDocFiles((state.allCrew.find(c=>c.id===id) || {}).documents);
             await persistArray('crew', fresh => fresh.filter(c=>c.id!==id));
             render();
           }
@@ -4187,6 +4255,7 @@ function attachContentEvents(){
         case 'delete-crew-doc':
           if(confirm('Remove this document? This cannot be undone.')){
             const docId = el.dataset.docId;
+            removeDocFiles([{ id:docId }]);
             await persistArray('crew', fresh => fresh.map(c=> c.id===id ? { ...c, documents:(c.documents||[]).filter(d=>d.id!==docId) } : c));
             render();
           }
@@ -4271,7 +4340,7 @@ function attachContentEvents(){
           render();
           break;
         case 'view-doc':
-          openStoredDocument(findStoredDocUrl(el.dataset));
+          openDocument(el.dataset);
           break;
         case 'logout':
           if(confirm('Sign out? You will need to sign in again to get back in.')){ await logout(); }
