@@ -1,6 +1,6 @@
 {
-  "name": "Ocean Hub — Fleet Operations",
-  "short_name": "Ocean Hub",
+  "name": "OCEANHUB — Vessel Manager",
+  "short_name": "OCEANHUB",
   "description": "Fleet and vessel management for Ocean Hub.",
   "id": "./",
   "start_url": "./",
