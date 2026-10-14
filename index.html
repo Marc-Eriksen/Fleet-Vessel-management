@@ -563,7 +563,7 @@ function seedData(){
       that user's "User UID".
    3. Realtime Database > Data — under "oceanhub" add: users > <that UID> > role = "admin".
    4. Realtime Database > Rules — paste the contents of database.rules.json and Publish.
-   5. Admin setting owner passwords needs the Cloud Function in functions/ (Blaze plan):
+   5. Admin changing an owner's login email or password needs the Cloud Function in functions/ (Blaze plan):
       npm i -g firebase-tools, firebase login, then firebase deploy --only functions.
    Every account needs a record at oceanhub/users/<uid> ({ role:'admin' } or
    { role:'owner', companyId }) to get in. Admin creates owner logins from the
@@ -2968,7 +2968,7 @@ function companyForm(c){
         <button type="button" class="btn small" data-action="company-reset-password" data-email="${esc(c.loginEmail)}">Send password reset email</button>
         <button type="button" class="btn small danger" data-action="company-remove-login" data-id="${c.id}">Remove login</button>
       </div>
-      <p style="font-size:12px; color:var(--ink-soft);">Enter a new password (at least 6 characters) to change it &mdash; tell the owner, as they aren't notified. Changing the email needs a password too, and the old email stops working on save. Owners can also reset their own password with &ldquo;Forgot password?&rdquo; on the sign-in page.</p>
+      <p style="font-size:12px; color:var(--ink-soft);">Change the email or enter a new password (at least 6 characters) and save &mdash; tell the owner, as they aren't notified. Their old email stops working straight away. Owners can also reset their own password with &ldquo;Forgot password?&rdquo; on the sign-in page.</p>
     ` : `
       ${fieldRow(
         `<label class="field">Login email<input name="loginEmail" type="email" value="" placeholder="${esc(c.contactEmail || 'owner@example.com')}" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="off"></label>`,
@@ -3370,6 +3370,15 @@ async function sendContractorStatement(id, channel){
       if(ct.accountType){ doc.text(`Account type: ${ct.accountType}`, 14, y); y += 6; }
       if(ct.swift){ doc.text(`SWIFT / BIC: ${ct.swift}`, 14, y); y += 6; }
     }
+
+    // Footer on every page, so each statement a contractor forwards carries the app's name.
+    const pageCount = doc.getNumberOfPages();
+    for(let i = 1; i <= pageCount; i++){
+      doc.setPage(i);
+      doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(120);
+      doc.text('Sent with OCEANHUB Vessel Manager', 105, 290, { align:'center' });
+    }
+    doc.setTextColor(0);
 
   }catch(e){
     alert('Could not generate the PDF. ' + (e && e.message ? e.message : ''));
@@ -4048,32 +4057,34 @@ async function handleFormSubmit(e){
     };
     const loginEmail = String(fd.get('loginEmail')||'').trim().toLowerCase();
     const pw = String(fd.get('loginPassword')||'');
-    /* Firebase only lets the browser create accounts, not edit someone else's, so a
-       changed email means a new account; the old one loses its role record below. */
     const prevLogin = modal.data && modal.data.loginUid ? modal.data : null;
     const emailChanged = !!loginEmail && (!prevLogin || loginEmail !== (prevLogin.loginEmail||'').toLowerCase());
-    if(prevLogin && !emailChanged && pw){
-      if(pw.length < 6){ alert('The new password needs at least 6 characters.'); return; }
-      try{ await firebase.functions().httpsCallable('setOwnerPassword')({ uid:prevLogin.loginUid, password:pw }); }
-      catch(err){
-        /* an undeployed function shows up as a CORS failure, reported as 'internal' */
-        alert(err && err.code === 'functions/internal'
-          ? "Couldn't reach the password service — has the Cloud Function been deployed? (see functions/ in the project)"
-          : "Couldn't set the password: " + ((err && err.message) || err));
-        return;
-      }
+    if(emailChanged && state.companies.some(c => c.id !== editId && (c.loginEmail||'').toLowerCase() === loginEmail)){
+      alert('Another company already signs in with that email.'); return;
     }
     let login = null;
-    if(emailChanged){
-      if(pw.length < 6){ alert(prevLogin ? 'Enter a password of at least 6 characters for the new login email.' : 'The starting password needs at least 6 characters.'); return; }
-      if(state.companies.some(c => c.id !== editId && (c.loginEmail||'').toLowerCase() === loginEmail)){
-        alert('Another company already signs in with that email.'); return;
+    if(prevLogin && (emailChanged || pw)){
+      /* editing someone else's account needs the Admin SDK, so it goes through the Cloud Function */
+      if(pw && pw.length < 6){ alert('The new password needs at least 6 characters.'); return; }
+      try{
+        await firebase.functions().httpsCallable('updateOwnerLogin')({
+          uid:prevLogin.loginUid, ...(emailChanged ? { email:loginEmail } : {}), ...(pw ? { password:pw } : {})
+        });
+      }catch(err){
+        /* an undeployed function shows up as a CORS failure, reported as 'internal' */
+        alert(err && err.code === 'functions/internal'
+          ? "Couldn't reach the login service — has the Cloud Function been deployed? (see functions/ in the project)"
+          : "Couldn't update the login: " + ((err && err.message) || err));
+        return;
       }
+      if(emailChanged) login = { loginEmail, loginUid:prevLogin.loginUid };
+    }
+    else if(emailChanged){
+      if(pw.length < 6){ alert('The starting password needs at least 6 characters.'); return; }
       try{
         const loginUid = await createOwnerAccount(loginEmail, pw);
         await firebase.database().ref('oceanhub/users/' + loginUid).set({ role:'owner', companyId:coId, email:loginEmail });
         login = { loginEmail, loginUid };
-        if(prevLogin){ try{ await firebase.database().ref('oceanhub/users/' + prevLogin.loginUid).remove(); }catch(e){} }
       }catch(err){
         alert(err && err.code === 'auth/email-already-in-use'
           ? `${loginEmail} already has an OCEANHUB account. Use a different email, or delete that user in the Firebase console (Authentication > Users) and try again.`
