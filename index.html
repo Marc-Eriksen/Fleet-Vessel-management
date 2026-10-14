@@ -713,6 +713,12 @@ function isAdmin(){ return !!(session && session.role === 'admin'); }
 /* Billing lifecycle for a maintenance task (admin-only view). */
 const BILLING_STAGES = [ { id:'quoted', label:'Quoted' }, { id:'invoiced', label:'Invoiced' }, { id:'paid', label:'Paid' } ];
 function billingOf(m){ return m.billing || 'none'; }
+/* Maintenance shows costs only for this company's vessels (Igobgolondo Trust), for every login. */
+const COST_COMPANY_ID = 'co_mttr3ir6kyzzz';
+function costVisible(vesselId){
+  const co = state.companies.find(c=>c.id===COST_COMPANY_ID);
+  return !!co && (co.vesselIds || []).includes(vesselId);
+}
 function billingLabel(b){ return ({ none:'Not billed', quoted:'Quoted', invoiced:'Invoiced', paid:'Paid' })[b] || b; }
 
 
@@ -2218,7 +2224,7 @@ function tenderMaintenanceForm(m){
         <option value="medium" ${m.priority==='medium'?'selected':''}>Medium</option>
         <option value="high" ${m.priority==='high'?'selected':''}>High</option>
       </select></label>`,
-      `<label class="field">Cost (R)<input name="cost" type="number" min="0" value="${m.cost}"></label>`
+      state.modal && costVisible(state.modal.vesselId) ? `<label class="field">Cost (R)<input name="cost" type="number" min="0" value="${m.cost}"></label>` : `<span></span>`
     )}
     ${isAdmin() ? `<label class="field">Billing status<select name="billing">
       <option value="none" ${billingOf(m)==='none'?'selected':''}>Not billed</option>
@@ -2602,7 +2608,8 @@ function renderMaintenanceTasks(){
 
   rows.sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));
 
-  const invoicedUnpaid = allTasks.filter(m=>billingOf(m)==='invoiced').reduce((s,m)=>s+Number(m.cost||0),0);
+  const showCost = state.vessels.some(v=>costVisible(v.id));
+  const invoicedUnpaid = allTasks.filter(m=>billingOf(m)==='invoiced' && costVisible(m.vesselId)).reduce((s,m)=>s+Number(m.cost||0),0);
 
   const billingTabs = admin ? `
     <div class="subtabs">
@@ -2610,10 +2617,10 @@ function renderMaintenanceTasks(){
       ${BILLING_STAGES.map(b=>`<button type="button" class="subtab ${billing===b.id?'active':''}" data-action="billing-tab" data-billing="${b.id}">${b.label}<span class="cnt">${billingCount(b.id)}</span></button>`).join('')}
       <button type="button" class="subtab ${billing==='none'?'active':''}" data-action="billing-tab" data-billing="none">Not billed<span class="cnt">${billingCount('none')}</span></button>
     </div>` : '';
-  const colspan = admin ? 9 : 8;
+  const colspan = 7 + (admin ? 1 : 0) + (showCost ? 1 : 0);
 
   return `
-    ${admin ? `<div class="cost-total-bar">
+    ${admin && showCost ? `<div class="cost-total-bar">
       <div class="ctb-item"><div class="label">Invoiced, unpaid</div><div class="value">${fmtCurrency(invoicedUnpaid)}</div></div>
     </div>` : ''}
     ${billingTabs}
@@ -2642,7 +2649,7 @@ function renderMaintenanceTasks(){
     <div class="table-wrap">
       <table>
         <thead><tr>
-          <th>Task</th><th>Vessel</th><th>Type</th><th>Due</th><th>Priority</th><th class="num">Cost</th><th>Status</th>${admin?'<th>Billing</th>':''}<th></th>
+          <th>Task</th><th>Vessel</th><th>Type</th><th>Due</th><th>Priority</th>${showCost ? '<th class="num">Cost</th>' : ''}<th>Status</th>${admin?'<th>Billing</th>':''}<th></th>
         </tr></thead>
         <tbody>
           ${rows.length===0 ? `<tr><td colspan="${colspan}"><div class="empty-note">No tasks match these filters.</div></td></tr>` : rows.map(m=>{
@@ -2658,7 +2665,7 @@ function renderMaintenanceTasks(){
               <td style="text-transform:capitalize;">${m.category}</td>
               <td>${fmtDate(m.dueDate)}</td>
               <td style="text-transform:capitalize;">${m.priority}</td>
-              <td class="num">${fmtCurrency(m.cost)}</td>
+              ${showCost ? `<td class="num">${costVisible(m.vesselId) ? fmtCurrency(m.cost) : '<span style="color:var(--ink-soft);">—</span>'}</td>` : ''}
               <td><span class="stamp ${maintStatus(m)}">${stampLabel(maintStatus(m))}</span></td>
               ${admin ? `<td>${billingOf(m)==='none' ? '<span style="color:var(--ink-soft);">—</span>' : `<span class="stamp bill-${billingOf(m)}">${billingLabel(billingOf(m))}</span>`}</td>` : ''}
               <td style="white-space:nowrap;">
@@ -3205,7 +3212,7 @@ function maintenanceForm(m){
       </select></label>`
     )}
     ${fieldRow(
-      `<label class="field">Estimated / actual cost (R)<input name="cost" type="number" min="0" value="${m.cost}"></label>`,
+      `<label class="field" data-cost-field style="${costVisible(m.vesselId) ? '' : 'display:none;'}">Estimated / actual cost (R)<input name="cost" type="number" min="0" value="${m.cost}" ${costVisible(m.vesselId) ? '' : 'disabled'}></label>`,
       isAdmin() ? `<label class="field">Billing status<select name="billing">
         <option value="none" ${billingOf(m)==='none'?'selected':''}>Not billed</option>
         ${BILLING_STAGES.map(b=>`<option value="${b.id}" ${billingOf(m)===b.id?'selected':''}>${b.label}</option>`).join('')}
@@ -3500,6 +3507,13 @@ function attachModalEvents(){
   if(form) form.addEventListener('submit', handleFormSubmit);
   wireChecklistItemEditor();
   wireCrewQualAdder();
+  const costField = form && form.querySelector('[data-cost-field]');
+  const costVessel = form && form.elements.vesselId;
+  if(costField && costVessel) costVessel.addEventListener('change', ()=>{
+    const show = costVisible(costVessel.value);
+    costField.style.display = show ? '' : 'none';
+    costField.querySelector('input').disabled = !show;
+  });
   const photoInput = document.getElementById('vesselPhotoInput');
   if(photoInput){
     photoInput.addEventListener('change', async (e)=>{
