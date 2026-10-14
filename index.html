@@ -281,6 +281,7 @@
 
   /* ===== Checklists ===== */
   .fin-scope{margin:0 0 16px;}
+  tr.total-row td{border-top:2px solid var(--border);}
   .fin-panel{background:var(--white-card); border:1px solid var(--border); border-radius:12px; padding:16px 16px 14px; margin-bottom:18px; max-width:640px;}
   .fin-hint{font-size:12px; color:var(--ink-soft); margin:-4px 0 12px;}
   .fin-share{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:0 0 14px;}
@@ -475,7 +476,9 @@ let state = {
   clView: { vesselId:null, checklistId:null, period:null },
   clDirty: false,
   clSaved: false,
-  fin: { period:'monthly', month:new Date().getMonth()+1, year:new Date().getFullYear(),
+  financeItems: [],
+  allFinanceItems: [],
+  fin: { view:'entries', entryCat:'all', budget:{ year:new Date().getFullYear()+1, startMonth:1, baseYears:3, uplift:6 }, period:'monthly', month:new Date().getMonth()+1, year:new Date().getFullYear(),
          from:'', to:'', company:'all', vessel:'all', report:null, emailTo:'' }
 };
 
@@ -577,7 +580,8 @@ const ADMIN_EMAIL = ""; /* e.g. "ops@oceanhub.co.za" — leave blank to hide adm
 const ADMIN_PHONE = ""; /* e.g. "+27820000000" — used for WhatsApp links, digits/plus only */
 /* Collections an owner/operator account may read; everything else under oceanhub/data
    is admin-only in the database rules. */
-const OWNER_KEYS = ['vessels','maintenance','crew','companies','checklists','checklistRuns','hourReadings','serviceLog'];
+const OWNER_KEYS = ['vessels','maintenance','crew','companies','checklists','checklistRuns','hourReadings','serviceLog','financeItems'];
+const OPTIONAL_OWNER_KEYS = ['financeItems']; /* a read error here (e.g. rules not published yet) loads as empty instead of failing sign-in */
 let fbInitialized = false;
 
 function isFirebaseConfigured(){
@@ -747,6 +751,7 @@ function applyScoping(){
   state.checklistRuns = state.allChecklistRuns.filter(r => visible.has(r.vesselId));
   state.hourReadings = state.allHourReadings.filter(r => visible.has(r.vesselId));
   state.serviceLog = state.allServiceLog.filter(s => visible.has(s.vesselId));
+  state.financeItems = state.allFinanceItems.filter(x => visible.has(x.vesselId));
 }
 
 function asArray(v){
@@ -775,6 +780,7 @@ function applyRemoteData(val){
   state.allChecklistRuns = normalizeKey('checklistRuns', val.checklistRuns);
   state.allHourReadings = normalizeKey('hourReadings', val.hourReadings);
   state.allServiceLog = normalizeKey('serviceLog', val.serviceLog);
+  state.allFinanceItems = normalizeKey('financeItems', val.financeItems);
   applyScoping();
 }
 
@@ -817,7 +823,7 @@ function loadState(){
             afterData();
           };
           dataListeners.push({ ref, fn });
-          ref.on('value', fn, onFirstError);
+          ref.on('value', fn, err => OPTIONAL_OWNER_KEYS.includes(key) ? fn({ val:()=>null }) : onFirstError(err));
         });
       }
     }catch(e){
@@ -887,8 +893,8 @@ async function persistArray(key, mutateFn){
 
 /* ============================= HELPERS ============================= */
 function fmtCurrency(n){
-  n = Number(n)||0;
-  return 'R' + n.toLocaleString('en-ZA', {minimumFractionDigits:0, maximumFractionDigits:0});
+  n = Math.round(Number(n)||0);
+  return (n < 0 ? '-R' : 'R') + Math.abs(n).toLocaleString('en-ZA', {minimumFractionDigits:0, maximumFractionDigits:0});
 }
 function fmtDate(iso){
   if(!iso) return '—';
@@ -2689,13 +2695,22 @@ const FIN_PERIODS = [
   { id:'all', label:'All time', title:'All-time cost report' },
   { id:'open', label:'Open work', title:'Open work cost report' }
 ];
+const FIN_CATEGORIES = [
+  { id:'parts', label:'Parts' },
+  { id:'service', label:'Service' },
+  { id:'unscheduled', label:'Unscheduled maintenance' },
+  { id:'scheduled', label:'Scheduled maintenance' }
+];
 const FIN_EMAIL_KEY = 'oceanhub_fin_email';
 try{ state.fin.emailTo = localStorage.getItem(FIN_EMAIL_KEY) || ''; }catch(e){}
 
 function fileSlug(s){ return String(s||'').replace(/[^a-z0-9]+/gi,'-').replace(/^-|-$/g,'') || 'file'; }
+function finCategoryLabel(id){ return (FIN_CATEGORIES.find(c=>c.id===id) || { label:id || '—' }).label; }
 
 /* The date a task's cost falls on: when it was completed, or when it's due if still open. */
 function taskCostDate(m){ return m.status==='completed' ? (m.completedDate || m.dueDate || '') : (m.dueDate || ''); }
+/* Maintenance tasks report under the two maintenance categories; daily checks count as scheduled. */
+function taskFinCategory(m){ return m.category === 'unscheduled' ? 'unscheduled' : 'scheduled'; }
 
 /* A year that starts on any day: the day before the same date a year later. */
 function yearEndFor(fromIso){
@@ -2741,9 +2756,32 @@ function renderFinScope(){
     </div>`;
 }
 
+/* Every cost line in the current company / vessel: costs entered on Finance plus the costs on
+   maintenance tasks. `spent` is true for money actually spent — a Finance entry, or a task
+   that's been completed — which is what the budget is worked out from. */
+function costLines(){
+  const tasks = getAllMaintenanceTasks().filter(m=>inFinScope(m.vesselId)).map(m=>({
+    source:'Maintenance task', date: taskCostDate(m), title: m.title || '', description: m.description || '',
+    vesselId: m.vesselId, vessel: vesselName(m.vesselId), tender: m._tenderName || '', category: taskFinCategory(m), provider:'',
+    status: stampLabel(maintStatus(m)), statusId: maintStatus(m), spent: m.status === 'completed',
+    billing: billingLabel(billingOf(m)), cost: Number(m.cost)||0
+  }));
+  const entries = state.financeItems.filter(x=>inFinScope(x.vesselId)).map(x=>({
+    source:'Finance entry', date: x.date || '', title: x.description || finCategoryLabel(x.category), description: x.invoiceRef ? `Ref ${x.invoiceRef}` : '',
+    vesselId: x.vesselId, vessel: vesselName(x.vesselId), tender:'', category: x.category, provider: (x.provider && x.provider.name) || '',
+    status:'Recorded', statusId:'completed', spent:true, billing:'—', cost: Number(x.cost)||0
+  }));
+  return [...tasks, ...entries];
+}
+function sumBy(rows, keyFn){
+  const out = {};
+  rows.forEach(r=>{ const k = keyFn(r); out[k] = out[k] || { count:0, cost:0 }; out[k].count++; out[k].cost += r.cost; });
+  return out;
+}
+
 /* Everything a cost report shows, for the saved report settings and the current company / vessel. */
 function costReportData(p){
-  let tasks = getAllMaintenanceTasks().filter(m=>inFinScope(m.vesselId));
+  let lines = costLines();
   let from = '', to = '', periodLabel = '';
   if(p.period === 'monthly'){
     const mm = String(p.month).padStart(2,'0');
@@ -2756,38 +2794,182 @@ function costReportData(p){
   } else if(p.period === 'open'){
     periodLabel = `Open as of ${fmtDate(localISODate(new Date()))}`;
   } else {
-    periodLabel = `All recorded work to ${fmtDate(localISODate(new Date()))}`;
+    periodLabel = `All recorded costs to ${fmtDate(localISODate(new Date()))}`;
   }
-  if(p.period === 'open') tasks = tasks.filter(m=>m.status!=='completed');
-  if(from) tasks = tasks.filter(m=>{ const d = taskCostDate(m); return d && d >= from && d <= to; });
-  const rows = tasks.map(m=>({
-    date: taskCostDate(m), title: m.title || '', description: m.description || '',
-    vessel: vesselName(m.vesselId), tender: m._tenderName || '', type: m.category || '',
-    status: stampLabel(maintStatus(m)), statusId: maintStatus(m), billing: billingLabel(billingOf(m)), cost: Number(m.cost)||0
-  })).sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+  if(p.period === 'open') lines = lines.filter(l=>!l.spent);
+  if(from) lines = lines.filter(l=> l.date && l.date >= from && l.date <= to);
+  const rows = lines.sort((a,b)=> (a.date||'').localeCompare(b.date||''));
   const total = rows.reduce((s,r)=>s+r.cost,0);
-  const openTotal = rows.filter(r=>r.statusId!=='completed').reduce((s,r)=>s+r.cost,0);
-  const byVessel = {};
-  rows.forEach(r=>{ byVessel[r.vessel] = byVessel[r.vessel] || { count:0, cost:0 }; byVessel[r.vessel].count++; byVessel[r.vessel].cost += r.cost; });
+  const openTotal = rows.filter(r=>!r.spent).reduce((s,r)=>s+r.cost,0);
+  const byCat = sumBy(rows, r=>r.category);
+  const byCategory = FIN_CATEGORIES.filter(c=>byCat[c.id]).map(c=>[c.label, byCat[c.id]]);
   const title = (FIN_PERIODS.find(x=>x.id===p.period) || FIN_PERIODS[0]).title;
-  return { title, periodLabel, vesselLabel: finScopeLabel(), rows, total, openTotal, completedTotal: total - openTotal, byVessel };
+  return { title, periodLabel, vesselLabel: finScopeLabel(), rows, total, openTotal, completedTotal: total - openTotal,
+    byVessel: sumBy(rows, r=>r.vessel), byCategory };
 }
 
+/* ---------- Budget ---------- */
+/* A budget year can start in any month (e.g. March for a South African financial year). */
+function budgetYearRange(y, startMonth){
+  const mm = String(startMonth).padStart(2,'0');
+  return { from:`${y}-${mm}-01`, to: localISODate(new Date(y + 1, startMonth - 1, 0)) };
+}
+function budgetYearLabel(y, startMonth){
+  if(startMonth === 1) return String(y);
+  return `${y}/${String(y+1).slice(2)} (${MONTH_NAMES[startMonth-1].slice(0,3)} ${y} – ${MONTH_NAMES[(startMonth+10)%12].slice(0,3)} ${y+1})`;
+}
+/* Budget per category (and per vessel) = average yearly spend over the chosen past years,
+   plus the uplift. Years with nothing recorded count as zero, so the average is honest. */
+function budgetData(b){
+  const spent = costLines().filter(l=>l.spent && l.date);
+  const baseYears = [];
+  for(let i = b.baseYears; i >= 1; i--) baseYears.push(b.year - i);
+  const inYear = (l, y)=>{ const r = budgetYearRange(y, b.startMonth); return l.date >= r.from && l.date <= r.to; };
+  const cur = budgetYearRange(b.year, b.startMonth);
+  const today = localISODate(new Date());
+  const started = today >= cur.from;
+  const factor = 1 + (Number(b.uplift)||0) / 100;
+  const line = filterFn=>{
+    const mine = spent.filter(filterFn);
+    const actuals = baseYears.map(y=> mine.filter(l=>inYear(l, y)).reduce((s,l)=>s+l.cost,0));
+    const average = actuals.reduce((s,v)=>s+v,0) / (baseYears.length || 1);
+    const budget = average * factor;
+    const ytd = started ? mine.filter(l=>l.date >= cur.from && l.date <= (today < cur.to ? today : cur.to)).reduce((s,l)=>s+l.cost,0) : null;
+    return { actuals, average, budget, monthly: budget / 12, ytd, remaining: ytd == null ? null : budget - ytd };
+  };
+  const categories = FIN_CATEGORIES.map(c=>({ label:c.label, ...line(l=>l.category===c.id) }));
+  const total = line(()=>true);
+  const vesselIds = [...new Set(spent.map(l=>l.vesselId))];
+  const vessels = vesselIds.length > 1 ? vesselIds.map(id=>({ label:vesselName(id), ...line(l=>l.vesselId===id) })).sort((a,b)=>b.budget-a.budget) : [];
+  return { baseYears, categories, total, vessels, started, yearLabel: budgetYearLabel(b.year, b.startMonth),
+    baseLabel: baseYears.length === 1 ? budgetYearLabel(baseYears[0], b.startMonth) : `${budgetYearLabel(baseYears[0], b.startMonth).split(' ')[0]} to ${budgetYearLabel(baseYears[baseYears.length-1], b.startMonth).split(' ')[0]}`,
+    vesselLabel: finScopeLabel(), uplift: Number(b.uplift)||0, hasHistory: total.actuals.some(v=>v>0) };
+}
+
+/* ---------- Page ---------- */
 function renderFinance(){
   const f = state.fin;
+  const views = [ { id:'entries', label:'Costs' }, { id:'reports', label:'Cost reports' }, { id:'budget', label:'Budget' } ];
   return `
     <h2 class="section-title">Finance</h2>
-    <p class="section-sub">Maintenance cost reports. Every report can be saved as PDF or CSV, or emailed.</p>
+    <p class="section-sub">Record costs, run cost reports and plan budgets. Reports and budgets can be saved as PDF or CSV, or emailed.</p>
+    <div class="subtabs">
+      ${views.map(v=>`<button type="button" class="subtab ${f.view===v.id?'active':''}" data-action="fin-view" data-view="${v.id}">${v.label}</button>`).join('')}
+    </div>
     ${renderFinScope()}
-    ${renderCostReports()}
+    ${f.view==='reports' ? renderCostReports() : f.view==='budget' ? renderBudget() : renderFinEntries()}
   `;
+}
+
+function renderFinEntries(){
+  const cat = state.fin.entryCat || 'all';
+  const rows = state.financeItems.filter(x=>inFinScope(x.vesselId) && (cat==='all' || x.category===cat))
+    .sort((a,b)=> (b.date||'').localeCompare(a.date||''));
+  const total = rows.reduce((s,x)=>s+(Number(x.cost)||0),0);
+  return `
+    <div class="toolbar">
+      <div class="filters">
+        <select id="finEntryCat" aria-label="Category">
+          <option value="all">All categories</option>
+          ${FIN_CATEGORIES.map(c=>`<option value="${c.id}" ${cat===c.id?'selected':''}>${c.label}</option>`).join('')}
+        </select>
+      </div>
+      <button class="btn primary" data-action="add-fin-item">+ Add cost</button>
+    </div>
+    <div class="cost-total-bar">
+      <div class="ctb-item"><div class="label">Recorded costs</div><div class="value">${fmtCurrency(total)}</div></div>
+      <div class="ctb-item"><div class="label">Entries</div><div class="value">${rows.length}</div></div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Vessel</th><th>Service provider</th><th class="num">Cost</th><th></th></tr></thead>
+        <tbody>
+          ${rows.length===0 ? `<tr><td colspan="7"><div class="empty-note">No costs recorded${cat!=='all' ? ' in this category' : ''} for ${esc(finScopeLabel())}. Use “+ Add cost” to record parts, services and maintenance spend.</div></td></tr>` : rows.map(x=>{
+            const pv = x.provider || {};
+            return `
+            <tr>
+              <td style="white-space:nowrap;">${fmtDate(x.date)}</td>
+              <td>${esc(finCategoryLabel(x.category))}</td>
+              <td><b>${esc(x.description)}</b>${x.invoiceRef ? `<div style="color:var(--ink-soft); font-size:11.5px;">Ref ${esc(x.invoiceRef)}</div>` : ''}${x.notes ? `<div style="color:var(--ink-soft); font-size:11.5px;">${esc(x.notes)}</div>` : ''}</td>
+              <td>${esc(vesselName(x.vesselId))}</td>
+              <td>${pv.name ? `<b>${esc(pv.name)}</b>` : '<span style="color:var(--ink-soft);">—</span>'}${[pv.contactName, pv.phone, pv.email].filter(Boolean).map(v=>`<div style="color:var(--ink-soft); font-size:11.5px;">${esc(v)}</div>`).join('')}</td>
+              <td class="num">${fmtCurrency(x.cost)}</td>
+              <td style="white-space:nowrap;">
+                <button class="btn small ghost" data-action="edit-fin-item" data-id="${x.id}">Edit</button>
+                <button class="btn small danger" data-action="delete-fin-item" data-id="${x.id}">Delete</button>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+/* Provider details used before, so a repeat supplier fills in by name: for each detail,
+   the most recent entry that has it. */
+function knownProviders(){
+  const seen = new Map();
+  state.financeItems.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'')).forEach(x=>{
+    const p = x.provider || {};
+    const key = (p.name||'').trim().toLowerCase();
+    if(!key) return;
+    const known = seen.get(key) || { name:p.name };
+    ['contactName','phone','email'].forEach(f=>{ if(!known[f] && p[f]) known[f] = p[f]; });
+    seen.set(key, known);
+  });
+  return seen;
+}
+
+function financeItemForm(x){
+  const vessels = state.vessels;
+  const defVessel = state.fin.vessel !== 'all' ? state.fin.vessel : (finScopeVessels()[0] || vessels[0] || {}).id || '';
+  x = x || { vesselId:defVessel, category:'parts', date:localISODate(new Date()), cost:'', description:'', invoiceRef:'', notes:'', provider:{} };
+  const pv = x.provider || {};
+  const names = [...knownProviders().values()].map(p=>p.name);
+  return `
+    ${fieldRow(
+      `<label class="field">Category<select name="category" required>${FIN_CATEGORIES.map(c=>`<option value="${c.id}" ${x.category===c.id?'selected':''}>${c.label}</option>`).join('')}</select></label>`,
+      `<label class="field">Vessel<select name="vesselId" required>${vessels.map(v=>`<option value="${v.id}" ${x.vesselId===v.id?'selected':''}>${esc(v.name)}</option>`).join('')}</select></label>`
+    )}
+    <label class="field">Description<input name="description" value="${esc(x.description)}" placeholder="e.g. Impeller kit and gaskets, port engine" required></label>
+    ${fieldRow(
+      `<label class="field">Date${dateField('date', x.date, { required:true })}</label>`,
+      `<label class="field">Cost (R)<input name="cost" type="number" min="0" step="0.01" value="${x.cost===''||x.cost==null?'':esc(x.cost)}" required></label>`
+    )}
+    <label class="field">Invoice / quote reference<input name="invoiceRef" value="${esc(x.invoiceRef||'')}" placeholder="optional"></label>
+
+    <div class="detail-section" style="margin-top:4px;"><h4>Service provider</h4></div>
+    ${fieldRow(
+      `<label class="field">Company / name<input name="providerName" value="${esc(pv.name||'')}" ${names.length?'list="finProviderNames"':''} autocomplete="off"></label>`,
+      `<label class="field">Contact person<input name="providerContact" value="${esc(pv.contactName||'')}"></label>`
+    )}
+    ${names.length ? `<datalist id="finProviderNames">${names.map(n=>`<option value="${esc(n)}">`).join('')}</datalist>` : ''}
+    ${fieldRow(
+      `<label class="field">Phone<input name="providerPhone" type="tel" value="${esc(pv.phone||'')}"></label>`,
+      `<label class="field">Email<input name="providerEmail" type="email" value="${esc(pv.email||'')}" autocapitalize="none" autocorrect="off" spellcheck="false"></label>`
+    )}
+    <label class="field">Notes<textarea name="notes" rows="2" placeholder="optional">${esc(x.notes||'')}</textarea></label>
+  `;
+}
+/* Typing a provider used before fills in their details where still blank. */
+function wireFinanceItemForm(){
+  const form = document.getElementById('modalForm');
+  const name = form && state.modal && state.modal.type==='finance-item' ? form.elements.providerName : null;
+  if(!name) return;
+  name.addEventListener('input', ()=>{
+    const p = knownProviders().get(name.value.trim().toLowerCase());
+    if(!p) return;
+    [['providerContact','contactName'],['providerPhone','phone'],['providerEmail','email']].forEach(([field, key])=>{
+      if(!form.elements[field].value && p[key]) form.elements[field].value = p[key];
+    });
+  });
 }
 
 function renderCostReports(){
   const f = state.fin;
   if(!f.from || !f.to) Object.assign(f, defaultYearRange());
   const years = new Set([new Date().getFullYear()]);
-  getAllMaintenanceTasks().forEach(m=>{ const y = Number(taskCostDate(m).slice(0,4)); if(y) years.add(y); });
+  costLines().forEach(l=>{ const y = Number(String(l.date).slice(0,4)); if(y) years.add(y); });
   const yearOpts = [...years].sort((a,b)=>b-a);
   const periodFields = f.period==='monthly' ? fieldRow(
       `<label class="field">Month<select id="finMonth">${MONTH_NAMES.map((n,i)=>`<option value="${i+1}" ${f.month===i+1?'selected':''}>${n}</option>`).join('')}</select></label>`,
@@ -2806,7 +2988,7 @@ function renderCostReports(){
       )}
       ${periodFields}
       ${f.period==='yearly' ? '<p class="fin-hint">Pick any start date, such as the first day of your financial year. The end date fills in a year later and can be changed.</p>' : ''}
-      ${f.period==='open' ? '<p class="fin-hint">Every task not yet completed, whatever its due date.</p>' : ''}
+      ${f.period==='open' ? '<p class="fin-hint">Every maintenance task not yet completed, whatever its due date.</p>' : '<p class="fin-hint">Includes costs recorded under Costs and the costs on maintenance tasks.</p>'}
       <button type="button" class="btn primary" data-action="fin-generate">Generate report</button>
     </div>
     ${!r ? '<div class="empty-note">Choose a report and press Generate.</div>' : `
@@ -2818,21 +3000,22 @@ function renderCostReports(){
     </div>
     <div class="cost-total-bar">
       <div class="ctb-item"><div class="label">Total cost</div><div class="value">${fmtCurrency(r.total)}</div></div>
-      ${f.report.period!=='open' ? `<div class="ctb-item"><div class="label">Completed</div><div class="value">${fmtCurrency(r.completedTotal)}</div></div>
+      ${f.report.period!=='open' ? `<div class="ctb-item"><div class="label">Spent</div><div class="value">${fmtCurrency(r.completedTotal)}</div></div>
       <div class="ctb-item"><div class="label">Still open</div><div class="value">${fmtCurrency(r.openTotal)}</div></div>` : ''}
-      <div class="ctb-item"><div class="label">Tasks</div><div class="value">${r.rows.length}</div></div>
+      <div class="ctb-item"><div class="label">Items</div><div class="value">${r.rows.length}</div></div>
     </div>
     ${renderFinShare('report')}
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Date</th><th>Task</th><th>Vessel</th><th>Type</th><th>Status</th>${admin?'<th>Billing</th>':''}<th class="num">Cost</th></tr></thead>
+        <thead><tr><th>Date</th><th>Item</th><th>Category</th><th>Vessel</th><th>Service provider</th><th>Status</th>${admin?'<th>Billing</th>':''}<th class="num">Cost</th></tr></thead>
         <tbody>
-          ${r.rows.length===0 ? `<tr><td colspan="${admin?7:6}"><div class="empty-note">No maintenance costs in this period.</div></td></tr>` : r.rows.map(x=>`
+          ${r.rows.length===0 ? `<tr><td colspan="${admin?8:7}"><div class="empty-note">No costs in this period.</div></td></tr>` : r.rows.map(x=>`
             <tr>
               <td>${fmtDate(x.date)}</td>
               <td><b>${esc(x.title)}</b>${x.description?`<div style="color:var(--ink-soft); font-size:11.5px; margin-top:2px;">${esc(x.description)}</div>`:''}</td>
+              <td>${esc(finCategoryLabel(x.category))}</td>
               <td>${esc(x.vessel)}${x.tender?` <span style="color:var(--ink-soft); font-size:11px;">— ${esc(x.tender)} (tender)</span>`:''}</td>
-              <td style="text-transform:capitalize;">${esc(x.type)}</td>
+              <td>${x.provider ? esc(x.provider) : '<span style="color:var(--ink-soft);">—</span>'}</td>
               <td><span class="stamp ${x.statusId}">${esc(x.status)}</span></td>
               ${admin?`<td>${esc(x.billing)}</td>`:''}
               <td class="num">${fmtCurrency(x.cost)}</td>
@@ -2840,16 +3023,83 @@ function renderCostReports(){
         </tbody>
       </table>
     </div>
+    ${r.byCategory.length ? `
+    <div class="detail-section">
+      <h4>By category</h4>
+      ${r.byCategory.map(([name, v])=>`<div class="mini-row"><span>${esc(name)} <span style="color:var(--ink-soft);">(${v.count} item${v.count===1?'':'s'})</span></span><b>${fmtCurrency(v.cost)}</b></div>`).join('')}
+    </div>` : ''}
     ${Object.keys(r.byVessel).length > 1 ? `
     <div class="detail-section">
       <h4>By vessel</h4>
-      ${Object.entries(r.byVessel).map(([name, v])=>`<div class="mini-row"><span>${esc(name)} <span style="color:var(--ink-soft);">(${v.count} task${v.count===1?'':'s'})</span></span><b>${fmtCurrency(v.cost)}</b></div>`).join('')}
+      ${Object.entries(r.byVessel).map(([name, v])=>`<div class="mini-row"><span>${esc(name)} <span style="color:var(--ink-soft);">(${v.count} item${v.count===1?'':'s'})</span></span><b>${fmtCurrency(v.cost)}</b></div>`).join('')}
     </div>` : ''}
     `}
   `;
 }
 
-/* PDF / CSV / email buttons with the recipient box. */
+function renderBudget(){
+  const b = state.fin.budget;
+  const thisYear = new Date().getFullYear();
+  const d = budgetData(b);
+  const money = v => v == null ? '<span style="color:var(--ink-soft);">—</span>' : fmtCurrency(v);
+  const table = (rows, firstCol, totalRow) => `
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>${firstCol}</th>${d.baseYears.map(y=>`<th class="num">${esc(budgetYearLabel(y, b.startMonth).split(' ')[0])} actual</th>`).join('')}<th class="num">Average</th><th class="num">Budget</th><th class="num">Per month</th>${d.started ? '<th class="num">Spent so far</th><th class="num">Remaining</th>' : ''}</tr></thead>
+        <tbody>
+          ${rows.map(r=>`
+            <tr>
+              <td><b>${esc(r.label)}</b></td>
+              ${r.actuals.map(v=>`<td class="num">${fmtCurrency(v)}</td>`).join('')}
+              <td class="num">${fmtCurrency(r.average)}</td>
+              <td class="num"><b>${fmtCurrency(r.budget)}</b></td>
+              <td class="num">${fmtCurrency(r.monthly)}</td>
+              ${d.started ? `<td class="num">${money(r.ytd)}</td><td class="num">${r.remaining < 0 ? `<span class="stamp overdue">${fmtCurrency(r.remaining)}</span>` : money(r.remaining)}</td>` : ''}
+            </tr>`).join('')}
+          ${totalRow ? `
+            <tr class="total-row">
+              <td><b>Total</b></td>
+              ${d.total.actuals.map(v=>`<td class="num"><b>${fmtCurrency(v)}</b></td>`).join('')}
+              <td class="num"><b>${fmtCurrency(d.total.average)}</b></td>
+              <td class="num"><b>${fmtCurrency(d.total.budget)}</b></td>
+              <td class="num"><b>${fmtCurrency(d.total.monthly)}</b></td>
+              ${d.started ? `<td class="num"><b>${money(d.total.ytd)}</b></td><td class="num"><b>${money(d.total.remaining)}</b></td>` : ''}
+            </tr>` : ''}
+        </tbody>
+      </table>
+    </div>`;
+  return `
+    <div class="fin-panel">
+      ${fieldRow(
+        `<label class="field">Budget year<select id="budYear">${[thisYear-1, thisYear, thisYear+1, thisYear+2].map(y=>`<option value="${y}" ${b.year===y?'selected':''}>${esc(budgetYearLabel(y, b.startMonth))}</option>`).join('')}</select></label>`,
+        `<label class="field">Year starts in<select id="budStart">${MONTH_NAMES.map((n,i)=>`<option value="${i+1}" ${b.startMonth===i+1?'selected':''}>${n}</option>`).join('')}</select></label>`
+      )}
+      ${fieldRow(
+        `<label class="field">Based on<select id="budBase">${[1,2,3].map(n=>`<option value="${n}" ${b.baseYears===n?'selected':''}>Average of the last ${n===1?'year':n+' years'}</option>`).join('')}</select></label>`,
+        `<label class="field">Increase on average (%)<input id="budUplift" type="number" step="0.5" value="${esc(b.uplift)}"></label>`
+      )}
+      <p class="fin-hint">Uses money actually spent: costs recorded under Costs, plus completed maintenance tasks. Years with nothing recorded count as zero — choose fewer years if your records are newer than that.</p>
+    </div>
+    <div class="toolbar" style="margin-top:6px;">
+      <div>
+        <h3 style="margin:0;">Budget ${esc(d.yearLabel)}</h3>
+        <div class="section-sub" style="margin:2px 0 0;">${esc(d.vesselLabel)} · based on ${esc(d.baseLabel)} + ${esc(d.uplift)}%</div>
+      </div>
+    </div>
+    <div class="cost-total-bar">
+      <div class="ctb-item"><div class="label">Budget</div><div class="value">${fmtCurrency(d.total.budget)}</div></div>
+      <div class="ctb-item"><div class="label">Per month</div><div class="value">${fmtCurrency(d.total.monthly)}</div></div>
+      ${d.started ? `<div class="ctb-item"><div class="label">Spent so far</div><div class="value">${fmtCurrency(d.total.ytd)}</div></div>
+      <div class="ctb-item"><div class="label">Remaining</div><div class="value">${fmtCurrency(d.total.remaining)}</div></div>` : ''}
+    </div>
+    ${!d.hasHistory ? `<div class="empty-note" style="margin-bottom:14px;">No spending recorded in ${esc(d.baseLabel)} for ${esc(d.vesselLabel)}, so the budget is R0. Record past costs under Costs, or complete maintenance tasks with their costs, to build history.</div>` : ''}
+    ${renderFinShare('budget')}
+    ${table(d.categories, 'Category', true)}
+    ${d.vessels.length ? `<div class="detail-section"><h4>By vessel</h4></div>${table(d.vessels, 'Vessel', false)}` : ''}
+  `;
+}
+
+/* PDF / CSV / email buttons with the recipient box. `kind` is 'report' or 'budget'. */
 function renderFinShare(kind){
   return `
     <div class="fin-share">
@@ -2862,7 +3112,7 @@ function renderFinShare(kind){
     </div>`;
 }
 
-/* Reads the report settings off the page into state, so a live refresh keeps them. */
+/* Reads the report and budget settings off the page into state, so a live refresh keeps them. */
 function captureFinControls(){
   const f = state.fin;
   const val = id => { const el = document.getElementById(id); return el ? el.value : null; };
@@ -2870,6 +3120,11 @@ function captureFinControls(){
   if(val('finVessel') != null) f.vessel = val('finVessel');
   if(val('finMonth') != null) f.month = Number(val('finMonth'));
   if(val('finYear') != null) f.year = Number(val('finYear'));
+  if(val('finEntryCat') != null) f.entryCat = val('finEntryCat');
+  if(val('budYear') != null) f.budget.year = Number(val('budYear'));
+  if(val('budStart') != null) f.budget.startMonth = Number(val('budStart'));
+  if(val('budBase') != null) f.budget.baseYears = Number(val('budBase'));
+  if(val('budUplift') != null) f.budget.uplift = val('budUplift') === '' ? 0 : Number(val('budUplift'));
   const from = document.querySelector('input[type=hidden][name=finFrom]');
   const to = document.querySelector('input[type=hidden][name=finTo]');
   if(from) f.from = from.value;
@@ -2885,8 +3140,10 @@ function attachFinancePageEvents(){
     if(!finScopeVessels().some(v=>v.id===state.fin.vessel)) state.fin.vessel = 'all';
     render();
   });
-  const ve = document.getElementById('finVessel');
-  if(ve) ve.addEventListener('change', ()=>{ captureFinControls(); render(); });
+  ['finVessel','finEntryCat','budYear','budStart','budBase','budUplift'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.addEventListener('change', ()=>{ captureFinControls(); render(); });
+  });
   ['finPeriod','finMonth','finYear'].forEach(id=>{
     const el = document.getElementById(id);
     if(el) el.addEventListener('change', ()=>{ captureFinControls(); if(id==='finPeriod') render(); });
@@ -2998,34 +3255,78 @@ function costReportFiles(){
 
   const { doc, y } = newPdf(r.title, [
     `Period: ${r.periodLabel}`, `Vessels: ${r.vesselLabel}`, `Generated: ${fmtDate(stamp)}`,
-    `Total: ${fmtCurrency(r.total)}${p.period!=='open' ? `   (completed ${fmtCurrency(r.completedTotal)}, still open ${fmtCurrency(r.openTotal)})` : ''}   ·   ${r.rows.length} task${r.rows.length===1?'':'s'}`
+    `Total: ${fmtCurrency(r.total)}${p.period!=='open' ? `   (spent ${fmtCurrency(r.completedTotal)}, still open ${fmtCurrency(r.openTotal)})` : ''}   ·   ${r.rows.length} item${r.rows.length===1?'':'s'}`
   ]);
-  const cols = admin
-    ? [{label:'Date',w:20},{label:'Task',w:50},{label:'Vessel',w:30},{label:'Type',w:20},{label:'Status',w:20},{label:'Billing',w:20},{label:'Cost',w:22,align:'right'}]
-    : [{label:'Date',w:22},{label:'Task',w:62},{label:'Vessel',w:34},{label:'Type',w:22},{label:'Status',w:20},{label:'Cost',w:22,align:'right'}];
-  const body = r.rows.map(x=>[fmtDate(x.date), x.title + (x.description ? ` — ${x.description}` : ''), x.vessel + (x.tender ? ` (${x.tender})` : ''), svcCap(x.type), x.status, ...(admin?[x.billing]:[]), fmtCurrency(x.cost)]);
+  const cols = [{label:'Date',w:19},{label:'Item',w:44},{label:'Category',w:26},{label:'Vessel',w:25},{label:'Provider',w:28},{label:'Status',w:21},{label:'Cost',w:19,align:'right'}];
+  const body = r.rows.map(x=>[fmtDate(x.date), x.title + (x.description ? ` — ${x.description}` : ''), finCategoryLabel(x.category), x.vessel + (x.tender ? ` (${x.tender})` : ''), x.provider, x.status, fmtCurrency(x.cost)]);
   body.push([...cols.slice(0,-2).map(()=> ''), 'Total', fmtCurrency(r.total)]);
   let yy = pdfTable(doc, y, cols, body, { boldRows:[body.length-1] });
-  if(Object.keys(r.byVessel).length > 1){
+  const summary = (heading, entries)=>{
     yy += 6;
-    if(yy > 260){ doc.addPage(); yy = 20; }
-    doc.setFont('helvetica','bold'); doc.setFontSize(11); doc.text('By vessel', 14, yy); yy += 7;
-    pdfTable(doc, yy, [{label:'Vessel',w:120},{label:'Tasks',w:30,align:'right'},{label:'Cost',w:32,align:'right'}],
-      Object.entries(r.byVessel).map(([n,v])=>[n, String(v.count), fmtCurrency(v.cost)]));
-  }
+    if(yy > 255){ doc.addPage(); yy = 20; }
+    doc.setFont('helvetica','bold'); doc.setFontSize(11); doc.text(heading, 14, yy); yy += 7;
+    yy = pdfTable(doc, yy, [{label:heading.replace('By ','').replace(/^./, c=>c.toUpperCase()),w:120},{label:'Items',w:30,align:'right'},{label:'Cost',w:32,align:'right'}],
+      entries.map(([n,v])=>[n, String(v.count), fmtCurrency(v.cost)]));
+  };
+  if(r.byCategory.length) summary('By category', r.byCategory);
+  if(Object.keys(r.byVessel).length > 1) summary('By vessel', Object.entries(r.byVessel));
   pdfFooter(doc);
 
+  const head = ['Date','Item','Details','Category','Source','Vessel','Tender','Service provider','Status', ...(admin?['Billing']:[]), 'Cost (R)'];
   const csv = [
-    ['Date','Task','Description','Vessel','Tender','Type','Status', ...(admin?['Billing']:[]), 'Cost (R)'],
-    ...r.rows.map(x=>[x.date, x.title, x.description, x.vessel, x.tender, x.type, x.status, ...(admin?[x.billing]:[]), Number(x.cost.toFixed(2))]),
-    ['','','','','','','', ...(admin?['']:[]), Number(r.total.toFixed(2))]
+    head,
+    ...r.rows.map(x=>[x.date, x.title, x.description, finCategoryLabel(x.category), x.source, x.vessel, x.tender, x.provider, x.status, ...(admin?[x.billing]:[]), Number(x.cost.toFixed(2))]),
+    [...head.slice(0,-2).map(()=> ''), 'Total', Number(r.total.toFixed(2))]
   ];
-  csv[csv.length-1][csv[0].length-2] = 'Total';
   return {
     pdf: pdfFile(doc, base + '.pdf'),
     csv: csvFile(csv, base + '.csv'),
     subject: `${r.title} — ${r.periodLabel} — ${r.vesselLabel}`,
-    text: `${r.title} for ${r.vesselLabel}, ${r.periodLabel}: ${fmtCurrency(r.total)} across ${r.rows.length} task${r.rows.length===1?'':'s'}. PDF and CSV attached.`
+    text: `${r.title} for ${r.vesselLabel}, ${r.periodLabel}: ${fmtCurrency(r.total)} across ${r.rows.length} item${r.rows.length===1?'':'s'}. PDF and CSV attached.`
+  };
+}
+
+function budgetFiles(){
+  const b = state.fin.budget;
+  const d = budgetData(b);
+  const yearCols = d.baseYears.map(y=>budgetYearLabel(y, b.startMonth).split(' ')[0]);
+  const base = `Budget-${fileSlug(d.yearLabel.split(' ')[0])}${state.fin.vessel!=='all' || finScopeCompany() ? '-' + fileSlug(d.vesselLabel) : ''}`;
+  const { doc, y } = newPdf(`Budget ${d.yearLabel}`, [
+    `Vessels: ${d.vesselLabel}`,
+    `Based on: average spend ${d.baseLabel}, plus ${d.uplift}%`,
+    `Budget: ${fmtCurrency(d.total.budget)}  (${fmtCurrency(d.total.monthly)} per month)${d.started ? `   ·   spent so far ${fmtCurrency(d.total.ytd)}, remaining ${fmtCurrency(d.total.remaining)}` : ''}`,
+    `Generated: ${fmtDate(localISODate(new Date()))}`
+  ]);
+  const extra = d.started ? 2 : 0;
+  const numW = Math.floor((182 - 44) / (yearCols.length + 3 + extra));
+  const cols = [{label:'Category',w:182 - numW*(yearCols.length + 3 + extra)}, ...yearCols.map(l=>({label:l,w:numW,align:'right'})),
+    {label:'Average',w:numW,align:'right'},{label:'Budget',w:numW,align:'right'},{label:'/month',w:numW,align:'right'},
+    ...(d.started ? [{label:'Spent',w:numW,align:'right'},{label:'Remaining',w:numW,align:'right'}] : [])];
+  const rowOf = r=>[r.label, ...r.actuals.map(fmtCurrency), fmtCurrency(r.average), fmtCurrency(r.budget), fmtCurrency(r.monthly), ...(d.started ? [fmtCurrency(r.ytd), fmtCurrency(r.remaining)] : [])];
+  const body = [...d.categories.map(rowOf), rowOf({ ...d.total, label:'Total' })];
+  let yy = pdfTable(doc, y, cols, body, { boldRows:[body.length-1] });
+  if(d.vessels.length){
+    yy += 6; if(yy > 255){ doc.addPage(); yy = 20; }
+    doc.setFont('helvetica','bold'); doc.setFontSize(11); doc.text('By vessel', 14, yy); yy += 7;
+    pdfTable(doc, yy, [{ ...cols[0], label:'Vessel' }, ...cols.slice(1)], d.vessels.map(rowOf));
+  }
+  pdfFooter(doc);
+
+  const head = ['Group','Name', ...yearCols.map(l=>`${l} actual (R)`), 'Average (R)', 'Budget (R)', 'Per month (R)', ...(d.started ? ['Spent so far (R)','Remaining (R)'] : [])];
+  const num = v => v == null ? '' : Number(v.toFixed(2));
+  const csvRow = (group, r)=>[group, r.label, ...r.actuals.map(num), num(r.average), num(r.budget), num(r.monthly), ...(d.started ? [num(r.ytd), num(r.remaining)] : [])];
+  const csv = [
+    ['Budget', d.yearLabel], ['Vessels', d.vesselLabel], ['Based on', `Average ${d.baseLabel} + ${d.uplift}%`], [],
+    head,
+    ...d.categories.map(r=>csvRow('Category', r)),
+    csvRow('Total', { ...d.total, label:'All categories' }),
+    ...d.vessels.map(r=>csvRow('Vessel', r))
+  ];
+  return {
+    pdf: pdfFile(doc, base + '.pdf'),
+    csv: csvFile(csv, base + '.csv'),
+    subject: `Budget ${d.yearLabel} — ${d.vesselLabel}`,
+    text: `Budget ${d.yearLabel} for ${d.vesselLabel}: ${fmtCurrency(d.total.budget)} (${fmtCurrency(d.total.monthly)} per month), based on average spend ${d.baseLabel} plus ${d.uplift}%. PDF and CSV attached.`
   };
 }
 
@@ -3045,9 +3346,10 @@ async function emailFiles(files, to, subject, text, cc){
 }
 
 async function finFileAction(action, kind){
-  if(kind !== 'report' || !state.fin.report) return;
+  if(kind === 'report' && !state.fin.report) return;
+  if(kind !== 'report' && kind !== 'budget') return;
   let out;
-  try{ out = costReportFiles(); }
+  try{ out = kind === 'budget' ? budgetFiles() : costReportFiles(); }
   catch(e){ alert('Could not build the files. ' + (e && e.message ? e.message : '')); return; }
   if(action === 'fin-pdf'){ downloadFile(out.pdf); return; }
   if(action === 'fin-csv'){ downloadFile(out.csv); return; }
@@ -3055,7 +3357,7 @@ async function finFileAction(action, kind){
   const to = state.fin.emailTo;
   if(!to){
     const box = document.getElementById('finEmailTo');
-    alert('Enter the email address to send this report to.');
+    alert(`Enter the email address to send this ${kind === 'budget' ? 'budget' : 'report'} to.`);
     if(box) box.focus();
     return;
   }
@@ -3481,6 +3783,7 @@ function renderModal(){
   else if(modal.type==='company'){ title = modal.data ? 'Edit company' : 'Add company'; body = companyForm(modal.data); }
   else if(modal.type==='checklist'){ title = modal.data ? 'Edit checklist' : 'New checklist'; body = checklistForm(modal.data); }
   else if(modal.type==='checklist-import'){ title = 'Import standard checklists'; body = checklistImportForm(); }
+  else if(modal.type==='finance-item'){ title = modal.data ? 'Edit cost' : 'Add cost'; body = financeItemForm(modal.data); }
 
   root.innerHTML = `
     <div class="modal-overlay" data-action="overlay-close">
@@ -3507,6 +3810,7 @@ function attachModalEvents(){
   if(form) form.addEventListener('submit', handleFormSubmit);
   wireChecklistItemEditor();
   wireCrewQualAdder();
+  wireFinanceItemForm();
   const costField = form && form.querySelector('[data-cost-field]');
   const costVessel = form && form.elements.vesselId;
   if(costField && costVessel) costVessel.addEventListener('change', ()=>{
@@ -3988,6 +4292,20 @@ async function handleFormSubmit(e){
       ? fresh.map(c=> c.id===editId ? { ...c, ...data } : c)
       : [...fresh, { id:uid('cl'), createdDate:localISODate(new Date()), ...data }];
   }
+  else if(modal.type==='finance-item'){
+    const cost = Number(fd.get('cost'));
+    if(!fd.get('date')){ alert('Enter the date as dd/mm/yyyy.'); return; }
+    if(!(cost >= 0)){ alert('Enter the cost.'); return; }
+    const t = k => String(fd.get(k)||'').trim();
+    const data = { vesselId:fd.get('vesselId'), category:fd.get('category'), description:t('description'), date:fd.get('date'),
+      cost: Math.round(cost*100)/100, invoiceRef:t('invoiceRef'), notes:t('notes'),
+      provider:{ name:t('providerName'), contactName:t('providerContact'), phone:t('providerPhone'), email:t('providerEmail') } };
+    const editId = modal.data ? modal.data.id : null;
+    targetKey = 'financeItems';
+    mutateFn = fresh => editId
+      ? fresh.map(x=> x.id===editId ? { ...x, ...data } : x)
+      : [...fresh, { id:uid('fi'), createdBy: session ? session.email : '', createdDate: localISODate(new Date()), ...data }];
+  }
   else if(modal.type==='checklist-import'){
     const lists = fd.getAll('lists');
     const allVessels = fd.get('allVessels') === '1';
@@ -4146,6 +4464,17 @@ function attachContentEvents(){
           break;
         case 'maint-view': state.maintView = el.dataset.view; render(); break;
         case 'fin-generate': generateCostReport(); break;
+        case 'fin-view': captureFinControls(); state.fin.view = el.dataset.view; render(); break;
+        case 'add-fin-item': state.modal = { type:'finance-item', data:null }; renderModal(); break;
+        case 'edit-fin-item': state.modal = { type:'finance-item', data: state.financeItems.find(x=>x.id===id) }; renderModal(); break;
+        case 'delete-fin-item': {
+          const x = state.financeItems.find(i=>i.id===id);
+          if(x && confirm(`Delete this cost — ${x.description} (${fmtCurrency(x.cost)})?`)){
+            await persistArray('financeItems', fresh => fresh.filter(i=>i.id!==id));
+            render();
+          }
+          break;
+        }
         case 'fin-pdf': case 'fin-csv': case 'fin-email': await finFileAction(action, el.dataset.kind); break;
         case 'svc-unit': state.svcMeterId = el.dataset.meter; render(); break;
         case 'svc-complete': await completeServiceTask(el.dataset.task); break;

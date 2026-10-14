@@ -41,6 +41,10 @@
           ".read": "auth != null && (root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin' || root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner')",
           ".write": "auth != null && (root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin' || root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner')"
         },
+        "financeItems": {
+          ".read": "auth != null && (root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin' || root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner')",
+          ".write": "auth != null && (root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin' || root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner')"
+        },
         "companies": {
           ".read": "auth != null && (root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin' || root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner')"
         }
