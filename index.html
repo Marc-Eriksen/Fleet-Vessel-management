@@ -2957,12 +2957,15 @@ function companyForm(c){
 
     <div class="detail-section" style="margin-top:4px;"><h4>Owner / operator login</h4></div>
     ${c.loginUid ? `
-      <div class="mini-row"><span>Signs in as</span><b>${esc(c.loginEmail)}</b></div>
-      <div style="display:flex; gap:6px; flex-wrap:wrap; margin:8px 0 4px;">
+      ${fieldRow(
+        `<label class="field">Login email<input name="loginEmail" type="email" value="${esc(c.loginEmail)}" required autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="off"></label>`,
+        `<label class="field">Password for new email<input name="loginPassword" value="" minlength="6" placeholder="Only if changing email" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="off"></label>`
+      )}
+      <div style="display:flex; gap:6px; flex-wrap:wrap; margin:4px 0 4px;">
         <button type="button" class="btn small" data-action="company-reset-password" data-email="${esc(c.loginEmail)}">Send password reset email</button>
         <button type="button" class="btn small danger" data-action="company-remove-login" data-id="${c.id}">Remove login</button>
       </div>
-      <p style="font-size:12px; color:var(--ink-soft);">Owners change their own password with &ldquo;Forgot password?&rdquo; on the sign-in page, or from the reset email above.</p>
+      <p style="font-size:12px; color:var(--ink-soft);">To change the login email, enter the new email and a password for it (at least 6 characters) &mdash; the old email stops working on save. Owners change their own password with &ldquo;Forgot password?&rdquo; on the sign-in page, or from the reset email above.</p>
     ` : `
       ${fieldRow(
         `<label class="field">Login email<input name="loginEmail" type="email" value="" placeholder="${esc(c.contactEmail || 'owner@example.com')}" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="off"></label>`,
@@ -4041,10 +4044,17 @@ async function handleFormSubmit(e){
       vesselIds:fd.getAll('vesselIds')
     };
     const loginEmail = String(fd.get('loginEmail')||'').trim().toLowerCase();
+    const pw = String(fd.get('loginPassword')||'');
+    /* Firebase only lets the browser create accounts, not edit someone else's, so a
+       changed email means a new account; the old one loses its role record below. */
+    const prevLogin = modal.data && modal.data.loginUid ? modal.data : null;
+    const emailChanged = !!loginEmail && (!prevLogin || loginEmail !== (prevLogin.loginEmail||'').toLowerCase());
+    if(prevLogin && !emailChanged && pw){
+      alert("An owner's password can't be set here. Use \u201cSend password reset email\u201d, or clear the password field to save other changes."); return;
+    }
     let login = null;
-    if(loginEmail){
-      const pw = String(fd.get('loginPassword')||'');
-      if(pw.length < 6){ alert('The starting password needs at least 6 characters.'); return; }
+    if(emailChanged){
+      if(pw.length < 6){ alert(prevLogin ? 'Enter a password of at least 6 characters for the new login email.' : 'The starting password needs at least 6 characters.'); return; }
       if(state.companies.some(c => c.id !== editId && (c.loginEmail||'').toLowerCase() === loginEmail)){
         alert('Another company already signs in with that email.'); return;
       }
@@ -4052,6 +4062,7 @@ async function handleFormSubmit(e){
         const loginUid = await createOwnerAccount(loginEmail, pw);
         await firebase.database().ref('oceanhub/users/' + loginUid).set({ role:'owner', companyId:coId, email:loginEmail });
         login = { loginEmail, loginUid };
+        if(prevLogin){ try{ await firebase.database().ref('oceanhub/users/' + prevLogin.loginUid).remove(); }catch(e){} }
       }catch(err){
         alert(err && err.code === 'auth/email-already-in-use'
           ? `${loginEmail} already has an OCEANHUB account. Use a different email, or delete that user in the Firebase console (Authentication > Users) and try again.`
