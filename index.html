@@ -558,16 +558,6 @@ function seedData(){
       address:'Durban Harbour, Berth 4', notes:'',
       loginEmail:'', loginUid:'', vesselIds:[v1] },
   ];
-  state.contractors = [
-    { id:uid('ct'), name:'Bluewater Marine Engineering', contactName:'Derek van Wyk',
-      email:'accounts@bluewaterme.example', phone:'+27831112222',
-      bankName:'Standard Bank', accountHolder:'Bluewater Marine Engineering CC', accountNumber:'0123456789',
-      branchCode:'051001', accountType:'Cheque/Current', swift:'SBZAZAJJ', notes:'',
-      payments:[
-        { id:uid('pay'), description:'Shaft seal replacement — MV Kingfisher', amount:34500, date:d(-1), status:'outstanding' },
-        { id:uid('pay'), description:'150-hour engine service — MV Zephyr', amount:8200, date:d(-4), status:'outstanding' },
-      ] },
-  ];
   applyScoping();
 }
 
@@ -584,7 +574,8 @@ function seedData(){
       npm i -g firebase-tools, firebase login, then firebase deploy --only functions.
    Every account needs a record at oceanhub/users/<uid> ({ role:'admin' } or
    { role:'owner', companyId }) to get in. Admin creates owner logins from the
-   Companies tab; an account without a record has no access to any data. */
+   Companies tab; an account without a record has no access to any data.
+   Contractors are managed in the separate contractors app (contractors/index.html). */
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyA5XbMVrsxvjAPNLJRycum5U5htjw9gSy0",
   authDomain: "ocean-hub-vessel-managem-cdca8.firebaseapp.com",
@@ -593,9 +584,8 @@ const FIREBASE_CONFIG = {
 };
 const ADMIN_EMAIL = ""; /* e.g. "ops@oceanhub.co.za" — leave blank to hide admin notify buttons */
 const ADMIN_PHONE = ""; /* e.g. "+27820000000" — used for WhatsApp links, digits/plus only */
-const AA_RATE_PER_KM = 3.75; /* default AA (Automobile Association) cost-per-km rate for contractor travel payments (GWM P-Series) — update as AA rates change; editable per payment */
 /* Collections an owner/operator account may read; everything else under oceanhub/data
-   (contractors) is admin-only in the database rules. */
+   is admin-only in the database rules. */
 const OWNER_KEYS = ['vessels','maintenance','crew','companies','checklists','checklistRuns','hourReadings','serviceLog','rfqs'];
 const OPTIONAL_OWNER_KEYS = ['rfqs']; /* a read error here (e.g. rules not deployed yet) loads as empty instead of failing sign-in */
 let fbInitialized = false;
@@ -631,7 +621,9 @@ async function handleAuthChange(user){
     rec = (await firebase.database().ref('oceanhub/users/' + user.uid).once('value')).val();
   }catch(e){ rec = null; }
   if(!rec || (rec.role !== 'admin' && rec.role !== 'owner')){
-    authNotice = 'This account has not been given access yet — ask the OCEANHUB admin.';
+    authNotice = rec && rec.role === 'contractor'
+      ? 'Contractor accounts sign in to the contractors app (this address with /contractors/ on the end).'
+      : 'This account has not been given access yet — ask the OCEANHUB admin.';
     firebase.auth().signOut();
     return;
   }
@@ -733,8 +725,6 @@ const BILLING_STAGES = [ { id:'quoted', label:'Quoted' }, { id:'invoiced', label
 function billingOf(m){ return m.billing || 'none'; }
 function billingLabel(b){ return ({ none:'Not billed', quoted:'Quoted', invoiced:'Invoiced', paid:'Paid' })[b] || b; }
 
-/* Contractor outstanding-payments total (admin-only view). */
-function outstandingTotal(ct){ return (ct.payments||[]).filter(p=>p.status!=='paid').reduce((s,p)=>s+(Number(p.amount)||0),0); }
 
 /* Which vessels the signed-in user may see: all of them for admin, only the
    assigned ones for an owner/operator. */
@@ -775,7 +765,6 @@ function normalizeKey(key, raw){
     tenders: asArray(v.tenders).map(t=>({ ...t, engines: asArray(t.engines), documents: asArray(t.documents), maintenance: asArray(t.maintenance) })) }));
   if(key==='crew') return asArray(raw).map(c=>({ ...c, quals: asArray(c.quals), documents: asArray(c.documents) }));
   if(key==='companies') return asArray(raw).map(c=>({ ...c, vesselIds: asArray(c.vesselIds) }));
-  if(key==='contractors') return asArray(raw).map(c=>({ ...c, payments: asArray(c.payments) }));
   if(key==='checklists') return asArray(raw).map(c=>({ ...c, vesselIds: asArray(c.vesselIds), items: asArray(c.items) }));
   if(key==='checklistRuns') return asArray(raw).map(r=>({ ...r, entries: asArray(r.entries) }));
   if(key==='hourReadings') return asArray(raw).map(r=>({ ...r, readings: asArray(r.readings) }));
@@ -788,7 +777,6 @@ function applyRemoteData(val){
   state.allMaintenance = normalizeKey('maintenance', val.maintenance);
   state.allCrew = normalizeKey('crew', val.crew);
   state.companies = normalizeKey('companies', val.companies);
-  state.contractors = normalizeKey('contractors', val.contractors);
   state.allChecklists = normalizeKey('checklists', val.checklists);
   state.allChecklistRuns = normalizeKey('checklistRuns', val.checklistRuns);
   state.allHourReadings = normalizeKey('hourReadings', val.hourReadings);
@@ -824,6 +812,11 @@ function loadState(){
         };
         dataListeners.push({ ref, fn });
         ref.on('value', fn, onFirstError);
+        /* contractor names and contacts (kept by the contractors app) for RFQ supplier autofill */
+        const ctRef = firebase.database().ref('oceanhub/contractors');
+        const ctFn = snap=>{ const v = snap.val() || {}; state.contractors = Object.keys(v).map(id=>({ id, ...((v[id] || {}).details || {}) })); };
+        dataListeners.push({ ref:ctRef, fn:ctFn });
+        ctRef.on('value', ctFn, ()=>{ state.contractors = []; });
       } else {
         const val = {}, arrived = new Set();
         OWNER_KEYS.forEach(key=>{
@@ -877,7 +870,7 @@ async function persistAll(){
   if(!fbInitialized) return;
   try{
     await firebase.database().ref('oceanhub/data').set({
-      vessels: state.allVessels, maintenance: state.allMaintenance, crew: state.allCrew, companies: state.companies, contractors: state.contractors
+      vessels: state.allVessels, maintenance: state.allMaintenance, crew: state.allCrew, companies: state.companies
     });
   } catch(e){ /* best effort */ }
 }
@@ -894,7 +887,7 @@ async function persistArray(key, mutateFn){
     let fresh = normalizeKey(key, snap.val());
     fresh = mutateFn(fresh);
     await firebase.database().ref('oceanhub/data/' + key).set(fresh);
-    const allKey = (key === 'companies' || key === 'contractors') ? key
+    const allKey = key === 'companies' ? key
       : 'all' + key.charAt(0).toUpperCase() + key.slice(1);
     state[allKey] = fresh;
     applyScoping();
@@ -1168,7 +1161,6 @@ const TABS = [
 ];
 const ADMIN_TABS = [
   { id:'companies', label:'Companies', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18"/><path d="M5 21V8l7-5 7 5v13"/><path d="M9 21v-5h6v5"/><path d="M9 9h.01M15 9h.01M9 12h.01M15 12h.01"/></svg>' },
-  { id:'contractors', label:'Contractors', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M6 9v0M18 15v0"/></svg>' },
 ];
 function navTabs(){
   const t = TABS.slice();
@@ -3712,398 +3704,6 @@ function renderCompanies(){
   `;
 }
 
-/* ============================= CONTRACTORS (admin only) ============================= */
-const CONTRACTOR_DETAIL_FIELDS = ['contactName','email','phone','bankName','accountHolder','accountNumber','branchCode','accountType','swift','notes'];
-
-function contractorForm(c){
-  const isNew = !c;
-  c = c || { name:'', contactName:'', email:'', phone:'', bankName:'', accountHolder:'', accountNumber:'', branchCode:'', accountType:'', swift:'', notes:'' };
-  return `
-    <label class="field">Contractor / company name<input name="name" value="${esc(c.name)}" required${isNew ? ' list="contractorNames" autocomplete="off"' : ''}></label>
-    ${isNew ? `<datalist id="contractorNames">${[...new Set(state.contractors.map(x=>x.name).filter(Boolean))].map(n=>`<option value="${esc(n)}">`).join('')}</datalist>
-    <div id="contractorAutofillNote" class="section-sub" style="display:none; margin:-4px 0 8px;">This contractor already exists — their details are filled in below. Saving updates them and opens Manage, where you add payments.
-      <button type="button" class="btn small ghost" id="openExistingContractorBtn" style="margin-left:6px;">Open Manage</button></div>` : ''}
-    ${fieldRow(
-      `<label class="field">Contact person<input name="contactName" value="${esc(c.contactName||'')}"></label>`,
-      `<label class="field">Phone<input name="phone" type="tel" value="${esc(c.phone||'')}"></label>`
-    )}
-    <label class="field">Email<input name="email" type="email" value="${esc(c.email||'')}"></label>
-    <label class="field">Notes<textarea name="notes" rows="10">${esc(c.notes||'')}</textarea></label>
-
-    <div class="detail-section" style="margin-top:4px;"><h4>Banking details</h4></div>
-    ${fieldRow(
-      `<label class="field">Bank<input name="bankName" value="${esc(c.bankName||'')}"></label>`,
-      `<label class="field">Account holder<input name="accountHolder" value="${esc(c.accountHolder||'')}"></label>`
-    )}
-    ${fieldRow(
-      `<label class="field">Account number<input name="accountNumber" value="${esc(c.accountNumber||'')}" autocomplete="off"></label>`,
-      `<label class="field">Branch code<input name="branchCode" value="${esc(c.branchCode||'')}"></label>`
-    )}
-    ${fieldRow(
-      `<label class="field">Account type<select name="accountType">
-        <option value="">Select…</option>
-        <option value="Cheque/Current" ${c.accountType==='Cheque/Current'?'selected':''}>Cheque / Current</option>
-        <option value="Savings" ${c.accountType==='Savings'?'selected':''}>Savings</option>
-        <option value="Transmission" ${c.accountType==='Transmission'?'selected':''}>Transmission</option>
-      </select></label>`,
-      `<label class="field">SWIFT / BIC (if international)<input name="swift" value="${esc(c.swift||'')}"></label>`
-    )}
-  `;
-}
-
-function renderExpenseRows(expenses){
-  if(!expenses || expenses.length===0) return '<div class="empty-note" style="padding:8px 0;">No expenses added yet.</div>';
-  return expenses.map(x=>`
-    <div class="mini-row" style="align-items:center;">
-      <span style="display:flex; align-items:center; gap:8px;">
-        ${x.photo ? `<img src="${x.photo}" style="width:34px; height:34px; object-fit:cover; border-radius:5px; flex-shrink:0;">` : ''}
-        ${esc(x.description||'Expense')}
-      </span>
-      <span style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
-        <b>${fmtCurrency(x.amount||0)}</b>
-        <button type="button" class="btn small danger" data-remove-expense="${x.id}">Remove</button>
-      </span>
-    </div>`).join('');
-}
-
-/* Vehicle-travel setup from the most recent travel payment for this contractor,
-   or for any contractor with the same name — used to prefill a new payment. */
-function lastTravelDefaults(contractorId){
-  const ct = state.contractors.find(c=>c.id===contractorId);
-  if(!ct) return null;
-  const key = (ct.name||'').trim().toLowerCase();
-  const travel = state.contractors
-    .filter(c=>c.id===contractorId || (key && (c.name||'').trim().toLowerCase()===key))
-    .flatMap(c=>c.payments||[])
-    .filter(p=>p.includeTravel || p.costType==='travel')
-    .sort((a,b)=>(b.date||'').localeCompare(a.date||''))[0];
-  if(!travel) return null;
-  return { includeTravel:true, ratePerKm: travel.ratePerKm!=null && travel.ratePerKm!=='' ? Number(travel.ratePerKm) : AA_RATE_PER_KM };
-}
-
-function contractorPaymentForm(p, defaults){
-  p = p || { description:'', fixedAmount:'', date:new Date().toISOString().slice(0,10), status:'outstanding', includeTravel:false, odometerStart:'', odometerEnd:'', distanceKm:'', ratePerKm:AA_RATE_PER_KM, photoBefore:'', photoAfter:'', expenses:[], ...(defaults||{}) };
-  const includeTravel = !!p.includeTravel || p.costType==='travel'; /* costType: legacy shape from an earlier version */
-  const distance = Number(p.distanceKm)||0;
-  const rate = p.ratePerKm!=null && p.ratePerKm!=='' ? Number(p.ratePerKm) : AA_RATE_PER_KM;
-  const travelAmount = p.travelAmount!=null ? Number(p.travelAmount) : distance*rate;
-  const fixedAmount = p.fixedAmount!=null && p.fixedAmount!=='' ? Number(p.fixedAmount) : Math.max(0, (Number(p.amount)||0) - (includeTravel ? travelAmount : 0));
-  const expenses = Array.isArray(p.expenses) ? p.expenses : [];
-  const expensesTotal = expenses.reduce((s,x)=>s+(Number(x.amount)||0),0);
-  const total = fixedAmount + (includeTravel ? travelAmount : 0) + expensesTotal;
-  return `
-    <label class="field">Description<textarea name="description" rows="10" placeholder="e.g. Shaft seal replacement — MV Kingfisher">${esc(p.description)}</textarea></label>
-    <label class="field">Fixed / base amount (R)<input name="fixedAmount" id="payFixedAmount" type="number" step="0.01" min="0" value="${fixedAmount}"></label>
-
-    <label style="display:flex; align-items:center; gap:9px; font-size:13px; font-weight:600; color:var(--ink); margin:-2px 0 14px;">
-      <input type="checkbox" name="includeTravel" id="includeTravelCheck" value="1" ${includeTravel?'checked':''} style="width:auto;">
-      Add vehicle travel (AA rate per km)
-    </label>
-
-    <div id="travelFields" style="${includeTravel?'':'display:none;'}">
-      ${fieldRow(
-        `<label class="field">Odometer — before (km)<input name="odometerStart" id="odoStart" type="number" step="1" min="0" value="${p.odometerStart!==''&&p.odometerStart!=null?esc(String(p.odometerStart)):''}"></label>`,
-        `<label class="field">Odometer — after (km)<input name="odometerEnd" id="odoEnd" type="number" step="1" min="0" value="${p.odometerEnd!==''&&p.odometerEnd!=null?esc(String(p.odometerEnd)):''}"></label>`
-      )}
-      ${fieldRow(
-        `<label class="field">Distance travelled (km)<input id="odoDistance" type="number" value="${distance}" readonly style="background:var(--paper-2);"></label>`,
-        `<label class="field">AA rate (R/km)<input name="ratePerKm" id="odoRate" type="number" step="0.01" min="0" value="${rate}"></label>`
-      )}
-      <div class="mini-row" style="padding:2px 0 12px;"><span>Travel cost (distance × rate)</span><b id="odoCalcAmount">${fmtCurrency(travelAmount)}</b></div>
-
-      <label class="field">Odometer photo — before
-        <input type="file" id="odoPhotoBeforeInput" accept="image/*">
-      </label>
-      <input type="hidden" name="photoBefore" id="odoPhotoBeforeHidden" value="${esc(p.photoBefore||'')}">
-      <div id="odoPhotoBeforePreview" style="margin:-4px 0 12px;">
-        ${p.photoBefore ? `<img src="${p.photoBefore}" style="max-width:160px; max-height:120px; border-radius:6px; display:block;">` : ''}
-      </div>
-
-      <label class="field">Odometer photo — after
-        <input type="file" id="odoPhotoAfterInput" accept="image/*">
-      </label>
-      <input type="hidden" name="photoAfter" id="odoPhotoAfterHidden" value="${esc(p.photoAfter||'')}">
-      <div id="odoPhotoAfterPreview" style="margin:-4px 0 12px;">
-        ${p.photoAfter ? `<img src="${p.photoAfter}" style="max-width:160px; max-height:120px; border-radius:6px; display:block;">` : ''}
-      </div>
-    </div>
-
-    <div class="detail-section" style="margin:14px 0 6px;"><h4 style="margin-bottom:0;">Miscellaneous expenses</h4></div>
-    <div id="expenseList">${renderExpenseRows(expenses)}</div>
-    <input type="hidden" name="expensesData" id="expensesDataHidden" value="${esc(JSON.stringify(expenses))}">
-    <div class="mini-row" style="padding:2px 0 10px;"><span>Expenses total</span><b id="expensesTotalAmount">${fmtCurrency(expensesTotal)}</b></div>
-    ${fieldRow(
-      `<label class="field">Expense description<input id="newExpDesc" placeholder="e.g. Toll fees, parts, fuel"></label>`,
-      `<label class="field">Amount (R)<input id="newExpAmount" type="number" step="0.01" min="0"></label>`
-    )}
-    <label class="field">Sales slip photo (optional)
-      <input type="file" id="newExpPhotoInput" accept="image/*">
-    </label>
-    <div id="newExpPhotoPreview" style="margin:-4px 0 10px;"></div>
-    <button type="button" class="btn small ghost" id="addExpenseBtn" style="margin:0 0 14px;">+ Add expense</button>
-
-    <div class="mini-row" style="padding:4px 0 14px; border-top:1px dashed var(--paper-line); margin-top:2px;"><span>Total payment amount</span><b id="payTotalAmount">${fmtCurrency(total)}</b></div>
-
-    <label class="field">Date${dateField('date', p.date)}</label>
-    <label class="field">Status<select name="status">
-      <option value="outstanding" ${p.status==='outstanding'?'selected':''}>Outstanding</option>
-      <option value="paid" ${p.status==='paid'?'selected':''}>Paid</option>
-    </select></label>
-  `;
-}
-
-function renderContractors(){
-  const rows = state.contractors.map(ct=>{
-    const total = outstandingTotal(ct);
-    return `
-      <tr>
-        <td><b>${esc(ct.name)}</b>${ct.notes ? `<div style="color:var(--ink-soft); font-size:11.5px;">${esc(ct.notes)}</div>` : ''}</td>
-        <td>${esc(ct.contactName || '—')}${ct.email ? `<div style="color:var(--ink-soft); font-size:11.5px;">${esc(ct.email)}</div>` : ''}${ct.phone ? `<div style="color:var(--ink-soft); font-size:11.5px;">${esc(ct.phone)}</div>` : ''}</td>
-        <td>${esc(ct.bankName || '—')}${ct.accountNumber ? `<div style="color:var(--ink-soft); font-size:11.5px;">Acc <span class="pw-mask" data-pw="${esc(ct.accountNumber)}">••••${esc(ct.accountNumber.slice(-4))}</span> <button type="button" class="btn small ghost" data-action="reveal-password">Show</button></div>` : ''}</td>
-        <td class="num">${total>0 ? `<span class="stamp pay-outstanding">${fmtCurrency(total)}</span>` : '<span style="color:var(--ink-soft);">—</span>'}</td>
-        <td style="white-space:nowrap;">
-          <button class="btn small ghost" data-action="view-contractor" data-id="${ct.id}">Manage</button>
-          <button class="btn small danger" data-action="delete-contractor" data-id="${ct.id}">Delete</button>
-        </td>
-      </tr>`;
-  }).join('');
-  return `
-    <div class="toolbar">
-      <div>
-        <h2 class="section-title">Contractors</h2>
-        <p class="section-sub" style="margin-bottom:0;">Contact and banking details for contractors, with outstanding payments you can send as a PDF statement via WhatsApp or email.</p>
-      </div>
-      <button class="btn primary" data-action="add-contractor">+ Add contractor</button>
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr>
-          <th>Contractor</th><th>Contact</th><th>Banking</th><th class="num">Outstanding</th><th></th>
-        </tr></thead>
-        <tbody>
-          ${state.contractors.length === 0
-            ? `<tr><td colspan="5"><div class="empty-note">No contractors yet. Add one to record banking details and payments.</div></td></tr>`
-            : rows}
-        </tbody>
-      </table>
-    </div>
-  `;
-}
-
-function renderContractorDetail(id){
-  const ct = state.contractors.find(c=>c.id===id);
-  if(!ct) return '<p>Contractor not found.</p>';
-  const payments = (ct.payments||[]).slice().sort((a,b)=> new Date(b.date) - new Date(a.date));
-  const outstanding = payments.filter(p=>p.status!=='paid');
-  const paidTotal = payments.filter(p=>p.status==='paid').reduce((s,p)=>s+(Number(p.amount)||0),0);
-  const total = outstandingTotal(ct);
-  return `
-    <div class="modal-header-row">
-      <h3 style="margin:0;">${esc(ct.name)}</h3>
-      <div style="display:flex; gap:8px;">
-        <button type="button" class="btn small ghost" data-action="edit-contractor" data-id="${ct.id}">Edit details</button>
-        <button type="button" class="btn small ghost" data-action="close-modal">Close</button>
-      </div>
-    </div>
-    <div class="detail-section">
-      <h4>Contact</h4>
-      <div class="mini-row"><span>Contact person</span><b>${esc(ct.contactName || '—')}</b></div>
-      ${ct.email ? `<div class="mini-row"><span>Email</span><a href="mailto:${esc(ct.email)}" style="color:var(--seafoam); font-weight:600; text-decoration:none;">${esc(ct.email)}</a></div>` : ''}
-      ${ct.phone ? `<div class="mini-row"><span>Phone</span><b>${esc(ct.phone)}</b></div>` : ''}
-    </div>
-    <div class="detail-section">
-      <h4>Banking details</h4>
-      <div class="mini-row"><span>Bank</span><b>${esc(ct.bankName || '—')}</b></div>
-      <div class="mini-row"><span>Account holder</span><b>${esc(ct.accountHolder || '—')}</b></div>
-      <div class="mini-row"><span>Account number</span><b><span class="pw-mask" data-pw="${esc(ct.accountNumber || '')}">••••••••</span> <button type="button" class="btn small ghost" data-action="reveal-password">Show</button></b></div>
-      <div class="mini-row"><span>Branch code</span><b>${esc(ct.branchCode || '—')}</b></div>
-      <div class="mini-row"><span>Account type</span><b>${esc(ct.accountType || '—')}</b></div>
-      ${ct.swift ? `<div class="mini-row"><span>SWIFT / BIC</span><b>${esc(ct.swift)}</b></div>` : ''}
-    </div>
-    <div class="cost-total-bar" style="margin-top:16px;">
-      <div class="ctb-item"><div class="label">Outstanding</div><div class="value">${fmtCurrency(total)}</div></div>
-      <div class="ctb-item"><div class="label">Paid to date</div><div class="value">${fmtCurrency(paidTotal)}</div></div>
-    </div>
-    <div class="detail-section">
-      <div class="modal-header-row"><h4 style="margin:0; border:none; padding:0;">Payments</h4><button type="button" class="btn small primary" data-action="add-contractor-payment" data-id="${ct.id}">+ Add payment</button></div>
-      ${payments.length === 0 ? '<div class="empty-note">No payments recorded yet.</div>' : payments.map(p=>{
-        const hasTravel = !!p.includeTravel || p.costType==='travel';
-        const expenses = Array.isArray(p.expenses) ? p.expenses : [];
-        const expensesTotal = expenses.reduce((s,x)=>s+(Number(x.amount)||0),0);
-        return `
-        <div class="mini-row" style="align-items:flex-start;">
-          <span>
-            ${esc(p.description)}
-            <div style="color:var(--ink-soft); font-size:11px;">
-              ${esc(p.date || '')}${hasTravel ? ` · base ${fmtCurrency(p.fixedAmount||0)} + ${Number(p.distanceKm)||0} km @ ${fmtCurrency(p.ratePerKm||0)}/km (${fmtCurrency(p.travelAmount||0)})` : ''}${expenses.length ? ` · ${expenses.length} expense${expenses.length===1?'':'s'} (${fmtCurrency(expensesTotal)})` : ''}
-            </div>
-            ${hasTravel && (p.photoBefore || p.photoAfter) ? `
-            <div style="margin-top:5px; display:flex; gap:6px; flex-wrap:wrap;">
-              ${p.photoBefore ? `<button type="button" class="btn small ghost" data-action="view-payment-photo" data-id="${ct.id}" data-payid="${p.id}" data-which="before">Before photo</button>` : ''}
-              ${p.photoAfter ? `<button type="button" class="btn small ghost" data-action="view-payment-photo" data-id="${ct.id}" data-payid="${p.id}" data-which="after">After photo</button>` : ''}
-            </div>` : ''}
-            ${expenses.length ? `
-            <div style="margin-top:5px; display:flex; gap:6px; flex-wrap:wrap;">
-              ${expenses.map((x,i)=>`<button type="button" class="btn small ghost" data-action="view-payment-photo" data-id="${ct.id}" data-payid="${p.id}" data-which="expense:${i}" ${x.photo?'':'disabled'}>${esc(x.description||'Expense')} (${fmtCurrency(x.amount||0)})${x.photo?' · slip':''}</button>`).join('')}
-            </div>` : ''}
-          </span>
-          <span style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
-            <b>${fmtCurrency(p.amount)}</b>
-            <span class="stamp ${p.status==='paid'?'pay-paid':'pay-outstanding'}">${p.status==='paid'?'Paid':'Outstanding'}</span>
-            <button type="button" class="btn small ghost" data-action="edit-contractor-payment" data-id="${ct.id}" data-payid="${p.id}">Edit</button>
-            <button type="button" class="btn small danger" data-action="delete-contractor-payment" data-id="${ct.id}" data-payid="${p.id}">Delete</button>
-          </span>
-        </div>`;
-      }).join('')}
-    </div>
-    <div class="detail-section">
-      <h4>Send outstanding statement</h4>
-      <p style="font-size:12px; color:var(--ink-soft); margin:0 0 10px;">
-        Builds a PDF of the ${outstanding.length} outstanding payment${outstanding.length===1?'':'s'} (total ${fmtCurrency(total)}). On most phones this opens your
-        share sheet with the PDF already attached — pick WhatsApp or Mail and send it to OCEANHUB for payment. On desktop it downloads the
-        PDF and opens WhatsApp/email with a message instead, so you'll need to attach it manually there.
-      </p>
-      <div style="display:flex; gap:10px; flex-wrap:wrap;">
-        <button type="button" class="btn primary" data-action="send-contractor-statement" data-channel="whatsapp" data-id="${ct.id}" ${outstanding.length===0 ? 'disabled' : ''}>Send via WhatsApp</button>
-        <button type="button" class="btn" data-action="send-contractor-statement" data-channel="email" data-id="${ct.id}" ${outstanding.length===0 ? 'disabled' : ''}>Send via Email</button>
-      </div>
-    </div>
-  `;
-}
-
-/* Builds a PDF statement of a contractor's outstanding payments. Where the device
-   supports it (most phones), it's handed to the OS share sheet as an actual attached
-   file alongside the message, so the app picked there (WhatsApp, Mail, etc.) opens
-   with the PDF already attached — no separate download-then-attach step. Desktop
-   browsers can't do that, so there it falls back to downloading the PDF and opening
-   WhatsApp/email with just the message text. */
-async function sendContractorStatement(id, channel){
-  const ct = state.contractors.find(c=>c.id===id);
-  if(!ct) return;
-  const outstanding = (ct.payments||[]).filter(p=>p.status!=='paid').sort((a,b)=> new Date(b.date) - new Date(a.date));
-  if(outstanding.length === 0){ alert('No outstanding payments for this contractor.'); return; }
-
-  const total = outstanding.reduce((s,p)=>s+(Number(p.amount)||0),0);
-  const todayStr = fmtDate(localISODate(new Date()));
-
-  let doc;
-  try{
-    const { jsPDF } = window.jspdf;
-    doc = new jsPDF();
-    doc.setFont('helvetica','bold'); doc.setFontSize(16);
-    doc.text('OCEANHUB — Vessel Manager', 14, 18);
-    doc.setFont('helvetica','normal'); doc.setFontSize(10);
-    doc.text('Outstanding payments statement', 14, 25);
-    doc.text(`Date: ${todayStr}`, 14, 31);
-
-    doc.setFont('helvetica','bold'); doc.setFontSize(12);
-    doc.text(ct.name || 'Contractor', 14, 42);
-    doc.setFont('helvetica','normal'); doc.setFontSize(10);
-    let y = 49;
-    if(ct.contactName){ doc.text(`Attn: ${ct.contactName}`, 14, y); y += 6; }
-    if(ct.email){ doc.text(`Email: ${ct.email}`, 14, y); y += 6; }
-    if(ct.phone){ doc.text(`Phone: ${ct.phone}`, 14, y); y += 6; }
-    y += 4;
-
-    doc.setFont('helvetica','bold');
-    doc.text('Description', 14, y); doc.text('Date', 130, y); doc.text('Amount', 170, y);
-    doc.setFont('helvetica','normal');
-    y += 3;
-    doc.line(14, y, 196, y);
-    y += 7;
-    outstanding.forEach(p=>{
-      const hasTravel = !!p.includeTravel || p.costType==='travel';
-      const expenses = Array.isArray(p.expenses) ? p.expenses : [];
-      let desc = p.description || '';
-      if(hasTravel) desc += ` (base ${fmtCurrency(p.fixedAmount||0)} + ${Number(p.distanceKm)||0} km @ ${fmtCurrency(p.ratePerKm||0)}/km)`;
-      if(expenses.length) desc += ` + expenses: ${expenses.map(x=>`${x.description||'Expense'} ${fmtCurrency(x.amount||0)}`).join(', ')}`;
-      const lines = doc.splitTextToSize(desc, 108);
-      doc.text(lines, 14, y);
-      doc.text(p.date ? fmtDate(p.date) : '', 130, y);
-      doc.text(fmtCurrency(p.amount), 170, y);
-      y += Math.max(6, lines.length * 6);
-      if(y > 270){ doc.addPage(); y = 20; }
-    });
-    y += 4;
-    doc.line(14, y, 196, y);
-    y += 8;
-    doc.setFont('helvetica','bold'); doc.setFontSize(12);
-    doc.text(`Total outstanding: ${fmtCurrency(total)}`, 14, y);
-
-    if(ct.bankName || ct.accountHolder || ct.accountNumber){
-      y += 14;
-      if(y > 260){ doc.addPage(); y = 20; }
-      doc.setFont('helvetica','bold'); doc.setFontSize(11);
-      doc.text('Banking details', 14, y);
-      y += 7;
-      doc.setFont('helvetica','normal'); doc.setFontSize(10);
-      if(ct.bankName){ doc.text(`Bank: ${ct.bankName}`, 14, y); y += 6; }
-      if(ct.accountHolder){ doc.text(`Account holder: ${ct.accountHolder}`, 14, y); y += 6; }
-      if(ct.accountNumber){ doc.text(`Account number: ${ct.accountNumber}`, 14, y); y += 6; }
-      if(ct.branchCode){ doc.text(`Branch code: ${ct.branchCode}`, 14, y); y += 6; }
-      if(ct.accountType){ doc.text(`Account type: ${ct.accountType}`, 14, y); y += 6; }
-      if(ct.swift){ doc.text(`SWIFT / BIC: ${ct.swift}`, 14, y); y += 6; }
-    }
-
-    // Footer on every page, so each statement a contractor forwards carries the app's name.
-    const pageCount = doc.getNumberOfPages();
-    for(let i = 1; i <= pageCount; i++){
-      doc.setPage(i);
-      doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(120);
-      doc.text('Sent with OCEANHUB Vessel Manager', 105, 290, { align:'center' });
-    }
-    doc.setTextColor(0);
-
-  }catch(e){
-    alert('Could not generate the PDF. ' + (e && e.message ? e.message : ''));
-    return;
-  }
-
-  const fileName = `Statement-${(ct.name||'contractor').replace(/[^a-z0-9]+/gi,'-')}-${new Date().toISOString().slice(0,10)}.pdf`;
-  const subject = `Outstanding payments statement — ${ct.name}`;
-  const msg = `Outstanding payment statement from ${ct.name} — total ${fmtCurrency(total)} as of ${todayStr}.`;
-
-  let file = null;
-  try{ file = new File([doc.output('blob')], fileName, { type:'application/pdf' }); }catch(e){ file = null; }
-
-  if(file && navigator.canShare && navigator.canShare({ files:[file] })){
-    try{ await navigator.share({ files:[file], title:subject, text:msg }); }catch(e){ /* user cancelled the share sheet */ }
-    return;
-  }
-
-  /* Fallback: no file-sharing support (mainly desktop browsers) — download the PDF,
-     then open WhatsApp/email with the message text; the file needs a manual attach
-     there. The destination tab is opened before doc.save() because jsPDF's save() can
-     itself open/navigate a tab on browsers that don't support the anchor `download`
-     attribute, which would otherwise eat the one-per-gesture popup allowance and
-     silently block this tab (notably Safari). If the browser's popup blocker eats
-     this window entirely (e.g. Chrome remembers "always block" for this site), the
-     handle it returns can still look non-null but be already closed — checked below
-     so a silent block surfaces as a message instead of doing nothing. */
-  let target = channel === 'whatsapp' ? window.open('', '_blank') : null;
-  if(target && target.closed) target = null;
-  try{
-    doc.save(fileName);
-  }catch(e){
-    if(target) target.close();
-    alert('Could not download the PDF. ' + (e && e.message ? e.message : ''));
-    return;
-  }
-  const fallbackMsg = msg + ' The PDF has just downloaded to this device — please attach it here and process payment.';
-  const popupBlockedMsg = 'The PDF downloaded, but your browser blocked the pop-up window. Please allow pop-ups for this site (usually a blocked-popup icon in the address bar) and try again, or open WhatsApp/email manually and attach the PDF.';
-  if(channel === 'whatsapp'){
-    const url = waLink('', fallbackMsg);
-    if(target && !target.closed){ target.location = url; }
-    else{
-      const opened = window.open(url, '_blank');
-      if(!opened || opened.closed) alert(popupBlockedMsg);
-    }
-  } else {
-    const opened = window.open(mailtoLink(ADMIN_EMAIL, '', subject, fallbackMsg), '_blank');
-    if(!opened || opened.closed) alert(popupBlockedMsg);
-  }
-}
-
 function renderModal(){
   const root = document.getElementById('modalRoot');
   const modal = state.modal;
@@ -4122,11 +3722,6 @@ function renderModal(){
     attachModalEvents();
     return;
   }
-  if(modal.type==='view-contractor'){
-    root.innerHTML = `<div class="modal-overlay" data-action="overlay-close"><div class="modal" onclick="event.stopPropagation()">${renderContractorDetail(modal.id)}</div></div>`;
-    attachModalEvents();
-    return;
-  }
   if(modal.type==='vessel'){ title = modal.data ? 'Edit vessel' : 'Add vessel'; body = vesselForm(modal.data); }
   else if(modal.type==='maintenance'){ title = modal.data ? 'Edit maintenance task' : 'Add maintenance task'; body = maintenanceForm(modal.data); }
   else if(modal.type==='crew'){ title = modal.data ? 'Edit crew member' : 'Add crew member'; body = crewForm(modal.data); }
@@ -4140,7 +3735,6 @@ function renderModal(){
   else if(modal.type==='tender-task'){ title = modal.data ? 'Edit task' : 'Add task'; body = tenderMaintenanceForm(modal.data); }
   else if(modal.type==='tender-doc'){ title = 'Add tender document'; body = documentForm(); }
   else if(modal.type==='company'){ title = modal.data ? 'Edit company' : 'Add company'; body = companyForm(modal.data); }
-  else if(modal.type==='contractor'){ title = modal.data ? 'Edit contractor' : 'Add contractor'; body = contractorForm(modal.data); }
   else if(modal.type==='checklist'){ title = modal.data ? 'Edit checklist' : 'New checklist'; body = checklistForm(modal.data); }
   else if(modal.type==='checklist-import'){ title = 'Import standard checklists'; body = checklistImportForm(); }
   else if(modal.type==='rfq'){ title = modal.data ? 'Edit request for quote' : 'New request for quote'; body = rfqForm(modal.data); }
@@ -4149,7 +3743,6 @@ function renderModal(){
     if(!q){ state.modal = null; root.innerHTML = ''; return; }
     title = 'Email request for quote'; body = rfqEmailForm(q);
   }
-  else if(modal.type==='contractor-payment'){ title = modal.data ? 'Edit payment' : 'Add payment'; body = contractorPaymentForm(modal.data, modal.data ? null : lastTravelDefaults(modal.id)); }
 
   root.innerHTML = `
     <div class="modal-overlay" data-action="overlay-close">
@@ -4219,96 +3812,6 @@ function attachModalEvents(){
         alert(err.message || "Couldn't process that file.");
       }
     });
-  }
-  const includeTravelCheck = document.getElementById('includeTravelCheck');
-  if(includeTravelCheck){
-    const travelFields = document.getElementById('travelFields');
-    let expenses = [];
-    try{ expenses = JSON.parse(document.getElementById('expensesDataHidden').value || '[]'); }catch(e){ expenses = []; }
-    const expensesTotalOf = ()=> expenses.reduce((s,x)=>s+(Number(x.amount)||0),0);
-    const recalcTotal = ()=>{
-      const start = Number(document.getElementById('odoStart').value)||0;
-      const end = Number(document.getElementById('odoEnd').value)||0;
-      const rate = Number(document.getElementById('odoRate').value)||0;
-      const distance = Math.max(0, end - start);
-      document.getElementById('odoDistance').value = distance;
-      const travelAmount = includeTravelCheck.checked ? distance * rate : 0;
-      document.getElementById('odoCalcAmount').textContent = fmtCurrency(distance * rate);
-      const fixedAmount = Number(document.getElementById('payFixedAmount').value)||0;
-      document.getElementById('expensesTotalAmount').textContent = fmtCurrency(expensesTotalOf());
-      document.getElementById('payTotalAmount').textContent = fmtCurrency(fixedAmount + travelAmount + expensesTotalOf());
-    };
-    includeTravelCheck.addEventListener('change', ()=>{
-      travelFields.style.display = includeTravelCheck.checked ? '' : 'none';
-      recalcTotal();
-    });
-    document.getElementById('payFixedAmount').addEventListener('input', recalcTotal);
-    ['odoStart','odoEnd','odoRate'].forEach(id=>{
-      document.getElementById(id).addEventListener('input', recalcTotal);
-    });
-    const wireOdoPhoto = (inputId, hiddenId, previewId)=>{
-      const input = document.getElementById(inputId);
-      input.addEventListener('change', async (e)=>{
-        const file = e.target.files[0];
-        if(!file) return;
-        try{
-          const dataUrl = await resizeImageFile(file, 900, 0.65);
-          document.getElementById(hiddenId).value = dataUrl;
-          document.getElementById(previewId).innerHTML = `<img src="${dataUrl}" style="max-width:160px; max-height:120px; border-radius:6px; display:block;">`;
-        }catch(err){
-          alert("Couldn't process that photo. Try a different file.");
-        }
-      });
-    };
-    wireOdoPhoto('odoPhotoBeforeInput','odoPhotoBeforeHidden','odoPhotoBeforePreview');
-    wireOdoPhoto('odoPhotoAfterInput','odoPhotoAfterHidden','odoPhotoAfterPreview');
-
-    /* Miscellaneous expenses, each with an optional sales-slip photo */
-    const expenseListEl = document.getElementById('expenseList');
-    const expensesDataHidden = document.getElementById('expensesDataHidden');
-    const newExpPhotoPreview = document.getElementById('newExpPhotoPreview');
-    const newExpPhotoInput = document.getElementById('newExpPhotoInput');
-    let newExpPhoto = '';
-    const renderExpenses = ()=>{
-      expenseListEl.innerHTML = renderExpenseRows(expenses);
-      expensesDataHidden.value = JSON.stringify(expenses);
-      expenseListEl.querySelectorAll('[data-remove-expense]').forEach(btn=>{
-        btn.addEventListener('click', ()=>{
-          expenses = expenses.filter(x=>x.id!==btn.dataset.removeExpense);
-          renderExpenses();
-          recalcTotal();
-        });
-      });
-    };
-    renderExpenses();
-    newExpPhotoInput.addEventListener('change', async (e)=>{
-      const file = e.target.files[0];
-      if(!file) return;
-      try{
-        newExpPhoto = await resizeImageFile(file, 900, 0.65);
-        newExpPhotoPreview.innerHTML = `<img src="${newExpPhoto}" style="max-width:120px; max-height:90px; border-radius:6px; display:block;">`;
-      }catch(err){
-        newExpPhoto = '';
-        alert("Couldn't process that photo. Try a different file.");
-      }
-    });
-    const addPendingExpense = (strict)=>{
-      const descInput = document.getElementById('newExpDesc');
-      const amountInput = document.getElementById('newExpAmount');
-      const description = descInput.value.trim();
-      const amount = Number(amountInput.value)||0;
-      if(strict && (!description || amount<=0)){ alert('Enter a description and an amount greater than zero for the expense.'); return; }
-      if(!description && amount<=0 && !newExpPhoto) return;
-      expenses.push({ id:uid('exp'), description, amount, photo:newExpPhoto });
-      descInput.value = ''; amountInput.value = ''; newExpPhoto = '';
-      newExpPhotoPreview.innerHTML = '';
-      newExpPhotoInput.value = '';
-      renderExpenses();
-      recalcTotal();
-    };
-    document.getElementById('addExpenseBtn').addEventListener('click', ()=>addPendingExpense(true));
-    /* Saving keeps an expense that was typed in but not yet added */
-    form.flushPendingExpense = ()=>addPendingExpense(false);
   }
   document.querySelectorAll('[data-action="edit-vessel"]').forEach(b=>b.addEventListener('click', ()=>{
     const v = state.vessels.find(x=>x.id===b.dataset.id);
@@ -4485,7 +3988,7 @@ function attachModalEvents(){
     render();
   }));
   /* Scoped to .modal because reveal-password also appears in the (already-bound)
-     companies/contractors list rows — an unscoped query here would double-bind those. */
+     companies list rows — an unscoped query here would double-bind those. */
   const modalEl = document.querySelector('.modal');
   if(modalEl){
     modalEl.querySelectorAll('[data-action="reveal-password"]').forEach(b=>b.addEventListener('click', ()=>{
@@ -4498,75 +4001,10 @@ function attachModalEvents(){
       }
     }));
   }
-  /* Add contractor: typing a name that matches an existing contractor fills in
-     their details. Only empty fields are filled, so nothing typed is overwritten. */
-  const contractorNameInput = state.modal && state.modal.type==='contractor' && !state.modal.data && form ? form.elements.name : null;
-  if(contractorNameInput){
-    contractorNameInput.addEventListener('input', ()=>{
-      const key = contractorNameInput.value.trim().toLowerCase();
-      const match = key && state.contractors.find(c=>(c.name||'').trim().toLowerCase()===key);
-      const note = document.getElementById('contractorAutofillNote');
-      if(note) note.style.display = match ? '' : 'none';
-      contractorNameInput.dataset.matchId = match ? match.id : '';
-      if(!match) return;
-      CONTRACTOR_DETAIL_FIELDS.forEach(f=>{
-        const el = form.elements[f];
-        if(el && !el.value && match[f]) el.value = match[f];
-      });
-    });
-  }
-  const openExistingBtn = document.getElementById('openExistingContractorBtn');
-  if(openExistingBtn && contractorNameInput){
-    openExistingBtn.addEventListener('click', ()=>{
-      if(!contractorNameInput.dataset.matchId) return;
-      state.modal = { type:'view-contractor', id: contractorNameInput.dataset.matchId };
-      renderModal();
-    });
-  }
-  document.querySelectorAll('[data-action="edit-contractor"]').forEach(b=>b.addEventListener('click', ()=>{
-    state.modal = { type:'contractor', data: state.contractors.find(c=>c.id===b.dataset.id) };
-    renderModal();
-  }));
-  document.querySelectorAll('[data-action="add-contractor-payment"]').forEach(b=>b.addEventListener('click', ()=>{
-    state.modal = { type:'contractor-payment', id:b.dataset.id, data:null };
-    renderModal();
-  }));
-  document.querySelectorAll('[data-action="edit-contractor-payment"]').forEach(b=>b.addEventListener('click', ()=>{
-    const ct = state.contractors.find(x=>x.id===b.dataset.id);
-    const pay = ct ? (ct.payments||[]).find(p=>p.id===b.dataset.payid) : null;
-    state.modal = { type:'contractor-payment', id:b.dataset.id, data:pay };
-    renderModal();
-  }));
-  document.querySelectorAll('[data-action="delete-contractor-payment"]').forEach(b=>b.addEventListener('click', async ()=>{
-    if(!confirm('Delete this payment record?')) return;
-    const contractorId = b.dataset.id, payId = b.dataset.payid;
-    state.modal = { type:'view-contractor', id:contractorId };
-    await persistArray('contractors', fresh => fresh.map(c=> c.id===contractorId ? { ...c, payments:(c.payments||[]).filter(p=>p.id!==payId) } : c));
-    render();
-  }));
-  document.querySelectorAll('[data-action="send-contractor-statement"]').forEach(b=>b.addEventListener('click', ()=>{
-    sendContractorStatement(b.dataset.id, b.dataset.channel);
-  }));
-  document.querySelectorAll('[data-action="view-payment-photo"]').forEach(b=>b.addEventListener('click', (e)=>{
-    e.preventDefault();
-    const ct = state.contractors.find(x=>x.id===b.dataset.id);
-    const p = ct ? (ct.payments||[]).find(x=>x.id===b.dataset.payid) : null;
-    if(!p) return;
-    const which = b.dataset.which;
-    let url = null;
-    if(which==='before') url = p.photoBefore;
-    else if(which==='after') url = p.photoAfter;
-    else if(which && which.startsWith('expense:')){
-      const exp = (p.expenses||[])[Number(which.split(':')[1])];
-      url = exp ? exp.photo : null;
-    }
-    openStoredDocument(url);
-  }));
 }
 
 async function handleFormSubmit(e){
   e.preventDefault();
-  if(e.target.flushPendingExpense) e.target.flushPendingExpense();
   const fd = new FormData(e.target);
   const modal = state.modal;
   let targetKey = null, mutateFn = null, nextModal = null;
@@ -4788,70 +4226,6 @@ async function handleFormSubmit(e){
       ? fresh.map(c=> c.id===editId ? merge(c) : c)
       : [...fresh, merge({ id:coId })];
   }
-  else if(modal.type==='contractor'){
-    const data = {
-      name:fd.get('name'), contactName:fd.get('contactName')||'', email:fd.get('email')||'', phone:fd.get('phone')||'',
-      bankName:fd.get('bankName')||'', accountHolder:fd.get('accountHolder')||'', accountNumber:fd.get('accountNumber')||'',
-      branchCode:fd.get('branchCode')||'', accountType:fd.get('accountType')||'', swift:fd.get('swift')||'', notes:fd.get('notes')||''
-    };
-    /* One record per contractor: adding a name that already exists updates that
-       contractor and opens Manage, where further payments are added. */
-    const nameKey = (data.name||'').trim().toLowerCase();
-    const existing = !modal.data && nameKey ? state.contractors.find(c=>(c.name||'').trim().toLowerCase()===nameKey) : null;
-    const editId = modal.data ? modal.data.id : existing ? existing.id : null;
-    targetKey = 'contractors';
-    mutateFn = fresh => editId
-      ? fresh.map(c=> c.id===editId ? { ...c, ...data } : c)
-      : [...fresh, { id:uid('ct'), payments:[], ...data }];
-    nextModal = editId ? { type:'view-contractor', id: editId } : null;
-  }
-  else if(modal.type==='contractor-payment'){
-    const includeTravel = fd.get('includeTravel') === '1';
-    const fixedAmount = Number(fd.get('fixedAmount'))||0;
-    let expenses = [];
-    try{ expenses = JSON.parse(fd.get('expensesData') || '[]'); }catch(e){ expenses = []; }
-    const expensesTotal = expenses.reduce((s,x)=>s+(Number(x.amount)||0),0);
-    let data;
-    if(includeTravel){
-      /* Blank readings stay blank so a trip can be saved with only the "before"
-         reading and completed later; distance counts only once both are in. */
-      const odoVal = name => { const v = fd.get(name); return v==='' || v==null ? '' : Number(v)||0; };
-      const odometerStart = odoVal('odometerStart');
-      const odometerEnd = odoVal('odometerEnd');
-      const distanceKm = odometerStart!=='' && odometerEnd!=='' ? Math.max(0, odometerEnd - odometerStart) : 0;
-      const ratePerKm = Number(fd.get('ratePerKm'))||0;
-      const travelAmount = Math.round(distanceKm * ratePerKm * 100) / 100;
-      const amount = Math.round((fixedAmount + travelAmount + expensesTotal) * 100) / 100;
-      data = {
-        description:fd.get('description'), date:fd.get('date'), status:fd.get('status'),
-        includeTravel, fixedAmount, amount,
-        odometerStart, odometerEnd, distanceKm, ratePerKm, travelAmount,
-        photoBefore:fd.get('photoBefore')||'', photoAfter:fd.get('photoAfter')||'',
-        expenses
-      };
-    } else {
-      const amount = Math.round((fixedAmount + expensesTotal) * 100) / 100;
-      data = {
-        description:fd.get('description'), date:fd.get('date'), status:fd.get('status'),
-        includeTravel, fixedAmount, amount,
-        odometerStart:null, odometerEnd:null, distanceKm:null, ratePerKm:null, travelAmount:null, photoBefore:'', photoAfter:'',
-        expenses
-      };
-    }
-    const contractorId = modal.id;
-    const editPayId = modal.data ? modal.data.id : null;
-    targetKey = 'contractors';
-    mutateFn = fresh => fresh.map(c=>{
-      if(c.id!==contractorId) return c;
-      const payments = c.payments || [];
-      const newPayments = editPayId
-        ? payments.map(p=> p.id===editPayId ? { ...p, ...data } : p)
-        : [...payments, { id:uid('pay'), ...data }];
-      return { ...c, payments: newPayments };
-    });
-    nextModal = { type:'view-contractor', id: contractorId };
-  }
-
   else if(modal.type==='checklist'){
     const labels = fd.getAll('itemLabel'), types = fd.getAll('itemType'), units = fd.getAll('itemUnit'), pars = fd.getAll('itemPar'), mins = fd.getAll('itemMin'), ids = fd.getAll('itemId');
     const items = labels.map((label, i)=>{
@@ -4927,7 +4301,7 @@ async function handleFormSubmit(e){
 function attachContentEvents(){
   document.querySelectorAll('[data-action]').forEach(el=>{
     const action = el.dataset.action;
-    if(['close-modal','overlay-close','edit-vessel','delete-vessel','edit-contractor','add-contractor-payment','edit-contractor-payment','delete-contractor-payment','send-contractor-statement','view-payment-photo'].includes(action)) return;
+    if(['close-modal','overlay-close','edit-vessel','delete-vessel'].includes(action)) return;
     el.addEventListener('click', async ()=>{
       const id = el.dataset.id;
       switch(action){
@@ -5009,15 +4383,6 @@ function attachContentEvents(){
             const co = state.companies.find(c=>c.id===id);
             if(co && co.loginUid){ try{ await firebase.database().ref('oceanhub/users/' + co.loginUid).remove(); }catch(e){} }
             await persistArray('companies', fresh => fresh.filter(c=>c.id!==id));
-            render();
-          }
-          break;
-        case 'add-contractor': state.modal = { type:'contractor', data:null }; renderModal(); break;
-        case 'view-contractor': state.modal = { type:'view-contractor', id }; renderModal(); break;
-        case 'delete-contractor':
-          if(confirm('Delete this contractor and their payment records?')){
-            await persistArray('contractors', fresh => fresh.filter(c=>c.id!==id));
-            state.modal = null;
             render();
           }
           break;
@@ -5131,7 +4496,6 @@ function render(){
     case 'maintenance': main.innerHTML = renderMaintenance(); break;
     case 'crew': main.innerHTML = renderCrew(); break;
     case 'companies': main.innerHTML = renderCompanies(); break;
-    case 'contractors': main.innerHTML = renderContractors(); break;
     case 'checklists': main.innerHTML = renderChecklists(); break;
     case 'hours': main.innerHTML = renderHours(); break;
     case 'finance': main.innerHTML = renderFinance(); break;
