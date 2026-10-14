@@ -1455,7 +1455,9 @@ function renderChecklists(){
   const admin = isAdmin();
   const view = resolveChecklistView();
   const { vesselId, list, cl, period, current, run } = view;
-  const stock = vesselId ? stockRows(vesselId) : [];
+  // Stock levels belong to the stock guide only, not the daily / weekly / monthly lists.
+  const stockGuide = cl && !(cl.items||[]).some(i=>i.type==='task');
+  const stock = vesselId && stockGuide ? stockRows(vesselId) : [];
 
   const vesselPicker = state.vessels.length > 1 ? `
     <div class="filters" style="margin-bottom:14px;">
@@ -1585,7 +1587,7 @@ function renderChecklists(){
     <div class="toolbar">
       <div>
         <h2 class="section-title">Checklists</h2>
-        <p class="section-sub" style="margin-bottom:0;">Daily, weekly and monthly checks for each vessel, with stock counts.</p>
+        <p class="section-sub" style="margin-bottom:0;">Daily, weekly and monthly checks for each vessel, and the stock guide.</p>
       </div>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
         ${admin ? `<button class="btn primary" data-action="add-checklist">+ New checklist</button>` : ''}
