@@ -593,7 +593,13 @@ function bootstrap(){
   try{ firebase.initializeApp(FIREBASE_CONFIG); }catch(e){ /* already initialized */ }
   fbInitialized = true;
   document.getElementById('mainContent').innerHTML = '<div class="empty-note" style="margin-top:60px;">Loading…</div>';
-  firebase.auth().onAuthStateChanged(handleAuthChange);
+  /* Never remember a sign-in: every time the app opens, the email and password must be entered.
+     Drop any session an older version saved to this device before listening for auth changes. */
+  const auth = firebase.auth();
+  auth.setPersistence(firebase.auth.Auth.Persistence.NONE)
+    .then(()=>auth.signOut())
+    .catch(()=>{})
+    .then(()=>auth.onAuthStateChanged(handleAuthChange));
 }
 
 /* Signed in → look up the account's role record, then load the data it may see. */
@@ -648,12 +654,12 @@ function renderLoginGate(err, info){
     <div class="login-wrap">
       <h2 class="section-title">Sign in</h2>
       <p class="section-sub">Admin and owner / operator accounts sign in with their email address.</p>
-      <form id="loginForm" autocomplete="on">
+      <form id="loginForm" autocomplete="off">
         <label class="field">Email
-          <input type="email" name="email" value="${esc(prevEmail)}" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required autofocus>
+          <input type="email" name="email" value="${esc(prevEmail)}" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" required autofocus>
         </label>
         <label class="field">Password
-          <input type="password" name="password" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false" required>
+          <input type="password" name="password" autocomplete="new-password" autocapitalize="none" autocorrect="off" spellcheck="false" required>
         </label>
         <div class="login-error">${err ? esc(err) : ''}</div>
         ${info ? `<div class="section-sub" style="margin:-4px 0 8px;">${esc(info)}</div>` : ''}
