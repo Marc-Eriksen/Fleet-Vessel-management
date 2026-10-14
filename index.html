@@ -286,10 +286,6 @@
   .fin-share{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:0 0 14px;}
   .fin-email{display:flex; gap:8px; flex:1 1 320px; min-width:0;}
   .fin-email input{flex:1 1 auto; min-width:0; padding:6px 10px; font-size:13px;}
-  .link-btn{background:none; border:none; padding:0; font:inherit; font-weight:700; color:var(--navy); text-align:left; cursor:pointer; text-decoration:underline; text-decoration-color:var(--border); text-underline-offset:3px;}
-  .link-btn:hover{text-decoration-color:currentColor;}
-  .rfq-item-row{display:grid; grid-template-columns:1fr 76px 90px auto; gap:6px; align-items:center; margin-bottom:6px;}
-  .rfq-item-row input{min-width:0; width:100%;}
   .cl-item-row{display:grid; grid-template-columns:1fr 96px 62px 56px 56px auto; gap:6px; align-items:center; margin-bottom:6px;}
   .cl-item-row input, .cl-item-row select{min-width:0; width:100%;}
   .cl-item-row{align-items:end;}
@@ -381,8 +377,6 @@
     .card-stats{flex-wrap:wrap; row-gap:10px;}
 
     .field-row{grid-template-columns:1fr;}
-    .rfq-item-row{grid-template-columns:1fr 1fr auto; padding-bottom:8px; margin-bottom:8px; border-bottom:1px dashed var(--paper-line);}
-    .rfq-item-row [name=rfqItemDesc]{grid-column:1 / -1;}
     .fin-email{flex-direction:column;}
     .cl-item-row{grid-template-columns:1fr 1fr 1fr; padding-bottom:8px; margin-bottom:8px; border-bottom:1px dashed var(--paper-line);}
     .cl-item-row .cl-label{grid-column:1 / -1;}
@@ -462,7 +456,6 @@ let state = {
   allMaintenance: [],
   allCrew: [],
   companies: [],
-  contractors: [],
   checklists: [],
   checklistRuns: [],
   allChecklists: [],
@@ -472,8 +465,6 @@ let state = {
   hoursVesselId: null,
   serviceLog: [],
   allServiceLog: [],
-  rfqs: [],
-  allRfqs: [],
   maintView: 'tasks',
   svcVesselId: null,
   svcMeterId: null,
@@ -484,7 +475,7 @@ let state = {
   clView: { vesselId:null, checklistId:null, period:null },
   clDirty: false,
   clSaved: false,
-  fin: { view:'reports', period:'monthly', month:new Date().getMonth()+1, year:new Date().getFullYear(),
+  fin: { period:'monthly', month:new Date().getMonth()+1, year:new Date().getFullYear(),
          from:'', to:'', company:'all', vessel:'all', report:null, emailTo:'' }
 };
 
@@ -586,8 +577,7 @@ const ADMIN_EMAIL = ""; /* e.g. "ops@oceanhub.co.za" — leave blank to hide adm
 const ADMIN_PHONE = ""; /* e.g. "+27820000000" — used for WhatsApp links, digits/plus only */
 /* Collections an owner/operator account may read; everything else under oceanhub/data
    is admin-only in the database rules. */
-const OWNER_KEYS = ['vessels','maintenance','crew','companies','checklists','checklistRuns','hourReadings','serviceLog','rfqs'];
-const OPTIONAL_OWNER_KEYS = ['rfqs']; /* a read error here (e.g. rules not deployed yet) loads as empty instead of failing sign-in */
+const OWNER_KEYS = ['vessels','maintenance','crew','companies','checklists','checklistRuns','hourReadings','serviceLog'];
 let fbInitialized = false;
 
 function isFirebaseConfigured(){
@@ -751,7 +741,6 @@ function applyScoping(){
   state.checklistRuns = state.allChecklistRuns.filter(r => visible.has(r.vesselId));
   state.hourReadings = state.allHourReadings.filter(r => visible.has(r.vesselId));
   state.serviceLog = state.allServiceLog.filter(s => visible.has(s.vesselId));
-  state.rfqs = isAdmin() ? state.allRfqs : state.allRfqs.filter(r => visible.has(r.vesselId));
 }
 
 function asArray(v){
@@ -768,7 +757,6 @@ function normalizeKey(key, raw){
   if(key==='checklists') return asArray(raw).map(c=>({ ...c, vesselIds: asArray(c.vesselIds), items: asArray(c.items) }));
   if(key==='checklistRuns') return asArray(raw).map(r=>({ ...r, entries: asArray(r.entries) }));
   if(key==='hourReadings') return asArray(raw).map(r=>({ ...r, readings: asArray(r.readings) }));
-  if(key==='rfqs') return asArray(raw).map(r=>({ ...r, items: asArray(r.items) }));
   return asArray(raw);
 }
 
@@ -781,7 +769,6 @@ function applyRemoteData(val){
   state.allChecklistRuns = normalizeKey('checklistRuns', val.checklistRuns);
   state.allHourReadings = normalizeKey('hourReadings', val.hourReadings);
   state.allServiceLog = normalizeKey('serviceLog', val.serviceLog);
-  state.allRfqs = normalizeKey('rfqs', val.rfqs);
   applyScoping();
 }
 
@@ -812,11 +799,6 @@ function loadState(){
         };
         dataListeners.push({ ref, fn });
         ref.on('value', fn, onFirstError);
-        /* contractor names and contacts (kept by the contractors app) for RFQ supplier autofill */
-        const ctRef = firebase.database().ref('oceanhub/contractors');
-        const ctFn = snap=>{ const v = snap.val() || {}; state.contractors = Object.keys(v).map(id=>({ id, ...((v[id] || {}).details || {}) })); };
-        dataListeners.push({ ref:ctRef, fn:ctFn });
-        ctRef.on('value', ctFn, ()=>{ state.contractors = []; });
       } else {
         const val = {}, arrived = new Set();
         OWNER_KEYS.forEach(key=>{
@@ -829,7 +811,7 @@ function loadState(){
             afterData();
           };
           dataListeners.push({ ref, fn });
-          ref.on('value', fn, err => OPTIONAL_OWNER_KEYS.includes(key) ? fn({ val:()=>null }) : onFirstError(err));
+          ref.on('value', fn, onFirstError);
         });
       }
     }catch(e){
@@ -2700,17 +2682,9 @@ const FIN_PERIODS = [
   { id:'all', label:'All time', title:'All-time cost report' },
   { id:'open', label:'Open work', title:'Open work cost report' }
 ];
-const RFQ_STATUSES = [
-  { id:'draft', label:'Draft', stamp:'upcoming' },
-  { id:'sent', label:'Sent', stamp:'due-soon' },
-  { id:'quoted', label:'Quote received', stamp:'bill-quoted' },
-  { id:'accepted', label:'Accepted', stamp:'completed' },
-  { id:'declined', label:'Declined', stamp:'overdue' }
-];
 const FIN_EMAIL_KEY = 'oceanhub_fin_email';
 try{ state.fin.emailTo = localStorage.getItem(FIN_EMAIL_KEY) || ''; }catch(e){}
 
-function rfqStatus(id){ return RFQ_STATUSES.find(s=>s.id===id) || RFQ_STATUSES[0]; }
 function fileSlug(s){ return String(s||'').replace(/[^a-z0-9]+/gi,'-').replace(/^-|-$/g,'') || 'file'; }
 
 /* The date a task's cost falls on: when it was completed, or when it's due if still open. */
@@ -2737,7 +2711,7 @@ function finScopeVessels(){
   const ids = new Set(co.vesselIds || []);
   return state.vessels.filter(v=>ids.has(v.id));
 }
-/* Does a vessel id fall inside the current scope? ('' = an RFQ with no vessel) */
+/* Does a vessel id fall inside the current scope? */
 function inFinScope(vesselId){
   const f = state.fin;
   if(f.vessel !== 'all') return vesselId === f.vessel;
@@ -2796,13 +2770,9 @@ function renderFinance(){
   const f = state.fin;
   return `
     <h2 class="section-title">Finance</h2>
-    <p class="section-sub">Maintenance cost reports and requests for quote. Everything here can be saved as PDF or CSV, or emailed.</p>
-    <div class="subtabs">
-      <button type="button" class="subtab ${f.view!=='rfq'?'active':''}" data-action="fin-view" data-view="reports">Cost reports</button>
-      <button type="button" class="subtab ${f.view==='rfq'?'active':''}" data-action="fin-view" data-view="rfq">Requests for quote${state.rfqs.length?`<span class="cnt">${state.rfqs.length}</span>`:''}</button>
-    </div>
+    <p class="section-sub">Maintenance cost reports. Every report can be saved as PDF or CSV, or emailed.</p>
     ${renderFinScope()}
-    ${f.view==='rfq' ? renderRfqs() : renderCostReports()}
+    ${renderCostReports()}
   `;
 }
 
@@ -2872,7 +2842,7 @@ function renderCostReports(){
   `;
 }
 
-/* PDF / CSV / email buttons with the recipient box. `kind` is 'report' or an RFQ id. */
+/* PDF / CSV / email buttons with the recipient box. */
 function renderFinShare(kind){
   return `
     <div class="fin-share">
@@ -2883,144 +2853,6 @@ function renderFinShare(kind){
         <button type="button" class="btn small primary" data-action="fin-email" data-kind="${esc(kind)}">Email PDF + CSV</button>
       </span>
     </div>`;
-}
-
-function renderRfqs(){
-  const scoped = state.fin.vessel !== 'all' || !!finScopeCompany();
-  const rows = state.rfqs.filter(q=>inFinScope(q.vesselId)).sort((a,b)=> (b.issueDate||'').localeCompare(a.issueDate||'') || (b.number||'').localeCompare(a.number||''));
-  return `
-    <div class="toolbar">
-      <p class="section-sub" style="margin:0;">Ask suppliers and contractors to quote for parts or work. Each request can be saved as PDF or CSV and emailed to the supplier.</p>
-      <button class="btn primary" data-action="add-rfq">+ New RFQ</button>
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>RFQ</th><th>Request</th><th>Vessel</th><th>Supplier</th><th>Quote due</th><th>Status</th><th class="num">Quoted</th><th></th></tr></thead>
-        <tbody>
-          ${rows.length===0 ? `<tr><td colspan="8"><div class="empty-note">${scoped ? `No requests for quote for ${esc(finScopeLabel())}.` : 'No requests for quote yet.'}</div></td></tr>` : rows.map(q=>{
-            const st = rfqStatus(q.status);
-            return `
-            <tr>
-              <td style="white-space:nowrap;"><button type="button" class="link-btn" data-action="edit-rfq" data-id="${q.id}" title="Edit">${esc(q.number)}</button><div style="color:var(--ink-soft); font-size:11px;">${fmtDate(q.issueDate)}</div></td>
-              <td><button type="button" class="link-btn" data-action="edit-rfq" data-id="${q.id}" title="Edit">${esc(q.title)}</button><div style="color:var(--ink-soft); font-size:11.5px;">${(q.items||[]).length} item${(q.items||[]).length===1?'':'s'}</div></td>
-              <td>${q.vesselId ? esc(vesselName(q.vesselId)) : '<span style="color:var(--ink-soft);">—</span>'}</td>
-              <td>${esc(q.supplierName||'—')}${q.supplierEmail?`<div style="color:var(--ink-soft); font-size:11.5px;">${esc(q.supplierEmail)}</div>`:''}</td>
-              <td>${fmtDate(q.dueDate)}</td>
-              <td><span class="stamp ${st.stamp}">${st.label}</span></td>
-              <td class="num">${q.quotedAmount!=='' && q.quotedAmount!=null ? fmtCurrency(q.quotedAmount) : '<span style="color:var(--ink-soft);">—</span>'}</td>
-              <td style="white-space:nowrap;">
-                <button class="btn small ghost" data-action="edit-rfq" data-id="${q.id}">Edit</button>
-                <button class="btn small ghost" data-action="fin-pdf" data-kind="${q.id}">PDF</button>
-                <button class="btn small ghost" data-action="fin-csv" data-kind="${q.id}">CSV</button>
-                <button class="btn small" data-action="fin-email" data-kind="${q.id}">Email</button>
-                <button class="btn small danger" data-action="delete-rfq" data-id="${q.id}">Delete</button>
-              </td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>
-    </div>
-  `;
-}
-
-function rfqItemRow(it){
-  it = it || {};
-  return `
-    <div class="rfq-item-row">
-      <input name="rfqItemDesc" value="${esc(it.description||'')}" placeholder="e.g. Impeller kit, Yanmar 4JH">
-      <input name="rfqItemQty" type="number" min="0" step="any" value="${it.qty==null?'':esc(it.qty)}" placeholder="Qty">
-      <input name="rfqItemUnit" value="${esc(it.unit||'')}" placeholder="Unit">
-      <button type="button" class="btn small danger" data-remove-rfq-item title="Remove">&times;</button>
-    </div>`;
-}
-
-function rfqForm(q){
-  const today = localISODate(new Date());
-  q = q || { title:'', vesselId: state.fin.vessel !== 'all' ? state.fin.vessel : (finScopeVessels()[0] || state.vessels[0] || {}).id || '', supplierName:'', supplierContact:'', supplierEmail:'', supplierPhone:'',
-             issueDate: today, dueDate: isoAddDays(today, 7), requiredBy:'', location:'', notes:'', status:'draft', quotedAmount:'', items:[{ qty:1 }] };
-  const admin = isAdmin();
-  const names = admin ? [...new Set(state.contractors.map(c=>c.name).filter(Boolean))] : [];
-  return `
-    ${q.number ? `<p class="section-sub" style="margin-top:-6px;">${esc(q.number)}</p>` : ''}
-    <label class="field">What is the quote for?<input name="title" value="${esc(q.title)}" placeholder="e.g. Annual antifouling and anode replacement" required></label>
-    <label class="field">Vessel<select name="vesselId">
-      ${admin ? `<option value="" ${!q.vesselId?'selected':''}>No specific vessel</option>` : ''}
-      ${state.vessels.map(v=>`<option value="${v.id}" ${q.vesselId===v.id?'selected':''}>${esc(v.name)}</option>`).join('')}
-    </select></label>
-
-    <div class="detail-section" style="margin-top:4px;"><h4>Supplier</h4></div>
-    ${fieldRow(
-      `<label class="field">Supplier / contractor<input name="supplierName" value="${esc(q.supplierName)}" ${names.length?'list="rfqSupplierNames"':''} autocomplete="off" required></label>`,
-      `<label class="field">Contact person<input name="supplierContact" value="${esc(q.supplierContact||'')}"></label>`
-    )}
-    ${names.length ? `<datalist id="rfqSupplierNames">${names.map(n=>`<option value="${esc(n)}">`).join('')}</datalist>` : ''}
-    ${fieldRow(
-      `<label class="field">Send to (email)<input name="supplierEmail" type="email" value="${esc(q.supplierEmail||'')}" autocapitalize="none" autocorrect="off" spellcheck="false"></label>`,
-      `<label class="field">Phone<input name="supplierPhone" value="${esc(q.supplierPhone||'')}"></label>`
-    )}
-
-    <div class="detail-section" style="margin-top:4px;"><h4>Items / work</h4></div>
-    <div id="rfqItems">${(q.items||[]).map(rfqItemRow).join('')}</div>
-    <button type="button" class="btn small" id="addRfqItem" style="margin:4px 0 14px;">+ Add item</button>
-
-    ${fieldRow(
-      `<label class="field">Date issued${dateField('issueDate', q.issueDate, { required:true })}</label>`,
-      `<label class="field">Quote due by${dateField('dueDate', q.dueDate)}</label>`
-    )}
-    ${fieldRow(
-      `<label class="field">Parts / work needed by${dateField('requiredBy', q.requiredBy)}</label>`,
-      `<label class="field">Delivery / work location<input name="location" value="${esc(q.location||'')}" placeholder="e.g. V&amp;A Waterfront, berth 12"></label>`
-    )}
-    <label class="field">Notes / terms<textarea name="notes" rows="3" placeholder="e.g. Please include delivery, VAT and lead time">${esc(q.notes||'')}</textarea></label>
-    ${fieldRow(
-      `<label class="field">Status<select name="status">${RFQ_STATUSES.map(s=>`<option value="${s.id}" ${q.status===s.id?'selected':''}>${s.label}</option>`).join('')}</select></label>`,
-      `<label class="field">Quoted amount (R)<input name="quotedAmount" type="number" min="0" step="0.01" value="${q.quotedAmount==null?'':esc(q.quotedAmount)}" placeholder="When the quote comes in"></label>`
-    )}
-  `;
-}
-
-function wireRfqForm(){
-  const del = document.querySelector('[data-rfq-delete]');
-  if(del && state.modal && state.modal.data) del.addEventListener('click', ()=> deleteRfq(state.modal.data.id));
-  const list = document.getElementById('rfqItems');
-  if(!list) return;
-  const wireRow = row => row.querySelector('[data-remove-rfq-item]').addEventListener('click', ()=> row.remove());
-  list.querySelectorAll('.rfq-item-row').forEach(wireRow);
-  document.getElementById('addRfqItem').addEventListener('click', ()=>{
-    const tmp = document.createElement('div');
-    tmp.innerHTML = rfqItemRow({ qty:1 });
-    const row = tmp.firstElementChild;
-    list.appendChild(row);
-    wireRow(row);
-    row.querySelector('[name="rfqItemDesc"]').focus();
-  });
-  /* picking a known contractor fills in their contact details where still blank */
-  const form = document.getElementById('modalForm');
-  const name = form && form.elements.supplierName;
-  if(name) name.addEventListener('input', ()=>{
-    const key = name.value.trim().toLowerCase();
-    const ct = key && state.contractors.find(c=>(c.name||'').trim().toLowerCase()===key);
-    if(!ct) return;
-    [['supplierContact','contactName'],['supplierEmail','email'],['supplierPhone','phone']].forEach(([field, src])=>{
-      if(!form.elements[field].value && ct[src]) form.elements[field].value = ct[src];
-    });
-  });
-}
-
-async function deleteRfq(id){
-  const q = state.rfqs.find(r=>r.id===id);
-  if(!q || !confirm(`Delete ${q.number} (${q.title})? This can't be undone.`)) return;
-  if(!await persistArray('rfqs', fresh => fresh.filter(r=>r.id!==id))){ alert(RFQ_SAVE_FAILED); return; }
-  state.modal = null;
-  render();
-}
-const RFQ_SAVE_FAILED = "Couldn't save the change. Check your connection and try again — if it keeps happening, ask the OCEANHUB admin (the database rules may need updating).";
-
-/* Next number in the RFQ-<year>-NNN sequence, worked out from the server copy at save time. */
-function nextRfqNumber(all, issueDate){
-  const y = (issueDate || localISODate(new Date())).slice(0,4);
-  const used = all.map(r=>(/^RFQ-(\d{4})-(\d+)$/.exec(r.number||'')||[])).filter(m=>m[1]===y).map(m=>Number(m[2]));
-  return `RFQ-${y}-${String((used.length ? Math.max(...used) : 0) + 1).padStart(3,'0')}`;
 }
 
 /* Reads the report settings off the page into state, so a live refresh keeps them. */
@@ -3190,51 +3022,6 @@ function costReportFiles(){
   };
 }
 
-function rfqFiles(q){
-  const vessel = q.vesselId ? vesselName(q.vesselId) : '';
-  const replyTo = session && session.email || '';
-  const { doc, y } = newPdf(`Request for quotation ${q.number}`, [
-    `Date issued: ${fmtDate(q.issueDate)}${q.dueDate ? `      Quote due by: ${fmtDate(q.dueDate)}` : ''}`,
-    q.requiredBy ? `Parts / work needed by: ${fmtDate(q.requiredBy)}` : '',
-    `To: ${q.supplierName}${q.supplierContact ? ` (attn ${q.supplierContact})` : ''}`,
-    q.supplierEmail || q.supplierPhone ? [q.supplierEmail, q.supplierPhone].filter(Boolean).join('   ') : '',
-    vessel ? `Vessel: ${vessel}` : '',
-    q.location ? `Delivery / work location: ${q.location}` : ''
-  ]);
-  let yy = y;
-  doc.setFont('helvetica','bold'); doc.setFontSize(11);
-  const t = doc.splitTextToSize(q.title, 182); doc.text(t, 14, yy); yy += t.length * 5.5 + 4;
-  yy = pdfTable(doc, yy, [{label:'#',w:10},{label:'Description',w:124},{label:'Qty',w:20},{label:'Unit',w:28}],
-    (q.items||[]).map((it,i)=>[String(i+1), it.description, it.qty==null||it.qty==='' ? '' : String(it.qty), it.unit||'']));
-  if(q.notes){
-    yy += 6; if(yy > 255){ doc.addPage(); yy = 20; }
-    doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.text('Notes / terms', 14, yy); yy += 6;
-    doc.setFont('helvetica','normal');
-    const n = doc.splitTextToSize(q.notes, 182); doc.text(n, 14, yy); yy += n.length * 5;
-  }
-  yy += 8; if(yy > 270){ doc.addPage(); yy = 20; }
-  doc.setFont('helvetica','normal'); doc.setFontSize(10);
-  doc.text(doc.splitTextToSize(`Please send your quotation${replyTo ? ` to ${replyTo}` : ''}, quoting ${q.number}${q.dueDate ? `, by ${fmtDate(q.dueDate)}` : ''}. Include VAT, delivery and lead time.`, 182), 14, yy);
-  pdfFooter(doc);
-
-  const csv = [
-    ['RFQ', q.number], ['Request', q.title], ['Date issued', q.issueDate], ['Quote due by', q.dueDate||''], ['Needed by', q.requiredBy||''],
-    ['Vessel', vessel], ['Supplier', q.supplierName], ['Contact', q.supplierContact||''], ['Email', q.supplierEmail||''], ['Phone', q.supplierPhone||''],
-    ['Location', q.location||''], ['Notes', q.notes||''], ['Status', rfqStatus(q.status).label],
-    ['Quoted amount (R)', q.quotedAmount==='' || q.quotedAmount==null ? '' : Number(q.quotedAmount)],
-    [],
-    ['#','Description','Qty','Unit'],
-    ...(q.items||[]).map((it,i)=>[i+1, it.description, it.qty==null||it.qty==='' ? '' : Number(it.qty), it.unit||''])
-  ];
-  const base = `${q.number}-${fileSlug(q.supplierName)}`;
-  return {
-    pdf: pdfFile(doc, base + '.pdf'),
-    csv: csvFile(csv, base + '.csv'),
-    subject: `Request for quotation ${q.number} — ${q.title}`,
-    text: `Good day${q.supplierContact ? ' ' + q.supplierContact : ''},\n\nPlease find attached our request for quotation ${q.number}: ${q.title}${vessel ? ` (${vessel})` : ''}.${q.dueDate ? ` We would appreciate your quote by ${fmtDate(q.dueDate)}.` : ''}\n\nKind regards`
-  };
-}
-
 /* Hands the files to the device's share sheet with them attached (most phones), copying
    the recipient so it can be pasted into the To field. Where files can't be shared
    (most desktop browsers) they download, and the mail app opens addressed to the
@@ -3251,16 +3038,13 @@ async function emailFiles(files, to, subject, text, cc){
 }
 
 async function finFileAction(action, kind){
-  const rfq = kind === 'report' ? null : state.rfqs.find(q=>q.id===kind);
-  if(kind !== 'report' && !rfq) return;
-  if(kind === 'report' && !state.fin.report) return;
+  if(kind !== 'report' || !state.fin.report) return;
   let out;
-  try{ out = rfq ? rfqFiles(rfq) : costReportFiles(); }
+  try{ out = costReportFiles(); }
   catch(e){ alert('Could not build the files. ' + (e && e.message ? e.message : '')); return; }
   if(action === 'fin-pdf'){ downloadFile(out.pdf); return; }
   if(action === 'fin-csv'){ downloadFile(out.csv); return; }
 
-  if(rfq){ state.modal = { type:'rfq-email', id:rfq.id }; renderModal(); return; }
   const to = state.fin.emailTo;
   if(!to){
     const box = document.getElementById('finEmailTo');
@@ -3270,53 +3054,6 @@ async function finFileAction(action, kind){
   }
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)){ alert('That email address doesn\'t look right.'); return; }
   await emailFiles([out.pdf, out.csv], to, out.subject, out.text);
-}
-
-/* "a@x.co, b@y.co; c@z.co" → ['a@x.co','b@y.co','c@z.co'], or null if any address is invalid. */
-function parseEmails(text){
-  const list = String(text||'').split(/[,;\s]+/).map(x=>x.trim()).filter(Boolean);
-  return list.every(x=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x)) ? list : null;
-}
-
-function rfqEmailForm(q){
-  const out = rfqFiles(q);
-  return `
-    <p class="section-sub" style="margin-top:-6px;">${esc(q.number)} — ${esc(q.title)}. The PDF and CSV go with it.</p>
-    <label class="field">Send to<input name="to" value="${esc(q.supplierEmail||'')}" placeholder="supplier@example.com" autocapitalize="none" autocorrect="off" spellcheck="false" required></label>
-    <label class="field">CC (optional)<input name="cc" value="" placeholder="e.g. your own address" autocapitalize="none" autocorrect="off" spellcheck="false"></label>
-    <label class="field">Subject<input name="subject" value="${esc(out.subject)}" required></label>
-    <label class="field">Message<textarea name="message" rows="6">${esc(out.text)}</textarea></label>
-    <label style="display:flex; align-items:center; gap:9px; font-size:13px; font-weight:600; color:var(--ink); margin:-2px 0 6px;">
-      <input type="checkbox" name="saveTo" value="1" style="width:auto;" ${q.supplierEmail ? '' : 'checked'}>
-      Save the "Send to" address on this RFQ
-    </label>
-    <p class="fin-hint" style="margin-top:6px;">On a phone the share sheet opens with both files attached. Pick Mail, then paste the address into To (it's copied for you). On a computer the files download and your mail app opens, ready to attach them.</p>
-  `;
-}
-
-/* Sends from the dialog. The share sheet has to open straight from the click, so it's
-   started before anything is saved. */
-async function sendRfqEmail(fd, rfqId){
-  const q = state.rfqs.find(r=>r.id===rfqId);
-  if(!q){ state.modal = null; render(); return; }
-  const to = parseEmails(fd.get('to'));
-  const cc = parseEmails(fd.get('cc'));
-  if(!to || !to.length){ alert('Enter a valid "Send to" email address. Separate several with commas.'); return; }
-  if(!cc){ alert('One of the CC addresses doesn\'t look right.'); return; }
-  let out;
-  try{ out = rfqFiles(q); }catch(e){ alert('Could not build the files. ' + (e && e.message ? e.message : '')); return; }
-  const sent = await emailFiles([out.pdf, out.csv], to.join(','), String(fd.get('subject')||out.subject), String(fd.get('message')||''), cc.join(','));
-  if(!sent) return;
-  const saveTo = fd.get('saveTo') === '1';
-  if(q.status === 'draft' || saveTo){
-    await persistArray('rfqs', fresh => fresh.map(r=> r.id!==q.id ? r : {
-      ...r,
-      ...(saveTo ? { supplierEmail: to.join(', ') } : {}),
-      ...(r.status === 'draft' ? { status:'sent', sentDate:localISODate(new Date()) } : {})
-    }));
-  }
-  state.modal = null;
-  render();
 }
 
 /* ============================= CREW ============================= */
@@ -3737,12 +3474,6 @@ function renderModal(){
   else if(modal.type==='company'){ title = modal.data ? 'Edit company' : 'Add company'; body = companyForm(modal.data); }
   else if(modal.type==='checklist'){ title = modal.data ? 'Edit checklist' : 'New checklist'; body = checklistForm(modal.data); }
   else if(modal.type==='checklist-import'){ title = 'Import standard checklists'; body = checklistImportForm(); }
-  else if(modal.type==='rfq'){ title = modal.data ? 'Edit request for quote' : 'New request for quote'; body = rfqForm(modal.data); }
-  else if(modal.type==='rfq-email'){
-    const q = state.rfqs.find(r=>r.id===modal.id);
-    if(!q){ state.modal = null; root.innerHTML = ''; return; }
-    title = 'Email request for quote'; body = rfqEmailForm(q);
-  }
 
   root.innerHTML = `
     <div class="modal-overlay" data-action="overlay-close">
@@ -3750,8 +3481,7 @@ function renderModal(){
         <form id="modalForm">
           <h3>${title}</h3>
           ${body}
-          <div class="modal-actions">${cancelBtn}${modal.type==='rfq-email' ? '<button type="submit" class="btn primary">Send</button>'
-            : modal.type==='rfq' ? `${modal.data ? '<button type="button" class="btn danger" data-rfq-delete style="margin-right:auto;">Delete</button>' : ''}<button type="submit" class="btn" name="then" value="email">Save &amp; email</button>${saveBtn}` : saveBtn}</div>
+          <div class="modal-actions">${cancelBtn}${saveBtn}</div>
         </form>
       </div>
     </div>
@@ -3770,7 +3500,6 @@ function attachModalEvents(){
   if(form) form.addEventListener('submit', handleFormSubmit);
   wireChecklistItemEditor();
   wireCrewQualAdder();
-  wireRfqForm();
   const photoInput = document.getElementById('vesselPhotoInput');
   if(photoInput){
     photoInput.addEventListener('change', async (e)=>{
@@ -4009,8 +3738,6 @@ async function handleFormSubmit(e){
   const modal = state.modal;
   let targetKey = null, mutateFn = null, nextModal = null;
 
-  if(modal.type==='rfq-email'){ await sendRfqEmail(fd, modal.id); return; }
-
   if(modal.type==='vessel'){
     const data = { name:fd.get('name'), type:fd.get('type'), reg:fd.get('reg'), status:fd.get('status'), engineHours:Number(fd.get('engineHours'))||0, notes:fd.get('notes')||'', photo:fd.get('photo')||'', ownerName:fd.get('ownerName')||'', ownerPhone:fd.get('ownerPhone')||'', ownerEmail:fd.get('ownerEmail')||'' };
     const editId = modal.data ? modal.data.id : null;
@@ -4247,23 +3974,6 @@ async function handleFormSubmit(e){
       ? fresh.map(c=> c.id===editId ? { ...c, ...data } : c)
       : [...fresh, { id:uid('cl'), createdDate:localISODate(new Date()), ...data }];
   }
-  else if(modal.type==='rfq'){
-    const descs = fd.getAll('rfqItemDesc'), qtys = fd.getAll('rfqItemQty'), units = fd.getAll('rfqItemUnit');
-    const items = descs.map((d, i)=>({ description:String(d).trim(), qty: qtys[i]==='' ? '' : Number(qtys[i])||0, unit:String(units[i]||'').trim() })).filter(it=>it.description);
-    if(items.length === 0){ alert('Add at least one item or piece of work to quote for.'); return; }
-    const quoted = String(fd.get('quotedAmount')||'');
-    const data = { title:String(fd.get('title')||'').trim(), vesselId:fd.get('vesselId')||'', supplierName:String(fd.get('supplierName')||'').trim(),
-      supplierContact:String(fd.get('supplierContact')||'').trim(), supplierEmail:String(fd.get('supplierEmail')||'').trim(), supplierPhone:String(fd.get('supplierPhone')||'').trim(),
-      issueDate:fd.get('issueDate'), dueDate:fd.get('dueDate')||'', requiredBy:fd.get('requiredBy')||'', location:String(fd.get('location')||'').trim(),
-      notes:String(fd.get('notes')||'').trim(), status:fd.get('status')||'draft', quotedAmount: quoted==='' ? '' : Number(quoted)||0, items };
-    const editId = modal.data ? modal.data.id : null;
-    const rfqId = editId || uid('rfq');
-    targetKey = 'rfqs';
-    mutateFn = fresh => editId
-      ? fresh.map(r=> r.id===editId ? { ...r, ...data } : r)
-      : [...fresh, { id:rfqId, number:nextRfqNumber(fresh, data.issueDate), createdBy: session ? session.email : '', ...data }];
-    if(e.submitter && e.submitter.value === 'email') nextModal = { type:'rfq-email', id:rfqId };
-  }
   else if(modal.type==='checklist-import'){
     const lists = fd.getAll('lists');
     const allVessels = fd.get('allVessels') === '1';
@@ -4290,8 +4000,7 @@ async function handleFormSubmit(e){
   }
 
   if(targetKey && mutateFn){
-    const saved = await persistArray(targetKey, mutateFn);
-    if(!saved && targetKey === 'rfqs' && fbInitialized){ alert(RFQ_SAVE_FAILED); return; }
+    await persistArray(targetKey, mutateFn);
   }
   state.modal = nextModal;
   render();
@@ -4422,12 +4131,8 @@ function attachContentEvents(){
           window.print();
           break;
         case 'maint-view': state.maintView = el.dataset.view; render(); break;
-        case 'fin-view': captureFinControls(); state.fin.view = el.dataset.view; render(); break;
         case 'fin-generate': generateCostReport(); break;
         case 'fin-pdf': case 'fin-csv': case 'fin-email': await finFileAction(action, el.dataset.kind); break;
-        case 'add-rfq': state.modal = { type:'rfq', data:null }; renderModal(); break;
-        case 'edit-rfq': state.modal = { type:'rfq', data: state.rfqs.find(q=>q.id===id) }; renderModal(); break;
-        case 'delete-rfq': await deleteRfq(id); break;
         case 'svc-unit': state.svcMeterId = el.dataset.meter; render(); break;
         case 'svc-complete': await completeServiceTask(el.dataset.task); break;
         case 'svc-undo':
