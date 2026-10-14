@@ -6,8 +6,8 @@
 <title>OCEANHUB — Contractors</title>
 <meta name="theme-color" content="#026b71">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" type="image/png" sizes="192x192" href="../icons/icon-192.png">
-<link rel="apple-touch-icon" href="../icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="OH Contractors">
@@ -416,6 +416,7 @@
     body.print-checklist .cl-card{border:none; padding:0;}
   }
   /* ===== Contractors app ===== */
+  .install-bar{display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; background:var(--brand-tint); border:1px solid var(--border); border-radius:10px; padding:10px 14px; font-size:13px; color:var(--ink);}
   .ct-grid{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.4fr); gap:18px; align-items:start;}
   .card-box{background:var(--white-card); border:1px solid var(--border); border-radius:12px; padding:14px 16px;}
   .pay-row{align-items:flex-start; gap:10px; border-bottom:1px solid var(--paper-line); padding:10px 0;}
@@ -753,7 +754,9 @@ function renderLoginGate(err, info){
         <button type="submit" class="btn primary" style="width:100%;">Sign in</button>
         <button type="button" class="btn ghost" id="forgotPasswordBtn" style="width:100%; margin-top:8px;">Forgot password?</button>
       </form>
+      <div class="install-slot" style="margin-top:18px;"></div>
     </div>`;
+  refreshInstallSlots();
   document.getElementById('loginForm').addEventListener('submit', async e=>{
     e.preventDefault();
     const fd = new FormData(e.target);
@@ -1414,6 +1417,33 @@ document.addEventListener('click', e=>{
   handleAction(el);
 });
 
+/* ============================= INSTALL ============================= */
+/* Chrome / Edge / Android offer an install prompt we can trigger from a button; iPhone and
+   iPad only install from Safari's Share menu, so they get a one-line how-to instead. */
+let installPrompt = null;
+const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+function installHtml(){
+  if(isStandalone()) return '';
+  if(installPrompt) return `<div class="install-bar"><span>Install OCEANHUB Contractors on this device for one-tap access.</span><button type="button" class="btn small primary" id="installAppBtn">Install app</button></div>`;
+  if(isIOS()) return `<div class="install-bar"><span>To install on iPhone or iPad: open this page in Safari, tap <b>Share</b> <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M5 12v8h14v-8"/></svg>, then <b>Add to Home Screen</b>.</span></div>`;
+  return '';
+}
+function refreshInstallSlots(){
+  document.querySelectorAll('.install-slot').forEach(el=>{ el.innerHTML = installHtml(); });
+  const btn = document.getElementById('installAppBtn');
+  if(btn) btn.addEventListener('click', async ()=>{
+    if(!installPrompt) return;
+    const p = installPrompt;
+    installPrompt = null;
+    p.prompt();
+    try{ await p.userChoice; }catch(e){}
+    refreshInstallSlots();
+  });
+}
+window.addEventListener('beforeinstallprompt', e=>{ e.preventDefault(); installPrompt = e; refreshInstallSlots(); });
+window.addEventListener('appinstalled', ()=>{ installPrompt = null; refreshInstallSlots(); });
+
 /* ============================= RENDER ============================= */
 function render(){
   if(!session){ renderLoginGate(); return; }
@@ -1425,6 +1455,8 @@ function render(){
   } else {
     main.innerHTML = renderContractorPage(session.contractorId);
   }
+  main.insertAdjacentHTML('beforeend', '<div class="install-slot" style="margin-top:22px;"></div>');
+  refreshInstallSlots();
   renderModal();
 }
 

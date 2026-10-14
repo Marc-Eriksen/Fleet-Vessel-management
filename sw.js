@@ -1,6 +1,6 @@
 // OCEANHUB service worker: makes the app installable and lets the shell
 // open offline. Data still comes live from Firebase, which is never cached.
-const CACHE = 'ocean-hub-v1';
+const CACHE = 'ocean-hub-v2';
 const SHELL = [
   './',
   './index.html',
@@ -8,7 +8,14 @@ const SHELL = [
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/icon-maskable-512.png',
-  './icons/apple-touch-icon.png'
+  './icons/apple-touch-icon.png',
+  './contractors/',
+  './contractors/index.html',
+  './contractors/manifest.webmanifest',
+  './contractors/icons/icon-192.png',
+  './contractors/icons/icon-512.png',
+  './contractors/icons/icon-maskable-512.png',
+  './contractors/icons/apple-touch-icon.png'
 ];
 
 self.addEventListener('install', event => {
@@ -41,7 +48,9 @@ self.addEventListener('fetch', event => {
           return res;
         })
         .catch(() => caches.match(req, { ignoreSearch: true })
-          .then(hit => hit || (req.mode === 'navigate' ? caches.match('./index.html') : undefined)))
+          .then(hit => hit || (req.mode === 'navigate'
+            ? caches.match(url.pathname.includes('/contractors/') ? './contractors/index.html' : './index.html')
+            : undefined)))
     );
     return;
   }
