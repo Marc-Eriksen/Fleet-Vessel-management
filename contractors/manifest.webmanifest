@@ -2,7 +2,7 @@
   "name": "OCEANHUB — Contractors",
   "short_name": "OH Contractors",
   "description": "Contractor details, payments and statements for OCEANHUB.",
-  "id": "./",
+  "id": "/Fleet-Vessel-management/contractors/",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
