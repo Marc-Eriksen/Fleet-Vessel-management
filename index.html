@@ -280,6 +280,7 @@
   .subtab .cnt{opacity:0.7; font-weight:700; margin-left:5px;}
 
   /* ===== Checklists ===== */
+  .fin-scope{margin:0 0 16px;}
   .fin-panel{background:var(--white-card); border:1px solid var(--border); border-radius:12px; padding:16px 16px 14px; margin-bottom:18px; max-width:640px;}
   .fin-hint{font-size:12px; color:var(--ink-soft); margin:-4px 0 12px;}
   .fin-share{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:0 0 14px;}
@@ -484,7 +485,7 @@ let state = {
   clDirty: false,
   clSaved: false,
   fin: { view:'reports', period:'monthly', month:new Date().getMonth()+1, year:new Date().getFullYear(),
-         from:'', to:'', vessel:'all', report:null, emailTo:'' }
+         from:'', to:'', company:'all', vessel:'all', report:null, emailTo:'' }
 };
 
 /* Auth session: null (signed out) | { role:'admin', uid, email } | { role:'owner', companyId, uid, email } */
@@ -2733,10 +2734,43 @@ function defaultYearRange(){
   return { from:`${y}-01-01`, to:`${y}-12-31` };
 }
 
-/* Everything a cost report shows, for a saved set of report settings. */
+/* Company / vessel picked at the top of Finance. Only the admin picks a company. */
+function finScopeCompany(){
+  const id = isAdmin() ? state.fin.company : 'all';
+  return id === 'all' ? null : state.companies.find(c=>c.id===id) || null;
+}
+function finScopeVessels(){
+  const co = finScopeCompany();
+  if(!co) return state.vessels;
+  const ids = new Set(co.vesselIds || []);
+  return state.vessels.filter(v=>ids.has(v.id));
+}
+/* Does a vessel id fall inside the current scope? ('' = an RFQ with no vessel) */
+function inFinScope(vesselId){
+  const f = state.fin;
+  if(f.vessel !== 'all') return vesselId === f.vessel;
+  if(!finScopeCompany()) return true;
+  return finScopeVessels().some(v=>v.id===vesselId);
+}
+function finScopeLabel(){
+  const co = finScopeCompany();
+  if(state.fin.vessel !== 'all') return (co ? co.name + ' — ' : '') + vesselName(state.fin.vessel);
+  return co ? `${co.name} — all vessels` : 'All vessels';
+}
+function renderFinScope(){
+  const f = state.fin;
+  const vessels = finScopeVessels();
+  if(f.vessel !== 'all' && !vessels.some(v=>v.id===f.vessel)) f.vessel = 'all';
+  return `
+    <div class="filters fin-scope">
+      ${isAdmin() ? `<select id="finCompany" aria-label="Company"><option value="all">All companies</option>${state.companies.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(c=>`<option value="${c.id}" ${f.company===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select>` : ''}
+      <select id="finVessel" aria-label="Vessel"><option value="all">All vessels${finScopeCompany() ? ' in this company' : ''}</option>${vessels.map(v=>`<option value="${v.id}" ${f.vessel===v.id?'selected':''}>${esc(v.name)}</option>`).join('')}</select>
+    </div>`;
+}
+
+/* Everything a cost report shows, for the saved report settings and the current company / vessel. */
 function costReportData(p){
-  let tasks = getAllMaintenanceTasks();
-  if(p.vessel !== 'all') tasks = tasks.filter(m=>m.vesselId===p.vessel);
+  let tasks = getAllMaintenanceTasks().filter(m=>inFinScope(m.vesselId));
   let from = '', to = '', periodLabel = '';
   if(p.period === 'monthly'){
     const mm = String(p.month).padStart(2,'0');
@@ -2763,7 +2797,7 @@ function costReportData(p){
   const byVessel = {};
   rows.forEach(r=>{ byVessel[r.vessel] = byVessel[r.vessel] || { count:0, cost:0 }; byVessel[r.vessel].count++; byVessel[r.vessel].cost += r.cost; });
   const title = (FIN_PERIODS.find(x=>x.id===p.period) || FIN_PERIODS[0]).title;
-  return { title, periodLabel, vesselLabel: vesselName(p.vessel), rows, total, openTotal, completedTotal: total - openTotal, byVessel };
+  return { title, periodLabel, vesselLabel: finScopeLabel(), rows, total, openTotal, completedTotal: total - openTotal, byVessel };
 }
 
 function renderFinance(){
@@ -2775,6 +2809,7 @@ function renderFinance(){
       <button type="button" class="subtab ${f.view!=='rfq'?'active':''}" data-action="fin-view" data-view="reports">Cost reports</button>
       <button type="button" class="subtab ${f.view==='rfq'?'active':''}" data-action="fin-view" data-view="rfq">Requests for quote${state.rfqs.length?`<span class="cnt">${state.rfqs.length}</span>`:''}</button>
     </div>
+    ${renderFinScope()}
     ${f.view==='rfq' ? renderRfqs() : renderCostReports()}
   `;
 }
@@ -2798,7 +2833,7 @@ function renderCostReports(){
     <div class="fin-panel">
       ${fieldRow(
         `<label class="field">Report<select id="finPeriod">${FIN_PERIODS.map(x=>`<option value="${x.id}" ${f.period===x.id?'selected':''}>${x.label}</option>`).join('')}</select></label>`,
-        `<label class="field">Vessel<select id="finVessel"><option value="all">All vessels</option>${state.vessels.map(v=>`<option value="${v.id}" ${f.vessel===v.id?'selected':''}>${esc(v.name)}</option>`).join('')}</select></label>`
+        `<span></span>`
       )}
       ${periodFields}
       ${f.period==='yearly' ? '<p class="fin-hint">Pick any start date, such as the first day of your financial year. The end date fills in a year later and can be changed.</p>' : ''}
@@ -2859,7 +2894,8 @@ function renderFinShare(kind){
 }
 
 function renderRfqs(){
-  const rows = state.rfqs.slice().sort((a,b)=> (b.issueDate||'').localeCompare(a.issueDate||'') || (b.number||'').localeCompare(a.number||''));
+  const scoped = state.fin.vessel !== 'all' || !!finScopeCompany();
+  const rows = state.rfqs.filter(q=>inFinScope(q.vesselId)).sort((a,b)=> (b.issueDate||'').localeCompare(a.issueDate||'') || (b.number||'').localeCompare(a.number||''));
   return `
     <div class="toolbar">
       <p class="section-sub" style="margin:0;">Ask suppliers and contractors to quote for parts or work. Each request can be saved as PDF or CSV and emailed to the supplier.</p>
@@ -2869,7 +2905,7 @@ function renderRfqs(){
       <table>
         <thead><tr><th>RFQ</th><th>Request</th><th>Vessel</th><th>Supplier</th><th>Quote due</th><th>Status</th><th class="num">Quoted</th><th></th></tr></thead>
         <tbody>
-          ${rows.length===0 ? `<tr><td colspan="8"><div class="empty-note">No requests for quote yet.</div></td></tr>` : rows.map(q=>{
+          ${rows.length===0 ? `<tr><td colspan="8"><div class="empty-note">${scoped ? `No requests for quote for ${esc(finScopeLabel())}.` : 'No requests for quote yet.'}</div></td></tr>` : rows.map(q=>{
             const st = rfqStatus(q.status);
             return `
             <tr>
@@ -2908,7 +2944,7 @@ function rfqItemRow(it){
 
 function rfqForm(q){
   const today = localISODate(new Date());
-  q = q || { title:'', vesselId: state.vessels[0]?.id || '', supplierName:'', supplierContact:'', supplierEmail:'', supplierPhone:'',
+  q = q || { title:'', vesselId: state.fin.vessel !== 'all' ? state.fin.vessel : (finScopeVessels()[0] || state.vessels[0] || {}).id || '', supplierName:'', supplierContact:'', supplierEmail:'', supplierPhone:'',
              issueDate: today, dueDate: isoAddDays(today, 7), requiredBy:'', location:'', notes:'', status:'draft', quotedAmount:'', items:[{ qty:1 }] };
   const admin = isAdmin();
   const names = admin ? [...new Set(state.contractors.map(c=>c.name).filter(Boolean))] : [];
@@ -3011,7 +3047,16 @@ function captureFinControls(){
 
 function attachFinancePageEvents(){
   if(state.activeTab !== 'finance') return;
-  ['finPeriod','finVessel','finMonth','finYear'].forEach(id=>{
+  const co = document.getElementById('finCompany');
+  if(co) co.addEventListener('change', ()=>{
+    captureFinControls();
+    state.fin.company = co.value;
+    if(!finScopeVessels().some(v=>v.id===state.fin.vessel)) state.fin.vessel = 'all';
+    render();
+  });
+  const ve = document.getElementById('finVessel');
+  if(ve) ve.addEventListener('change', ()=>{ captureFinControls(); render(); });
+  ['finPeriod','finMonth','finYear'].forEach(id=>{
     const el = document.getElementById(id);
     if(el) el.addEventListener('change', ()=>{ captureFinControls(); if(id==='finPeriod') render(); });
   });
@@ -3044,7 +3089,7 @@ function generateCostReport(){
     if(!f.from || !f.to){ alert('Choose the start and end dates of the year.'); return; }
     if(f.from > f.to){ alert('The year has to end after it starts.'); return; }
   }
-  f.report = { period:f.period, vessel:f.vessel, month:f.month, year:f.year, from:f.from, to:f.to };
+  f.report = { period:f.period, month:f.month, year:f.year, from:f.from, to:f.to };
   render();
 }
 
@@ -3118,7 +3163,7 @@ function costReportFiles(){
   const r = costReportData(p);
   const admin = isAdmin();
   const stamp = localISODate(new Date());
-  const base = `${fileSlug(r.title)}-${fileSlug(p.period==='monthly' ? `${p.year}-${String(p.month).padStart(2,'0')}` : p.period==='yearly' ? `${p.from}-to-${p.to}` : stamp)}${p.vessel!=='all' ? '-' + fileSlug(r.vesselLabel) : ''}`;
+  const base = `${fileSlug(r.title)}-${fileSlug(p.period==='monthly' ? `${p.year}-${String(p.month).padStart(2,'0')}` : p.period==='yearly' ? `${p.from}-to-${p.to}` : stamp)}${state.fin.vessel!=='all' || finScopeCompany() ? '-' + fileSlug(r.vesselLabel) : ''}`;
 
   const { doc, y } = newPdf(r.title, [
     `Period: ${r.periodLabel}`, `Vessels: ${r.vesselLabel}`, `Generated: ${fmtDate(stamp)}`,
