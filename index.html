@@ -2859,16 +2859,41 @@ function crewForm(c){
 }
 function crewQualTemplate(){
   const names = qualTemplateNames();
-  if(!names.length) return `<p style="font-size:12px; color:var(--ink-soft); margin-top:-4px;">You can add qualifications once the crew member is saved.</p>`;
   return `
     <div class="detail-section" style="margin-top:4px;"><h4>Qualifications</h4></div>
-    <p style="font-size:12px; color:var(--ink-soft); margin-top:-4px;">Enter the expiry date for each qualification this crew member holds. Leave the others blank. You can add more later.</p>
+    ${names.length ? `<p style="font-size:12px; color:var(--ink-soft); margin-top:-4px;">Enter the expiry date for each qualification this crew member holds. Leave the others blank.</p>` : ''}
     ${names.map((n,i)=>`
       <label class="field">${esc(n)}
         <input type="hidden" name="tqName_${i}" value="${esc(n)}">
         ${dateField('tqExpiry_' + i, '')}
       </label>`).join('')}
+    <div id="crewExtraQuals"></div>
+    <datalist id="qualNames">${names.map(n=>`<option value="${esc(n)}">`).join('')}</datalist>
+    <div style="margin-bottom:12px;"><button type="button" class="btn small" data-add-crew-qual>+ Add ${names.length ? 'another' : 'a'} qualification</button></div>
   `;
+}
+/* A blank name + expiry row for a qualification not in the template list. */
+function crewExtraQualRow(){
+  return `<div class="crew-extra-qual">
+    ${fieldRow(
+      `<label class="field">Qualification / certificate name<input name="xqName" placeholder="e.g. STCW Basic Safety Training" list="qualNames" autocomplete="off" required></label>`,
+      `<label class="field">Expiry date${dateField('xqExpiry', '', { required:true })}</label>`
+    )}
+    <div style="margin:-6px 0 12px;"><button type="button" class="btn small danger" data-remove-crew-qual>Remove</button></div>
+  </div>`;
+}
+function wireCrewQualAdder(){
+  const list = document.getElementById('crewExtraQuals');
+  const btn = document.querySelector('[data-add-crew-qual]');
+  if(!list || !btn) return;
+  btn.addEventListener('click', ()=>{
+    const tmp = document.createElement('div');
+    tmp.innerHTML = crewExtraQualRow();
+    const row = tmp.firstElementChild;
+    list.appendChild(row);
+    row.querySelector('[data-remove-crew-qual]').addEventListener('click', ()=> row.remove());
+    row.querySelector('[name="xqName"]').focus();
+  });
 }
 
 function qualForm(q){
@@ -3495,6 +3520,7 @@ function attachModalEvents(){
   const form = document.getElementById('modalForm');
   if(form) form.addEventListener('submit', handleFormSubmit);
   wireChecklistItemEditor();
+  wireCrewQualAdder();
   const photoInput = document.getElementById('vesselPhotoInput');
   if(photoInput){
     photoInput.addEventListener('change', async (e)=>{
@@ -3913,6 +3939,11 @@ async function handleFormSubmit(e){
       const expiry = fd.get('tqExpiry_' + i);
       if(expiry) quals.push({ id:uid('q'), name:fd.get('tqName_' + i), expiry });
     }
+    const xqNames = fd.getAll('xqName'), xqExpiries = fd.getAll('xqExpiry');
+    xqNames.forEach((n,i)=>{
+      const name = String(n||'').trim();
+      if(name && xqExpiries[i]) quals.push({ id:uid('q'), name, expiry:xqExpiries[i] });
+    });
     targetKey = 'crew';
     mutateFn = fresh => editId
       ? fresh.map(c=> c.id===editId ? { ...c, ...data } : c)
