@@ -1166,7 +1166,7 @@ function renderDashboard(){
   const events = [];
   allTasks.filter(m=>m.status!=='completed').forEach(m=>{
     const vesselLabel = m._source==='tender' ? `${vesselName(m.vesselId)} — ${m._tenderName} (tender)` : vesselName(m.vesselId);
-    events.push({ date:m.dueDate, kind:'Maintenance', title:m.title, sub:`${vesselLabel} · ${m.category==='scheduled'?'Scheduled':m.category==='daily'?'Daily':'Unscheduled'}${isAdmin() ? ` · ${fmtCurrency(m.cost)}` : ''}`, status:maintStatus(m) });
+    events.push({ date:m.dueDate, kind:'Maintenance', title:m.title, sub:`${vesselLabel} · ${m.category==='scheduled'?'Scheduled':m.category==='daily'?'Daily':'Unscheduled'} · ${fmtCurrency(m.cost)}`, status:maintStatus(m) });
   });
   state.crew.forEach(c=>c.quals.forEach(q=>{
     events.push({ date:q.expiry, kind:'Qualification', title:q.name, sub:`${c.name} (${c.role})`, status:qualStatus(q.expiry) });
@@ -1998,7 +1998,7 @@ function renderVessels(){
             <div class="stat"><b>${v.engineHours.toLocaleString()}</b>Engine hrs</div>
             <div class="stat"><b style="${overdueTasks>0?'color:var(--signal-red)':''}">${openTasks}</b>Open tasks</div>
             <div class="stat"><b>${crewCount}</b>Crew assigned</div>
-            ${isAdmin() ? `<div class="stat"><b>${fmtCurrency(vesselMonthlyFixed(v))}</b>Fixed costs/mo</div>` : ''}
+            <div class="stat"><b>${fmtCurrency(vesselMonthlyFixed(v))}</b>Fixed costs/mo</div>
           </div>
         </div>
       `}).join('')}
@@ -2078,7 +2078,7 @@ function renderVesselDetail(id){
       `).join('')}
     </div>
 
-    ${isAdmin() ? `<div class="detail-section">
+    <div class="detail-section">
       <h4>Fixed costs <span style="text-transform:none; font-weight:400; letter-spacing:0;">(${fmtCurrency(vesselMonthlyFixed(v))}/mo total)</span></h4>
       ${(v.fixedCosts||[]).length===0 ? '<div class="empty-note" style="padding:10px 0;">No fixed costs recorded.</div>' : v.fixedCosts.map(c=>`
         <div class="mini-row">
@@ -2090,7 +2090,7 @@ function renderVesselDetail(id){
         </div>
       `).join('')}
       <div style="margin-top:8px;"><button class="btn small" data-action="add-vessel-cost" data-id="${v.id}">+ Add fixed cost</button></div>
-    </div>` : ''}
+    </div>
 
     <div class="detail-section">
       <h4>Documents</h4>
@@ -2216,7 +2216,7 @@ function tenderMaintenanceForm(m){
         <option value="medium" ${m.priority==='medium'?'selected':''}>Medium</option>
         <option value="high" ${m.priority==='high'?'selected':''}>High</option>
       </select></label>`,
-      isAdmin() ? `<label class="field">Cost (R)<input name="cost" type="number" min="0" value="${m.cost}"></label>` : `<span></span>`
+      `<label class="field">Cost (R)<input name="cost" type="number" min="0" value="${m.cost}"></label>`
     )}
     ${isAdmin() ? `<label class="field">Billing status<select name="billing">
       <option value="none" ${billingOf(m)==='none'?'selected':''}>Not billed</option>
@@ -2610,14 +2610,14 @@ function renderMaintenanceTasks(){
       ${BILLING_STAGES.map(b=>`<button type="button" class="subtab ${billing===b.id?'active':''}" data-action="billing-tab" data-billing="${b.id}">${b.label}<span class="cnt">${billingCount(b.id)}</span></button>`).join('')}
       <button type="button" class="subtab ${billing==='none'?'active':''}" data-action="billing-tab" data-billing="none">Not billed<span class="cnt">${billingCount('none')}</span></button>
     </div>` : '';
-  const colspan = admin ? 9 : 7;
+  const colspan = admin ? 9 : 8;
 
   return `
-    ${admin ? `<div class="cost-total-bar">
+    <div class="cost-total-bar">
       <div class="ctb-item"><div class="label">Open work cost</div><div class="value">${fmtCurrency(openCost)}</div></div>
       <div class="ctb-item"><div class="label">All-time recorded cost</div><div class="value">${fmtCurrency(totalCost)}</div></div>
-      <div class="ctb-item"><div class="label">Invoiced, unpaid</div><div class="value">${fmtCurrency(invoicedUnpaid)}</div></div>
-    </div>` : ''}
+      ${admin ? `<div class="ctb-item"><div class="label">Invoiced, unpaid</div><div class="value">${fmtCurrency(invoicedUnpaid)}</div></div>` : ''}
+    </div>
     ${billingTabs}
     <div class="toolbar">
       <div class="filters">
@@ -2644,7 +2644,7 @@ function renderMaintenanceTasks(){
     <div class="table-wrap">
       <table>
         <thead><tr>
-          <th>Task</th><th>Vessel</th><th>Type</th><th>Due</th><th>Priority</th>${admin?'<th class="num">Cost</th>':''}<th>Status</th>${admin?'<th>Billing</th>':''}<th></th>
+          <th>Task</th><th>Vessel</th><th>Type</th><th>Due</th><th>Priority</th><th class="num">Cost</th><th>Status</th>${admin?'<th>Billing</th>':''}<th></th>
         </tr></thead>
         <tbody>
           ${rows.length===0 ? `<tr><td colspan="${colspan}"><div class="empty-note">No tasks match these filters.</div></td></tr>` : rows.map(m=>{
@@ -2660,7 +2660,7 @@ function renderMaintenanceTasks(){
               <td style="text-transform:capitalize;">${m.category}</td>
               <td>${fmtDate(m.dueDate)}</td>
               <td style="text-transform:capitalize;">${m.priority}</td>
-              ${admin ? `<td class="num">${fmtCurrency(m.cost)}</td>` : ''}
+              <td class="num">${fmtCurrency(m.cost)}</td>
               <td><span class="stamp ${maintStatus(m)}">${stampLabel(maintStatus(m))}</span></td>
               ${admin ? `<td>${billingOf(m)==='none' ? '<span style="color:var(--ink-soft);">—</span>' : `<span class="stamp bill-${billingOf(m)}">${billingLabel(billingOf(m))}</span>`}</td>` : ''}
               <td style="white-space:nowrap;">
@@ -2824,13 +2824,13 @@ function maintenanceForm(m){
         <option value="high" ${m.priority==='high'?'selected':''}>High</option>
       </select></label>`
     )}
-    ${isAdmin() ? fieldRow(
+    ${fieldRow(
       `<label class="field">Estimated / actual cost (R)<input name="cost" type="number" min="0" value="${m.cost}"></label>`,
-      `<label class="field">Billing status<select name="billing">
+      isAdmin() ? `<label class="field">Billing status<select name="billing">
         <option value="none" ${billingOf(m)==='none'?'selected':''}>Not billed</option>
         ${BILLING_STAGES.map(b=>`<option value="${b.id}" ${billingOf(m)===b.id?'selected':''}>${b.label}</option>`).join('')}
-      </select></label>`
-    ) : ''}
+      </select></label>` : `<span></span>`
+    )}
   `;
 }
 
