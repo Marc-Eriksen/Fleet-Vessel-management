@@ -1086,8 +1086,8 @@ function maintStatus(m){
 function qualStatus(expiry){
   const dd = daysUntil(expiry);
   if(dd < 0) return 'expired';
-  if(dd <= 7) return 'red-alert';
-  if(dd <= 30) return 'advisory';
+  if(dd <= 30) return 'red-alert';
+  if(dd <= 60) return 'advisory';
   return 'valid';
 }
 function stampLabel(s){
@@ -1196,8 +1196,8 @@ function renderDashboard(){
       <div class="kpi ${overdue>0?'alert':''}"><div class="label">Overdue maintenance</div><div class="value">${overdue}</div></div>
       <div class="kpi ${dueSoon>0?'warn':''}"><div class="label">Due within 14 days</div><div class="value">${dueSoon}</div></div>
       <div class="kpi ${qualsExpired>0?'alert':''}"><div class="label">Quals expired</div><div class="value">${qualsExpired}</div></div>
-      <div class="kpi ${qualsRedAlert>0?'alert':''}"><div class="label">Quals red alert (≤7 days)</div><div class="value">${qualsRedAlert}</div></div>
-      <div class="kpi ${qualsAdvisory>0?'warn':''}"><div class="label">Quals advisory (≤30 days)</div><div class="value">${qualsAdvisory}</div></div>
+      <div class="kpi ${qualsRedAlert>0?'alert':''}"><div class="label">Quals red alert (≤30 days)</div><div class="value">${qualsRedAlert}</div></div>
+      <div class="kpi ${qualsAdvisory>0?'warn':''}"><div class="label">Quals advisory (≤60 days)</div><div class="value">${qualsAdvisory}</div></div>
       <div class="kpi ${clOutstanding>0?'warn':''}"><div class="label">Checklists due</div><div class="value">${clOutstanding}</div></div>
       <div class="kpi ${lowStock>0?'alert':''}"><div class="label">Low stock items</div><div class="value">${lowStock}</div></div>
       <div class="kpi ${svcAlerts.some(a=>a.d.status==='critical')?'alert':svcAlerts.length?'warn':''}"><div class="label">Service items due</div><div class="value">${svcAlerts.length}</div></div>
@@ -3062,7 +3062,7 @@ function renderCrew(){
     <div class="toolbar">
       <div>
         <h2 class="section-title">Crew qualifications</h2>
-        <p class="section-sub" style="margin-bottom:0;">Certification status for all crew, colour-coded by expiry. Advisory at 30 days, red alert at 7 days.</p>
+        <p class="section-sub" style="margin-bottom:0;">Certification status for all crew, colour-coded by expiry. Advisory at 60 days, red alert at 30 days.</p>
       </div>
       <button class="btn primary" data-action="add-crew">+ Add crew member</button>
     </div>
