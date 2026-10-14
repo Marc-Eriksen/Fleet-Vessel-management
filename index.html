@@ -280,6 +280,13 @@
   .subtab .cnt{opacity:0.7; font-weight:700; margin-left:5px;}
 
   /* ===== Checklists ===== */
+  .fin-panel{background:var(--white-card); border:1px solid var(--border); border-radius:12px; padding:16px 16px 14px; margin-bottom:18px; max-width:640px;}
+  .fin-hint{font-size:12px; color:var(--ink-soft); margin:-4px 0 12px;}
+  .fin-share{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:0 0 14px;}
+  .fin-email{display:flex; gap:8px; flex:1 1 320px; min-width:0;}
+  .fin-email input{flex:1 1 auto; min-width:0; padding:6px 10px; font-size:13px;}
+  .rfq-item-row{display:grid; grid-template-columns:1fr 76px 90px auto; gap:6px; align-items:center; margin-bottom:6px;}
+  .rfq-item-row input{min-width:0; width:100%;}
   .cl-item-row{display:grid; grid-template-columns:1fr 96px 62px 56px 56px auto; gap:6px; align-items:center; margin-bottom:6px;}
   .cl-item-row input, .cl-item-row select{min-width:0; width:100%;}
   .cl-item-row{align-items:end;}
@@ -371,6 +378,9 @@
     .card-stats{flex-wrap:wrap; row-gap:10px;}
 
     .field-row{grid-template-columns:1fr;}
+    .rfq-item-row{grid-template-columns:1fr 1fr auto; padding-bottom:8px; margin-bottom:8px; border-bottom:1px dashed var(--paper-line);}
+    .rfq-item-row [name=rfqItemDesc]{grid-column:1 / -1;}
+    .fin-email{flex-direction:column;}
     .cl-item-row{grid-template-columns:1fr 1fr 1fr; padding-bottom:8px; margin-bottom:8px; border-bottom:1px dashed var(--paper-line);}
     .cl-item-row .cl-label{grid-column:1 / -1;}
     .cl-item-row.task .cl-stock-only, .cl-item-row.heading .cl-stock-only{display:none;}
@@ -459,6 +469,8 @@ let state = {
   hoursVesselId: null,
   serviceLog: [],
   allServiceLog: [],
+  rfqs: [],
+  allRfqs: [],
   maintView: 'tasks',
   svcVesselId: null,
   svcMeterId: null,
@@ -468,7 +480,9 @@ let state = {
   filters: { vessel:'all', category:'all', status:'all', billing:'all' },
   clView: { vesselId:null, checklistId:null, period:null },
   clDirty: false,
-  clSaved: false
+  clSaved: false,
+  fin: { view:'reports', period:'monthly', month:new Date().getMonth()+1, year:new Date().getFullYear(),
+         from:'', to:'', vessel:'all', report:null, emailTo:'' }
 };
 
 /* Auth session: null (signed out) | { role:'admin', uid, email } | { role:'owner', companyId, uid, email } */
@@ -579,7 +593,8 @@ const ADMIN_PHONE = ""; /* e.g. "+27820000000" — used for WhatsApp links, digi
 const AA_RATE_PER_KM = 3.75; /* default AA (Automobile Association) cost-per-km rate for contractor travel payments (GWM P-Series) — update as AA rates change; editable per payment */
 /* Collections an owner/operator account may read; everything else under oceanhub/data
    (contractors) is admin-only in the database rules. */
-const OWNER_KEYS = ['vessels','maintenance','crew','companies','checklists','checklistRuns','hourReadings','serviceLog'];
+const OWNER_KEYS = ['vessels','maintenance','crew','companies','checklists','checklistRuns','hourReadings','serviceLog','rfqs'];
+const OPTIONAL_OWNER_KEYS = ['rfqs']; /* a read error here (e.g. rules not deployed yet) loads as empty instead of failing sign-in */
 let fbInitialized = false;
 
 function isFirebaseConfigured(){
@@ -743,6 +758,7 @@ function applyScoping(){
   state.checklistRuns = state.allChecklistRuns.filter(r => visible.has(r.vesselId));
   state.hourReadings = state.allHourReadings.filter(r => visible.has(r.vesselId));
   state.serviceLog = state.allServiceLog.filter(s => visible.has(s.vesselId));
+  state.rfqs = isAdmin() ? state.allRfqs : state.allRfqs.filter(r => visible.has(r.vesselId));
 }
 
 function asArray(v){
@@ -760,6 +776,7 @@ function normalizeKey(key, raw){
   if(key==='checklists') return asArray(raw).map(c=>({ ...c, vesselIds: asArray(c.vesselIds), items: asArray(c.items) }));
   if(key==='checklistRuns') return asArray(raw).map(r=>({ ...r, entries: asArray(r.entries) }));
   if(key==='hourReadings') return asArray(raw).map(r=>({ ...r, readings: asArray(r.readings) }));
+  if(key==='rfqs') return asArray(raw).map(r=>({ ...r, items: asArray(r.items) }));
   return asArray(raw);
 }
 
@@ -773,6 +790,7 @@ function applyRemoteData(val){
   state.allChecklistRuns = normalizeKey('checklistRuns', val.checklistRuns);
   state.allHourReadings = normalizeKey('hourReadings', val.hourReadings);
   state.allServiceLog = normalizeKey('serviceLog', val.serviceLog);
+  state.allRfqs = normalizeKey('rfqs', val.rfqs);
   applyScoping();
 }
 
@@ -815,7 +833,7 @@ function loadState(){
             afterData();
           };
           dataListeners.push({ ref, fn });
-          ref.on('value', fn, onFirstError);
+          ref.on('value', fn, err => OPTIONAL_OWNER_KEYS.includes(key) ? fn({ val:()=>null }) : onFirstError(err));
         });
       }
     }catch(e){
@@ -1142,6 +1160,7 @@ const TABS = [
   { id:'hours', label:'Hours', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5"/><path d="M9 2h6"/></svg>' },
   { id:'maintenance', label:'Maintenance', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a4 4 0 1 0-5.4 5.4L2 19v3h3l7.3-7.3a4 4 0 0 0 5.4-5.4l-2.8 2.8-2-2z"/></svg>' },
   { id:'checklists', label:'Checklists', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 3v2h6V3"/><path d="m9 11 1.5 1.5L13.5 9.5"/><path d="M9 16h6"/></svg>' },
+  { id:'finance', label:'Finance', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 6-6"/><path d="M16 8h4v4"/></svg>' },
   { id:'crew', label:'Crew', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20c0-3.5 3-6 6.5-6s6.5 2.5 6.5 6"/><circle cx="18" cy="8" r="2.6"/><path d="M15.5 14.3c2.9.4 5 2.6 5 5.7"/></svg>' },
 ];
 const ADMIN_TABS = [
@@ -2606,8 +2625,6 @@ function renderMaintenanceTasks(){
 
   rows.sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));
 
-  const totalCost = allTasks.reduce((s,m)=>s+Number(m.cost||0),0);
-  const openCost = allTasks.filter(m=>m.status!=='completed').reduce((s,m)=>s+Number(m.cost||0),0);
   const invoicedUnpaid = allTasks.filter(m=>billingOf(m)==='invoiced').reduce((s,m)=>s+Number(m.cost||0),0);
 
   const billingTabs = admin ? `
@@ -2619,11 +2636,9 @@ function renderMaintenanceTasks(){
   const colspan = admin ? 9 : 8;
 
   return `
-    <div class="cost-total-bar">
-      <div class="ctb-item"><div class="label">Open work cost</div><div class="value">${fmtCurrency(openCost)}</div></div>
-      <div class="ctb-item"><div class="label">All-time recorded cost</div><div class="value">${fmtCurrency(totalCost)}</div></div>
-      ${admin ? `<div class="ctb-item"><div class="label">Invoiced, unpaid</div><div class="value">${fmtCurrency(invoicedUnpaid)}</div></div>` : ''}
-    </div>
+    ${admin ? `<div class="cost-total-bar">
+      <div class="ctb-item"><div class="label">Invoiced, unpaid</div><div class="value">${fmtCurrency(invoicedUnpaid)}</div></div>
+    </div>` : ''}
     ${billingTabs}
     <div class="toolbar">
       <div class="filters">
@@ -2680,6 +2695,537 @@ function renderMaintenanceTasks(){
       </table>
     </div>
   `;
+}
+
+/* ============================= FINANCE ============================= */
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const FIN_PERIODS = [
+  { id:'monthly', label:'Monthly', title:'Monthly cost report' },
+  { id:'yearly', label:'Yearly', title:'Yearly cost report' },
+  { id:'all', label:'All time', title:'All-time cost report' },
+  { id:'open', label:'Open work', title:'Open work cost report' }
+];
+const RFQ_STATUSES = [
+  { id:'draft', label:'Draft', stamp:'upcoming' },
+  { id:'sent', label:'Sent', stamp:'due-soon' },
+  { id:'quoted', label:'Quote received', stamp:'bill-quoted' },
+  { id:'accepted', label:'Accepted', stamp:'completed' },
+  { id:'declined', label:'Declined', stamp:'overdue' }
+];
+const FIN_EMAIL_KEY = 'oceanhub_fin_email';
+try{ state.fin.emailTo = localStorage.getItem(FIN_EMAIL_KEY) || ''; }catch(e){}
+
+function rfqStatus(id){ return RFQ_STATUSES.find(s=>s.id===id) || RFQ_STATUSES[0]; }
+function fileSlug(s){ return String(s||'').replace(/[^a-z0-9]+/gi,'-').replace(/^-|-$/g,'') || 'file'; }
+
+/* The date a task's cost falls on: when it was completed, or when it's due if still open. */
+function taskCostDate(m){ return m.status==='completed' ? (m.completedDate || m.dueDate || '') : (m.dueDate || ''); }
+
+/* A year that starts on any day: the day before the same date a year later. */
+function yearEndFor(fromIso){
+  const [y, m, d] = fromIso.split('-').map(Number);
+  return localISODate(new Date(y + 1, m - 1, d - 1));
+}
+function defaultYearRange(){
+  const y = new Date().getFullYear();
+  return { from:`${y}-01-01`, to:`${y}-12-31` };
+}
+
+/* Everything a cost report shows, for a saved set of report settings. */
+function costReportData(p){
+  let tasks = getAllMaintenanceTasks();
+  if(p.vessel !== 'all') tasks = tasks.filter(m=>m.vesselId===p.vessel);
+  let from = '', to = '', periodLabel = '';
+  if(p.period === 'monthly'){
+    const mm = String(p.month).padStart(2,'0');
+    from = `${p.year}-${mm}-01`;
+    to = `${p.year}-${mm}-${String(new Date(p.year, p.month, 0).getDate()).padStart(2,'0')}`;
+    periodLabel = `${MONTH_NAMES[p.month-1]} ${p.year}`;
+  } else if(p.period === 'yearly'){
+    from = p.from; to = p.to;
+    periodLabel = `${fmtDate(from)} to ${fmtDate(to)}`;
+  } else if(p.period === 'open'){
+    periodLabel = `Open as of ${fmtDate(localISODate(new Date()))}`;
+  } else {
+    periodLabel = `All recorded work to ${fmtDate(localISODate(new Date()))}`;
+  }
+  if(p.period === 'open') tasks = tasks.filter(m=>m.status!=='completed');
+  if(from) tasks = tasks.filter(m=>{ const d = taskCostDate(m); return d && d >= from && d <= to; });
+  const rows = tasks.map(m=>({
+    date: taskCostDate(m), title: m.title || '', description: m.description || '',
+    vessel: vesselName(m.vesselId), tender: m._tenderName || '', type: m.category || '',
+    status: stampLabel(maintStatus(m)), statusId: maintStatus(m), billing: billingLabel(billingOf(m)), cost: Number(m.cost)||0
+  })).sort((a,b)=> (a.date||'').localeCompare(b.date||''));
+  const total = rows.reduce((s,r)=>s+r.cost,0);
+  const openTotal = rows.filter(r=>r.statusId!=='completed').reduce((s,r)=>s+r.cost,0);
+  const byVessel = {};
+  rows.forEach(r=>{ byVessel[r.vessel] = byVessel[r.vessel] || { count:0, cost:0 }; byVessel[r.vessel].count++; byVessel[r.vessel].cost += r.cost; });
+  const title = (FIN_PERIODS.find(x=>x.id===p.period) || FIN_PERIODS[0]).title;
+  return { title, periodLabel, vesselLabel: vesselName(p.vessel), rows, total, openTotal, completedTotal: total - openTotal, byVessel };
+}
+
+function renderFinance(){
+  const f = state.fin;
+  return `
+    <h2 class="section-title">Finance</h2>
+    <p class="section-sub">Maintenance cost reports and requests for quote. Everything here can be saved as PDF or CSV, or emailed.</p>
+    <div class="subtabs">
+      <button type="button" class="subtab ${f.view!=='rfq'?'active':''}" data-action="fin-view" data-view="reports">Cost reports</button>
+      <button type="button" class="subtab ${f.view==='rfq'?'active':''}" data-action="fin-view" data-view="rfq">Requests for quote${state.rfqs.length?`<span class="cnt">${state.rfqs.length}</span>`:''}</button>
+    </div>
+    ${f.view==='rfq' ? renderRfqs() : renderCostReports()}
+  `;
+}
+
+function renderCostReports(){
+  const f = state.fin;
+  if(!f.from || !f.to) Object.assign(f, defaultYearRange());
+  const years = new Set([new Date().getFullYear()]);
+  getAllMaintenanceTasks().forEach(m=>{ const y = Number(taskCostDate(m).slice(0,4)); if(y) years.add(y); });
+  const yearOpts = [...years].sort((a,b)=>b-a);
+  const periodFields = f.period==='monthly' ? fieldRow(
+      `<label class="field">Month<select id="finMonth">${MONTH_NAMES.map((n,i)=>`<option value="${i+1}" ${f.month===i+1?'selected':''}>${n}</option>`).join('')}</select></label>`,
+      `<label class="field">Year<select id="finYear">${yearOpts.map(y=>`<option value="${y}" ${f.year===y?'selected':''}>${y}</option>`).join('')}</select></label>`)
+    : f.period==='yearly' ? fieldRow(
+      `<label class="field" id="finFromField">Year starts${dateField('finFrom', f.from, { required:true })}</label>`,
+      `<label class="field" id="finToField">Year ends${dateField('finTo', f.to, { required:true })}</label>`)
+    : '';
+  const r = f.report ? costReportData(f.report) : null;
+  const admin = isAdmin();
+  return `
+    <div class="fin-panel">
+      ${fieldRow(
+        `<label class="field">Report<select id="finPeriod">${FIN_PERIODS.map(x=>`<option value="${x.id}" ${f.period===x.id?'selected':''}>${x.label}</option>`).join('')}</select></label>`,
+        `<label class="field">Vessel<select id="finVessel"><option value="all">All vessels</option>${state.vessels.map(v=>`<option value="${v.id}" ${f.vessel===v.id?'selected':''}>${esc(v.name)}</option>`).join('')}</select></label>`
+      )}
+      ${periodFields}
+      ${f.period==='yearly' ? '<p class="fin-hint">Pick any start date, such as the first day of your financial year. The end date fills in a year later and can be changed.</p>' : ''}
+      ${f.period==='open' ? '<p class="fin-hint">Every task not yet completed, whatever its due date.</p>' : ''}
+      <button type="button" class="btn primary" data-action="fin-generate">Generate report</button>
+    </div>
+    ${!r ? '<div class="empty-note">Choose a report and press Generate.</div>' : `
+    <div class="toolbar" style="margin-top:18px;">
+      <div>
+        <h3 style="margin:0;">${esc(r.title)}</h3>
+        <div class="section-sub" style="margin:2px 0 0;">${esc(r.periodLabel)} · ${esc(r.vesselLabel)}</div>
+      </div>
+    </div>
+    <div class="cost-total-bar">
+      <div class="ctb-item"><div class="label">Total cost</div><div class="value">${fmtCurrency(r.total)}</div></div>
+      ${f.report.period!=='open' ? `<div class="ctb-item"><div class="label">Completed</div><div class="value">${fmtCurrency(r.completedTotal)}</div></div>
+      <div class="ctb-item"><div class="label">Still open</div><div class="value">${fmtCurrency(r.openTotal)}</div></div>` : ''}
+      <div class="ctb-item"><div class="label">Tasks</div><div class="value">${r.rows.length}</div></div>
+    </div>
+    ${renderFinShare('report')}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Date</th><th>Task</th><th>Vessel</th><th>Type</th><th>Status</th>${admin?'<th>Billing</th>':''}<th class="num">Cost</th></tr></thead>
+        <tbody>
+          ${r.rows.length===0 ? `<tr><td colspan="${admin?7:6}"><div class="empty-note">No maintenance costs in this period.</div></td></tr>` : r.rows.map(x=>`
+            <tr>
+              <td>${fmtDate(x.date)}</td>
+              <td><b>${esc(x.title)}</b>${x.description?`<div style="color:var(--ink-soft); font-size:11.5px; margin-top:2px;">${esc(x.description)}</div>`:''}</td>
+              <td>${esc(x.vessel)}${x.tender?` <span style="color:var(--ink-soft); font-size:11px;">— ${esc(x.tender)} (tender)</span>`:''}</td>
+              <td style="text-transform:capitalize;">${esc(x.type)}</td>
+              <td><span class="stamp ${x.statusId}">${esc(x.status)}</span></td>
+              ${admin?`<td>${esc(x.billing)}</td>`:''}
+              <td class="num">${fmtCurrency(x.cost)}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    ${Object.keys(r.byVessel).length > 1 ? `
+    <div class="detail-section">
+      <h4>By vessel</h4>
+      ${Object.entries(r.byVessel).map(([name, v])=>`<div class="mini-row"><span>${esc(name)} <span style="color:var(--ink-soft);">(${v.count} task${v.count===1?'':'s'})</span></span><b>${fmtCurrency(v.cost)}</b></div>`).join('')}
+    </div>` : ''}
+    `}
+  `;
+}
+
+/* PDF / CSV / email buttons with the recipient box. `kind` is 'report' or an RFQ id. */
+function renderFinShare(kind){
+  return `
+    <div class="fin-share">
+      <button type="button" class="btn small" data-action="fin-pdf" data-kind="${esc(kind)}">Save PDF</button>
+      <button type="button" class="btn small" data-action="fin-csv" data-kind="${esc(kind)}">Save CSV</button>
+      <span class="fin-email">
+        <input type="email" id="finEmailTo" placeholder="Email to, e.g. accounts@example.com" value="${esc(state.fin.emailTo)}" autocapitalize="none" autocorrect="off" spellcheck="false">
+        <button type="button" class="btn small primary" data-action="fin-email" data-kind="${esc(kind)}">Email PDF + CSV</button>
+      </span>
+    </div>`;
+}
+
+function renderRfqs(){
+  const rows = state.rfqs.slice().sort((a,b)=> (b.issueDate||'').localeCompare(a.issueDate||'') || (b.number||'').localeCompare(a.number||''));
+  return `
+    <div class="toolbar">
+      <p class="section-sub" style="margin:0;">Ask suppliers and contractors to quote for parts or work. Each request can be saved as PDF or CSV and emailed to the supplier.</p>
+      <button class="btn primary" data-action="add-rfq">+ New RFQ</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>RFQ</th><th>Request</th><th>Vessel</th><th>Supplier</th><th>Quote due</th><th>Status</th><th class="num">Quoted</th><th></th></tr></thead>
+        <tbody>
+          ${rows.length===0 ? `<tr><td colspan="8"><div class="empty-note">No requests for quote yet.</div></td></tr>` : rows.map(q=>{
+            const st = rfqStatus(q.status);
+            return `
+            <tr>
+              <td style="white-space:nowrap;"><b>${esc(q.number)}</b><div style="color:var(--ink-soft); font-size:11px;">${fmtDate(q.issueDate)}</div></td>
+              <td><b>${esc(q.title)}</b><div style="color:var(--ink-soft); font-size:11.5px;">${(q.items||[]).length} item${(q.items||[]).length===1?'':'s'}</div></td>
+              <td>${q.vesselId ? esc(vesselName(q.vesselId)) : '<span style="color:var(--ink-soft);">—</span>'}</td>
+              <td>${esc(q.supplierName||'—')}${q.supplierEmail?`<div style="color:var(--ink-soft); font-size:11.5px;">${esc(q.supplierEmail)}</div>`:''}</td>
+              <td>${fmtDate(q.dueDate)}</td>
+              <td><span class="stamp ${st.stamp}">${st.label}</span></td>
+              <td class="num">${q.quotedAmount!=='' && q.quotedAmount!=null ? fmtCurrency(q.quotedAmount) : '<span style="color:var(--ink-soft);">—</span>'}</td>
+              <td style="white-space:nowrap;">
+                <button class="btn small ghost" data-action="edit-rfq" data-id="${q.id}">Edit</button>
+                <button class="btn small ghost" data-action="fin-pdf" data-kind="${q.id}">PDF</button>
+                <button class="btn small ghost" data-action="fin-csv" data-kind="${q.id}">CSV</button>
+                <button class="btn small" data-action="fin-email" data-kind="${q.id}">Email</button>
+                <button class="btn small danger" data-action="delete-rfq" data-id="${q.id}">Delete</button>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function rfqItemRow(it){
+  it = it || {};
+  return `
+    <div class="rfq-item-row">
+      <input name="rfqItemDesc" value="${esc(it.description||'')}" placeholder="e.g. Impeller kit, Yanmar 4JH">
+      <input name="rfqItemQty" type="number" min="0" step="any" value="${it.qty==null?'':esc(it.qty)}" placeholder="Qty">
+      <input name="rfqItemUnit" value="${esc(it.unit||'')}" placeholder="Unit">
+      <button type="button" class="btn small danger" data-remove-rfq-item title="Remove">&times;</button>
+    </div>`;
+}
+
+function rfqForm(q){
+  const today = localISODate(new Date());
+  q = q || { title:'', vesselId: state.vessels[0]?.id || '', supplierName:'', supplierContact:'', supplierEmail:'', supplierPhone:'',
+             issueDate: today, dueDate: isoAddDays(today, 7), requiredBy:'', location:'', notes:'', status:'draft', quotedAmount:'', items:[{ qty:1 }] };
+  const admin = isAdmin();
+  const names = admin ? [...new Set(state.contractors.map(c=>c.name).filter(Boolean))] : [];
+  return `
+    ${q.number ? `<p class="section-sub" style="margin-top:-6px;">${esc(q.number)}</p>` : ''}
+    <label class="field">What is the quote for?<input name="title" value="${esc(q.title)}" placeholder="e.g. Annual antifouling and anode replacement" required></label>
+    <label class="field">Vessel<select name="vesselId">
+      ${admin ? `<option value="" ${!q.vesselId?'selected':''}>No specific vessel</option>` : ''}
+      ${state.vessels.map(v=>`<option value="${v.id}" ${q.vesselId===v.id?'selected':''}>${esc(v.name)}</option>`).join('')}
+    </select></label>
+
+    <div class="detail-section" style="margin-top:4px;"><h4>Supplier</h4></div>
+    ${fieldRow(
+      `<label class="field">Supplier / contractor<input name="supplierName" value="${esc(q.supplierName)}" ${names.length?'list="rfqSupplierNames"':''} autocomplete="off" required></label>`,
+      `<label class="field">Contact person<input name="supplierContact" value="${esc(q.supplierContact||'')}"></label>`
+    )}
+    ${names.length ? `<datalist id="rfqSupplierNames">${names.map(n=>`<option value="${esc(n)}">`).join('')}</datalist>` : ''}
+    ${fieldRow(
+      `<label class="field">Send to (email)<input name="supplierEmail" type="email" value="${esc(q.supplierEmail||'')}" autocapitalize="none" autocorrect="off" spellcheck="false"></label>`,
+      `<label class="field">Phone<input name="supplierPhone" value="${esc(q.supplierPhone||'')}"></label>`
+    )}
+
+    <div class="detail-section" style="margin-top:4px;"><h4>Items / work</h4></div>
+    <div id="rfqItems">${(q.items||[]).map(rfqItemRow).join('')}</div>
+    <button type="button" class="btn small" id="addRfqItem" style="margin:4px 0 14px;">+ Add item</button>
+
+    ${fieldRow(
+      `<label class="field">Date issued${dateField('issueDate', q.issueDate, { required:true })}</label>`,
+      `<label class="field">Quote due by${dateField('dueDate', q.dueDate)}</label>`
+    )}
+    ${fieldRow(
+      `<label class="field">Parts / work needed by${dateField('requiredBy', q.requiredBy)}</label>`,
+      `<label class="field">Delivery / work location<input name="location" value="${esc(q.location||'')}" placeholder="e.g. V&amp;A Waterfront, berth 12"></label>`
+    )}
+    <label class="field">Notes / terms<textarea name="notes" rows="3" placeholder="e.g. Please include delivery, VAT and lead time">${esc(q.notes||'')}</textarea></label>
+    ${fieldRow(
+      `<label class="field">Status<select name="status">${RFQ_STATUSES.map(s=>`<option value="${s.id}" ${q.status===s.id?'selected':''}>${s.label}</option>`).join('')}</select></label>`,
+      `<label class="field">Quoted amount (R)<input name="quotedAmount" type="number" min="0" step="0.01" value="${q.quotedAmount==null?'':esc(q.quotedAmount)}" placeholder="When the quote comes in"></label>`
+    )}
+  `;
+}
+
+function wireRfqForm(){
+  const list = document.getElementById('rfqItems');
+  if(!list) return;
+  const wireRow = row => row.querySelector('[data-remove-rfq-item]').addEventListener('click', ()=> row.remove());
+  list.querySelectorAll('.rfq-item-row').forEach(wireRow);
+  document.getElementById('addRfqItem').addEventListener('click', ()=>{
+    const tmp = document.createElement('div');
+    tmp.innerHTML = rfqItemRow({ qty:1 });
+    const row = tmp.firstElementChild;
+    list.appendChild(row);
+    wireRow(row);
+    row.querySelector('[name="rfqItemDesc"]').focus();
+  });
+  /* picking a known contractor fills in their contact details where still blank */
+  const form = document.getElementById('modalForm');
+  const name = form && form.elements.supplierName;
+  if(name) name.addEventListener('input', ()=>{
+    const key = name.value.trim().toLowerCase();
+    const ct = key && state.contractors.find(c=>(c.name||'').trim().toLowerCase()===key);
+    if(!ct) return;
+    [['supplierContact','contactName'],['supplierEmail','email'],['supplierPhone','phone']].forEach(([field, src])=>{
+      if(!form.elements[field].value && ct[src]) form.elements[field].value = ct[src];
+    });
+  });
+}
+
+/* Next number in the RFQ-<year>-NNN sequence, worked out from the server copy at save time. */
+function nextRfqNumber(all, issueDate){
+  const y = (issueDate || localISODate(new Date())).slice(0,4);
+  const used = all.map(r=>(/^RFQ-(\d{4})-(\d+)$/.exec(r.number||'')||[])).filter(m=>m[1]===y).map(m=>Number(m[2]));
+  return `RFQ-${y}-${String((used.length ? Math.max(...used) : 0) + 1).padStart(3,'0')}`;
+}
+
+/* Reads the report settings off the page into state, so a live refresh keeps them. */
+function captureFinControls(){
+  const f = state.fin;
+  const val = id => { const el = document.getElementById(id); return el ? el.value : null; };
+  if(val('finPeriod') != null) f.period = val('finPeriod');
+  if(val('finVessel') != null) f.vessel = val('finVessel');
+  if(val('finMonth') != null) f.month = Number(val('finMonth'));
+  if(val('finYear') != null) f.year = Number(val('finYear'));
+  const from = document.querySelector('input[type=hidden][name=finFrom]');
+  const to = document.querySelector('input[type=hidden][name=finTo]');
+  if(from) f.from = from.value;
+  if(to) f.to = to.value;
+}
+
+function attachFinancePageEvents(){
+  if(state.activeTab !== 'finance') return;
+  ['finPeriod','finVessel','finMonth','finYear'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.addEventListener('change', ()=>{ captureFinControls(); if(id==='finPeriod') render(); });
+  });
+  /* a new start date moves the end date to a year later */
+  const fromText = document.querySelector('#finFromField .df-text');
+  if(fromText) fromText.addEventListener('input', ()=> setTimeout(()=>{
+    const from = document.querySelector('input[type=hidden][name=finFrom]').value;
+    if(!from) return;
+    const end = yearEndFor(from);
+    const field = document.querySelector('#finToField .date-field');
+    field.querySelector('.df-text').value = fmtDate(end);
+    field.querySelector('.df-native').value = end;
+    field.querySelector('input[type=hidden]').value = end;
+    field.querySelector('.df-text').setCustomValidity('');
+    captureFinControls();
+  }, 0));
+  const toText = document.querySelector('#finToField .df-text');
+  if(toText) toText.addEventListener('input', ()=> setTimeout(captureFinControls, 0));
+  const email = document.getElementById('finEmailTo');
+  if(email) email.addEventListener('input', ()=>{
+    state.fin.emailTo = email.value.trim();
+    try{ localStorage.setItem(FIN_EMAIL_KEY, state.fin.emailTo); }catch(e){}
+  });
+}
+
+function generateCostReport(){
+  captureFinControls();
+  const f = state.fin;
+  if(f.period === 'yearly'){
+    if(!f.from || !f.to){ alert('Choose the start and end dates of the year.'); return; }
+    if(f.from > f.to){ alert('The year has to end after it starts.'); return; }
+  }
+  f.report = { period:f.period, vessel:f.vessel, month:f.month, year:f.year, from:f.from, to:f.to };
+  render();
+}
+
+/* ---------- PDF / CSV builders ---------- */
+function newPdf(title, lines){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  doc.setFont('helvetica','bold'); doc.setFontSize(16);
+  doc.text('OCEANHUB — Vessel Manager', 14, 18);
+  doc.setFontSize(12);
+  doc.text(title, 14, 26);
+  doc.setFont('helvetica','normal'); doc.setFontSize(10);
+  let y = 33;
+  lines.filter(Boolean).forEach(l=>{ const w = doc.splitTextToSize(l, 182); doc.text(w, 14, y); y += w.length * 5.5; });
+  return { doc, y: y + 3 };
+}
+/* Draws a table from x=14 across 182mm, wrapping cells and repeating the header on new pages. */
+function pdfTable(doc, y, cols, rows, opts){
+  opts = opts || {};
+  const header = ()=>{
+    doc.setFont('helvetica','bold'); doc.setFontSize(9);
+    let x = 14;
+    cols.forEach(c=>{ doc.text(c.label, c.align==='right' ? x + c.w - 1 : x, y, c.align==='right' ? { align:'right' } : undefined); x += c.w; });
+    y += 2; doc.line(14, y, 196, y); y += 5;
+    doc.setFont('helvetica','normal');
+  };
+  header();
+  rows.forEach((row, ri)=>{
+    const cells = row.map((v, i)=> doc.splitTextToSize(String(v==null?'':v), cols[i].w - 2));
+    const h = Math.max(...cells.map(c=>c.length)) * 4.2 + 2;
+    if(y + h > 280){ doc.addPage(); y = 20; header(); }
+    if(opts.boldRows && opts.boldRows.includes(ri)) doc.setFont('helvetica','bold');
+    let x = 14;
+    cells.forEach((c, i)=>{ const col = cols[i]; doc.text(c, col.align==='right' ? x + col.w - 1 : x, y, col.align==='right' ? { align:'right' } : undefined); x += col.w; });
+    doc.setFont('helvetica','normal');
+    y += h;
+  });
+  return y;
+}
+function pdfFooter(doc){
+  const pageCount = doc.getNumberOfPages();
+  for(let i = 1; i <= pageCount; i++){
+    doc.setPage(i);
+    doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(120);
+    doc.text(`Sent with OCEANHUB Vessel Manager · page ${i} of ${pageCount}`, 105, 290, { align:'center' });
+  }
+  doc.setTextColor(0);
+}
+/* Spreadsheet-safe CSV: quoted where needed, and text that starts like a formula is
+   prefixed so Excel shows it rather than running it. */
+function toCsv(rows){
+  return rows.map(r=>r.map(c=>{
+    if(typeof c === 'number') return String(c);
+    let s = c==null ? '' : String(c);
+    if(/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+  }).join(',')).join('\r\n');
+}
+function csvFile(rows, name){ return new File(['﻿' + toCsv(rows)], name, { type:'text/csv' }); }
+function pdfFile(doc, name){ return new File([doc.output('blob')], name, { type:'application/pdf' }); }
+function downloadFile(file){
+  const url = URL.createObjectURL(file);
+  const a = document.createElement('a');
+  a.href = url; a.download = file.name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 10000);
+}
+
+function costReportFiles(){
+  const p = state.fin.report;
+  const r = costReportData(p);
+  const admin = isAdmin();
+  const stamp = localISODate(new Date());
+  const base = `${fileSlug(r.title)}-${fileSlug(p.period==='monthly' ? `${p.year}-${String(p.month).padStart(2,'0')}` : p.period==='yearly' ? `${p.from}-to-${p.to}` : stamp)}${p.vessel!=='all' ? '-' + fileSlug(r.vesselLabel) : ''}`;
+
+  const { doc, y } = newPdf(r.title, [
+    `Period: ${r.periodLabel}`, `Vessels: ${r.vesselLabel}`, `Generated: ${fmtDate(stamp)}`,
+    `Total: ${fmtCurrency(r.total)}${p.period!=='open' ? `   (completed ${fmtCurrency(r.completedTotal)}, still open ${fmtCurrency(r.openTotal)})` : ''}   ·   ${r.rows.length} task${r.rows.length===1?'':'s'}`
+  ]);
+  const cols = admin
+    ? [{label:'Date',w:20},{label:'Task',w:50},{label:'Vessel',w:30},{label:'Type',w:20},{label:'Status',w:20},{label:'Billing',w:20},{label:'Cost',w:22,align:'right'}]
+    : [{label:'Date',w:22},{label:'Task',w:62},{label:'Vessel',w:34},{label:'Type',w:22},{label:'Status',w:20},{label:'Cost',w:22,align:'right'}];
+  const body = r.rows.map(x=>[fmtDate(x.date), x.title + (x.description ? ` — ${x.description}` : ''), x.vessel + (x.tender ? ` (${x.tender})` : ''), svcCap(x.type), x.status, ...(admin?[x.billing]:[]), fmtCurrency(x.cost)]);
+  body.push([...cols.slice(0,-2).map(()=> ''), 'Total', fmtCurrency(r.total)]);
+  let yy = pdfTable(doc, y, cols, body, { boldRows:[body.length-1] });
+  if(Object.keys(r.byVessel).length > 1){
+    yy += 6;
+    if(yy > 260){ doc.addPage(); yy = 20; }
+    doc.setFont('helvetica','bold'); doc.setFontSize(11); doc.text('By vessel', 14, yy); yy += 7;
+    pdfTable(doc, yy, [{label:'Vessel',w:120},{label:'Tasks',w:30,align:'right'},{label:'Cost',w:32,align:'right'}],
+      Object.entries(r.byVessel).map(([n,v])=>[n, String(v.count), fmtCurrency(v.cost)]));
+  }
+  pdfFooter(doc);
+
+  const csv = [
+    ['Date','Task','Description','Vessel','Tender','Type','Status', ...(admin?['Billing']:[]), 'Cost (R)'],
+    ...r.rows.map(x=>[x.date, x.title, x.description, x.vessel, x.tender, x.type, x.status, ...(admin?[x.billing]:[]), Number(x.cost.toFixed(2))]),
+    ['','','','','','','', ...(admin?['']:[]), Number(r.total.toFixed(2))]
+  ];
+  csv[csv.length-1][csv[0].length-2] = 'Total';
+  return {
+    pdf: pdfFile(doc, base + '.pdf'),
+    csv: csvFile(csv, base + '.csv'),
+    subject: `${r.title} — ${r.periodLabel} — ${r.vesselLabel}`,
+    text: `${r.title} for ${r.vesselLabel}, ${r.periodLabel}: ${fmtCurrency(r.total)} across ${r.rows.length} task${r.rows.length===1?'':'s'}. PDF and CSV attached.`
+  };
+}
+
+function rfqFiles(q){
+  const vessel = q.vesselId ? vesselName(q.vesselId) : '';
+  const replyTo = session && session.email || '';
+  const { doc, y } = newPdf(`Request for quotation ${q.number}`, [
+    `Date issued: ${fmtDate(q.issueDate)}${q.dueDate ? `      Quote due by: ${fmtDate(q.dueDate)}` : ''}`,
+    q.requiredBy ? `Parts / work needed by: ${fmtDate(q.requiredBy)}` : '',
+    `To: ${q.supplierName}${q.supplierContact ? ` (attn ${q.supplierContact})` : ''}`,
+    q.supplierEmail || q.supplierPhone ? [q.supplierEmail, q.supplierPhone].filter(Boolean).join('   ') : '',
+    vessel ? `Vessel: ${vessel}` : '',
+    q.location ? `Delivery / work location: ${q.location}` : ''
+  ]);
+  let yy = y;
+  doc.setFont('helvetica','bold'); doc.setFontSize(11);
+  const t = doc.splitTextToSize(q.title, 182); doc.text(t, 14, yy); yy += t.length * 5.5 + 4;
+  yy = pdfTable(doc, yy, [{label:'#',w:10},{label:'Description',w:124},{label:'Qty',w:20},{label:'Unit',w:28}],
+    (q.items||[]).map((it,i)=>[String(i+1), it.description, it.qty==null||it.qty==='' ? '' : String(it.qty), it.unit||'']));
+  if(q.notes){
+    yy += 6; if(yy > 255){ doc.addPage(); yy = 20; }
+    doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.text('Notes / terms', 14, yy); yy += 6;
+    doc.setFont('helvetica','normal');
+    const n = doc.splitTextToSize(q.notes, 182); doc.text(n, 14, yy); yy += n.length * 5;
+  }
+  yy += 8; if(yy > 270){ doc.addPage(); yy = 20; }
+  doc.setFont('helvetica','normal'); doc.setFontSize(10);
+  doc.text(doc.splitTextToSize(`Please send your quotation${replyTo ? ` to ${replyTo}` : ''}, quoting ${q.number}${q.dueDate ? `, by ${fmtDate(q.dueDate)}` : ''}. Include VAT, delivery and lead time.`, 182), 14, yy);
+  pdfFooter(doc);
+
+  const csv = [
+    ['RFQ', q.number], ['Request', q.title], ['Date issued', q.issueDate], ['Quote due by', q.dueDate||''], ['Needed by', q.requiredBy||''],
+    ['Vessel', vessel], ['Supplier', q.supplierName], ['Contact', q.supplierContact||''], ['Email', q.supplierEmail||''], ['Phone', q.supplierPhone||''],
+    ['Location', q.location||''], ['Notes', q.notes||''], ['Status', rfqStatus(q.status).label],
+    ['Quoted amount (R)', q.quotedAmount==='' || q.quotedAmount==null ? '' : Number(q.quotedAmount)],
+    [],
+    ['#','Description','Qty','Unit'],
+    ...(q.items||[]).map((it,i)=>[i+1, it.description, it.qty==null||it.qty==='' ? '' : Number(it.qty), it.unit||''])
+  ];
+  const base = `${q.number}-${fileSlug(q.supplierName)}`;
+  return {
+    pdf: pdfFile(doc, base + '.pdf'),
+    csv: csvFile(csv, base + '.csv'),
+    subject: `Request for quotation ${q.number} — ${q.title}`,
+    text: `Good day${q.supplierContact ? ' ' + q.supplierContact : ''},\n\nPlease find attached our request for quotation ${q.number}: ${q.title}${vessel ? ` (${vessel})` : ''}.${q.dueDate ? ` We would appreciate your quote by ${fmtDate(q.dueDate)}.` : ''}\n\nKind regards`
+  };
+}
+
+/* Hands the files to the device's share sheet with them attached (most phones), copying
+   the recipient so it can be pasted into the To field. Where files can't be shared
+   (most desktop browsers) they download, and the mail app opens addressed to the
+   recipient so they can be attached. Returns false if the person cancelled. */
+async function emailFiles(files, to, subject, text){
+  if(navigator.canShare && navigator.canShare({ files })){
+    if(to && navigator.clipboard) navigator.clipboard.writeText(to).catch(()=>{});
+    try{ await navigator.share({ files, title:subject, text }); return true; }
+    catch(e){ if(e && e.name === 'AbortError') return false; /* otherwise fall through to download */ }
+  }
+  files.forEach(downloadFile);
+  window.location.href = mailtoLink(to, '', subject, `${text}\n\n(${files.map(f=>f.name).join(' and ')} downloaded to this device — please attach before sending.)`);
+  return true;
+}
+
+async function finFileAction(action, kind){
+  const rfq = kind === 'report' ? null : state.rfqs.find(q=>q.id===kind);
+  if(kind !== 'report' && !rfq) return;
+  if(kind === 'report' && !state.fin.report) return;
+  let out;
+  try{ out = rfq ? rfqFiles(rfq) : costReportFiles(); }
+  catch(e){ alert('Could not build the files. ' + (e && e.message ? e.message : '')); return; }
+  if(action === 'fin-pdf'){ downloadFile(out.pdf); return; }
+  if(action === 'fin-csv'){ downloadFile(out.csv); return; }
+
+  let to = rfq ? (rfq.supplierEmail || '') : state.fin.emailTo;
+  if(!rfq && !to){
+    const box = document.getElementById('finEmailTo');
+    alert('Enter the email address to send this report to.');
+    if(box) box.focus();
+    return;
+  }
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)){
+    if(rfq){ alert('Add the supplier\'s email address to this RFQ (Edit → Send to) first.'); return; }
+    alert('That email address doesn\'t look right.'); return;
+  }
+  const sent = await emailFiles([out.pdf, out.csv], to, out.subject, out.text);
+  if(sent && rfq && rfq.status === 'draft'){
+    await persistArray('rfqs', fresh => fresh.map(r=> r.id===rfq.id ? { ...r, status:'sent', sentDate:localISODate(new Date()) } : r));
+    render();
+  }
 }
 
 /* ============================= CREW ============================= */
@@ -3500,6 +4046,7 @@ function renderModal(){
   else if(modal.type==='contractor'){ title = modal.data ? 'Edit contractor' : 'Add contractor'; body = contractorForm(modal.data); }
   else if(modal.type==='checklist'){ title = modal.data ? 'Edit checklist' : 'New checklist'; body = checklistForm(modal.data); }
   else if(modal.type==='checklist-import'){ title = 'Import standard checklists'; body = checklistImportForm(); }
+  else if(modal.type==='rfq'){ title = modal.data ? 'Edit request for quote' : 'New request for quote'; body = rfqForm(modal.data); }
   else if(modal.type==='contractor-payment'){ title = modal.data ? 'Edit payment' : 'Add payment'; body = contractorPaymentForm(modal.data, modal.data ? null : lastTravelDefaults(modal.id)); }
 
   root.innerHTML = `
@@ -3527,6 +4074,7 @@ function attachModalEvents(){
   if(form) form.addEventListener('submit', handleFormSubmit);
   wireChecklistItemEditor();
   wireCrewQualAdder();
+  wireRfqForm();
   const photoInput = document.getElementById('vesselPhotoInput');
   if(photoInput){
     photoInput.addEventListener('change', async (e)=>{
@@ -4221,6 +4769,21 @@ async function handleFormSubmit(e){
       ? fresh.map(c=> c.id===editId ? { ...c, ...data } : c)
       : [...fresh, { id:uid('cl'), createdDate:localISODate(new Date()), ...data }];
   }
+  else if(modal.type==='rfq'){
+    const descs = fd.getAll('rfqItemDesc'), qtys = fd.getAll('rfqItemQty'), units = fd.getAll('rfqItemUnit');
+    const items = descs.map((d, i)=>({ description:String(d).trim(), qty: qtys[i]==='' ? '' : Number(qtys[i])||0, unit:String(units[i]||'').trim() })).filter(it=>it.description);
+    if(items.length === 0){ alert('Add at least one item or piece of work to quote for.'); return; }
+    const quoted = String(fd.get('quotedAmount')||'');
+    const data = { title:String(fd.get('title')||'').trim(), vesselId:fd.get('vesselId')||'', supplierName:String(fd.get('supplierName')||'').trim(),
+      supplierContact:String(fd.get('supplierContact')||'').trim(), supplierEmail:String(fd.get('supplierEmail')||'').trim(), supplierPhone:String(fd.get('supplierPhone')||'').trim(),
+      issueDate:fd.get('issueDate'), dueDate:fd.get('dueDate')||'', requiredBy:fd.get('requiredBy')||'', location:String(fd.get('location')||'').trim(),
+      notes:String(fd.get('notes')||'').trim(), status:fd.get('status')||'draft', quotedAmount: quoted==='' ? '' : Number(quoted)||0, items };
+    const editId = modal.data ? modal.data.id : null;
+    targetKey = 'rfqs';
+    mutateFn = fresh => editId
+      ? fresh.map(r=> r.id===editId ? { ...r, ...data } : r)
+      : [...fresh, { id:uid('rfq'), number:nextRfqNumber(fresh, data.issueDate), createdBy: session ? session.email : '', ...data }];
+  }
   else if(modal.type==='checklist-import'){
     const lists = fd.getAll('lists');
     const allVessels = fd.get('allVessels') === '1';
@@ -4387,6 +4950,17 @@ function attachContentEvents(){
           window.print();
           break;
         case 'maint-view': state.maintView = el.dataset.view; render(); break;
+        case 'fin-view': captureFinControls(); state.fin.view = el.dataset.view; render(); break;
+        case 'fin-generate': generateCostReport(); break;
+        case 'fin-pdf': case 'fin-csv': case 'fin-email': await finFileAction(action, el.dataset.kind); break;
+        case 'add-rfq': state.modal = { type:'rfq', data:null }; renderModal(); break;
+        case 'edit-rfq': state.modal = { type:'rfq', data: state.rfqs.find(q=>q.id===id) }; renderModal(); break;
+        case 'delete-rfq':
+          if(confirm('Delete this request for quote?')){
+            await persistArray('rfqs', fresh => fresh.filter(q=>q.id!==id));
+            render();
+          }
+          break;
         case 'svc-unit': state.svcMeterId = el.dataset.meter; render(); break;
         case 'svc-complete': await completeServiceTask(el.dataset.task); break;
         case 'svc-undo':
@@ -4430,6 +5004,7 @@ function attachContentEvents(){
   attachChecklistPageEvents();
   attachHoursPageEvents();
   attachServicePageEvents();
+  attachFinancePageEvents();
 }
 
 /* ============================= RENDER DISPATCH ============================= */
@@ -4457,6 +5032,7 @@ function render(){
     case 'contractors': main.innerHTML = renderContractors(); break;
     case 'checklists': main.innerHTML = renderChecklists(); break;
     case 'hours': main.innerHTML = renderHours(); break;
+    case 'finance': main.innerHTML = renderFinance(); break;
   }
   attachContentEvents();
   renderModal();

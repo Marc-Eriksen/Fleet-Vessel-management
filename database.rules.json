@@ -41,6 +41,10 @@
           ".read": "auth != null && root.child('oceanhub/users/' + auth.uid).exists()",
           ".write": "auth != null && root.child('oceanhub/users/' + auth.uid).exists()"
         },
+        "rfqs": {
+          ".read": "auth != null && root.child('oceanhub/users/' + auth.uid).exists()",
+          ".write": "auth != null && root.child('oceanhub/users/' + auth.uid).exists()"
+        },
         "companies": {
           ".read": "auth != null && root.child('oceanhub/users/' + auth.uid).exists()"
         }
