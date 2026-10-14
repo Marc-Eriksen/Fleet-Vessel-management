@@ -437,6 +437,7 @@
 <script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-functions-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
 /* ============================= STATE ============================= */
@@ -562,6 +563,8 @@ function seedData(){
       that user's "User UID".
    3. Realtime Database > Data — under "oceanhub" add: users > <that UID> > role = "admin".
    4. Realtime Database > Rules — paste the contents of database.rules.json and Publish.
+   5. Admin setting owner passwords needs the Cloud Function in functions/ (Blaze plan):
+      npm i -g firebase-tools, firebase login, then firebase deploy --only functions.
    Every account needs a record at oceanhub/users/<uid> ({ role:'admin' } or
    { role:'owner', companyId }) to get in. Admin creates owner logins from the
    Companies tab; an account without a record has no access to any data. */
@@ -2959,13 +2962,13 @@ function companyForm(c){
     ${c.loginUid ? `
       ${fieldRow(
         `<label class="field">Login email<input name="loginEmail" type="email" value="${esc(c.loginEmail)}" required autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="off"></label>`,
-        `<label class="field">Password for new email<input name="loginPassword" value="" minlength="6" placeholder="Only if changing email" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="off"></label>`
+        `<label class="field">New password<input name="loginPassword" value="" minlength="6" placeholder="Leave blank to keep" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="off"></label>`
       )}
       <div style="display:flex; gap:6px; flex-wrap:wrap; margin:4px 0 4px;">
         <button type="button" class="btn small" data-action="company-reset-password" data-email="${esc(c.loginEmail)}">Send password reset email</button>
         <button type="button" class="btn small danger" data-action="company-remove-login" data-id="${c.id}">Remove login</button>
       </div>
-      <p style="font-size:12px; color:var(--ink-soft);">To change the login email, enter the new email and a password for it (at least 6 characters) &mdash; the old email stops working on save. Owners change their own password with &ldquo;Forgot password?&rdquo; on the sign-in page, or from the reset email above.</p>
+      <p style="font-size:12px; color:var(--ink-soft);">Enter a new password (at least 6 characters) to change it &mdash; tell the owner, as they aren't notified. Changing the email needs a password too, and the old email stops working on save. Owners can also reset their own password with &ldquo;Forgot password?&rdquo; on the sign-in page.</p>
     ` : `
       ${fieldRow(
         `<label class="field">Login email<input name="loginEmail" type="email" value="" placeholder="${esc(c.contactEmail || 'owner@example.com')}" autocapitalize="none" autocorrect="off" spellcheck="false" autocomplete="off"></label>`,
@@ -4050,7 +4053,15 @@ async function handleFormSubmit(e){
     const prevLogin = modal.data && modal.data.loginUid ? modal.data : null;
     const emailChanged = !!loginEmail && (!prevLogin || loginEmail !== (prevLogin.loginEmail||'').toLowerCase());
     if(prevLogin && !emailChanged && pw){
-      alert("An owner's password can't be set here. Use \u201cSend password reset email\u201d, or clear the password field to save other changes."); return;
+      if(pw.length < 6){ alert('The new password needs at least 6 characters.'); return; }
+      try{ await firebase.functions().httpsCallable('setOwnerPassword')({ uid:prevLogin.loginUid, password:pw }); }
+      catch(err){
+        /* an undeployed function shows up as a CORS failure, reported as 'internal' */
+        alert(err && err.code === 'functions/internal'
+          ? "Couldn't reach the password service — has the Cloud Function been deployed? (see functions/ in the project)"
+          : "Couldn't set the password: " + ((err && err.message) || err));
+        return;
+      }
     }
     let login = null;
     if(emailChanged){
