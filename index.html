@@ -284,6 +284,28 @@
   tr.total-row td{border-top:2px solid var(--border);}
   .fin-panel{background:var(--white-card); border:1px solid var(--border); border-radius:12px; padding:16px 16px 14px; margin-bottom:18px; max-width:640px;}
   .fin-hint{font-size:12px; color:var(--ink-soft); margin:-4px 0 12px;}
+  /* Invoice scanning */
+  .inv-pick{display:flex; gap:8px; flex-wrap:wrap; margin:4px 0 14px;}
+  .inv-pick label.btn{display:inline-flex; align-items:center; cursor:pointer;}
+  .inv-pick input[type=file]{display:none;}
+  .inv-file{display:flex; justify-content:space-between; align-items:center; gap:10px; padding:7px 0; border-bottom:1px solid var(--paper-line); font-size:13px;}
+  .inv-file img{width:38px; height:38px; object-fit:cover; border-radius:5px; flex-shrink:0;}
+  .inv-error{background:rgba(208,59,59,0.10); color:var(--signal-red); border:1px solid rgba(208,59,59,0.3); border-radius:9px; padding:9px 12px; font-size:13px; margin:0 0 12px;}
+  .inv-warn{background:var(--brass-bg); color:var(--brass); border:1px solid rgba(250,178,25,0.4); border-radius:9px; padding:9px 12px; font-size:13px; margin:0 0 12px;}
+  .inv-reading{display:flex; align-items:center; gap:12px; padding:26px 4px; color:var(--ink-soft); font-size:14px;}
+  .inv-spin{width:22px; height:22px; border:3px solid var(--paper-line); border-top-color:var(--navy); border-radius:50%; animation:inv-spin 0.9s linear infinite; flex-shrink:0;}
+  @keyframes inv-spin{to{transform:rotate(360deg);}}
+  .inv-line{display:grid; grid-template-columns:auto minmax(0,1fr) 150px 110px; gap:6px; align-items:center; margin-bottom:6px;}
+  .inv-line input, .inv-line select{min-width:0; width:100%;}
+  .inv-line input[type=checkbox]{width:19px; height:19px;}
+  .inv-line.off input:not([type=checkbox]), .inv-line.off select{opacity:0.45;}
+  .inv-totals{display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px 14px; font-size:13px; padding:10px 0 2px; border-top:1px dashed var(--paper-line); margin-top:6px;}
+  .inv-totals b{font-variant-numeric:tabular-nums;}
+  @media (max-width:640px){
+    .inv-line{grid-template-columns:auto 1fr 1fr; padding-bottom:8px; margin-bottom:8px; border-bottom:1px dashed var(--paper-line);}
+    .inv-line [name=lineDesc]{grid-column:2 / -1;}
+    .inv-line select{grid-column:2;}
+  }
   .fin-share{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:0 0 14px;}
   .fin-email{display:flex; gap:8px; flex:1 1 320px; min-width:0;}
   .fin-email input{flex:1 1 auto; min-width:0; padding:6px 10px; font-size:13px;}
@@ -575,6 +597,7 @@ const FIREBASE_CONFIG = {
   authDomain: "ocean-hub-vessel-managem-cdca8.firebaseapp.com",
   databaseURL: "https://ocean-hub-vessel-managem-cdca8-default-rtdb.firebaseio.com",
   projectId: "ocean-hub-vessel-managem-cdca8",
+  appId: "1:50009827319:web:3a38149f69813bdacf70f2", /* needed by Firebase AI Logic (invoice reading) */
 };
 const ADMIN_EMAIL = ""; /* e.g. "ops@oceanhub.co.za" — leave blank to hide admin notify buttons */
 const ADMIN_PHONE = ""; /* e.g. "+27820000000" — used for WhatsApp links, digits/plus only */
@@ -758,6 +781,7 @@ function normalizeKey(key, raw){
   if(key==='checklists') return asArray(raw).map(c=>({ ...c, vesselIds: asArray(c.vesselIds), items: asArray(c.items) }));
   if(key==='checklistRuns') return asArray(raw).map(r=>({ ...r, entries: asArray(r.entries) }));
   if(key==='hourReadings') return asArray(raw).map(r=>({ ...r, readings: asArray(r.readings) }));
+  if(key==='financeItems') return asArray(raw).map(x=> x.invoiceFiles ? { ...x, invoiceFiles: asArray(x.invoiceFiles) } : x);
   return asArray(raw);
 }
 
@@ -1019,12 +1043,16 @@ async function openDocument(ds){
   const doc = findStoredDoc(ds);
   if(!doc){ alert('That document has no file attached.'); return; }
   if(doc.dataUrl){ openStoredDocument(doc.dataUrl); return; }
+  await openFileById(doc.id);
+}
+/* Opens a file kept at oceanhub/files/<fileId> in a new tab. */
+async function openFileById(fileId){
   /* open the window now, while the tap still counts, so pop-up blockers allow it */
   const win = window.open('', '_blank');
   if(!win){ alert('Your browser blocked the document window — allow pop-ups for this site and try again.'); return; }
   try{ win.document.body.innerHTML = '<p style="font:16px sans-serif; padding:24px;">Loading document…</p>'; }catch(e){}
   try{
-    const file = (await firebase.database().ref(FILES_PATH + doc.id).once('value')).val();
+    const file = (await firebase.database().ref(FILES_PATH + fileId).once('value')).val();
     if(!file || !file.dataUrl){ win.close(); alert('That document has no file attached.'); return; }
     const url = URL.createObjectURL(dataUrlToBlob(file.dataUrl));
     win.location.href = url;
@@ -2868,7 +2896,10 @@ function renderFinEntries(){
           ${FIN_CATEGORIES.map(c=>`<option value="${c.id}" ${cat===c.id?'selected':''}>${c.label}</option>`).join('')}
         </select>
       </div>
-      <button class="btn primary" data-action="add-fin-item">+ Add cost</button>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn" data-action="scan-invoice">Scan invoice</button>
+        <button class="btn primary" data-action="add-fin-item">+ Add cost</button>
+      </div>
     </div>
     <div class="cost-total-bar">
       <div class="ctb-item"><div class="label">Recorded costs</div><div class="value">${fmtCurrency(total)}</div></div>
@@ -2889,6 +2920,7 @@ function renderFinEntries(){
               <td>${pv.name ? `<b>${esc(pv.name)}</b>` : '<span style="color:var(--ink-soft);">—</span>'}${[pv.contactName, pv.phone, pv.email].filter(Boolean).map(v=>`<div style="color:var(--ink-soft); font-size:11.5px;">${esc(v)}</div>`).join('')}</td>
               <td class="num">${fmtCurrency(x.cost)}</td>
               <td style="white-space:nowrap;">
+                ${(x.invoiceFiles||[]).map((f,i,all)=>`<button class="btn small ghost" data-action="open-invoice-file" data-file="${esc(f.id)}">${all.length > 1 ? `Invoice p${i+1}` : 'Invoice'}</button>`).join(' ')}
                 <button class="btn small ghost" data-action="edit-fin-item" data-id="${x.id}">Edit</button>
                 <button class="btn small danger" data-action="delete-fin-item" data-id="${x.id}">Delete</button>
               </td>
@@ -2945,6 +2977,323 @@ function financeItemForm(x){
     <label class="field">Notes<textarea name="notes" rows="2" placeholder="optional">${esc(x.notes||'')}</textarea></label>
   `;
 }
+/* ---------- Invoice scanning ---------- */
+/* A photo or PDF of an invoice is read by Gemini through Firebase AI Logic (Gemini Developer API,
+   free tier — switched on in the Firebase console under AI Logic). Each invoice line comes back as
+   its own cost for the user to check; saving adds them to Finance with a copy of the invoice kept
+   at oceanhub/files. The AI library only loads the first time someone scans. */
+const INVOICE_MODEL = 'gemini-3.5-flash';
+const INVOICE_MAX_BYTES = 15 * 1024 * 1024; /* all pages together, as sent to Gemini */
+const INVOICE_PROMPT = `You are reading a supplier invoice, receipt or quote for a South African boat and vessel operator. Extract it as JSON.
+- supplier: the business that issued the document (not the customer / bill-to).
+- invoiceDate: as YYYY-MM-DD. South African dates are usually written day first (dd/mm/yyyy).
+- currency: ISO code, e.g. ZAR.
+- lines: every charged line, in the order printed. description: short but specific, keeping part numbers and sizes that help identify it. quantity: as printed. amount: the line total as printed, after any line discount.
+- Delivery, freight, call-out, labour, travel and similar charges are lines of their own. An invoice-level discount is a line with a negative amount.
+- Never list VAT, subtotals, totals, balances, payments or deposits as lines.
+- amountsIncludeVat: true only if the printed line amounts already include VAT.
+- vatAmount: total VAT on the document, 0 if none. total: the grand total payable.
+- category for each line: "parts" for goods, parts, consumables and materials; "service" for labour, servicing, call-outs, travel, delivery, hire and other work. Use "scheduled" only when the line clearly says it is a scheduled, routine or interval service, and "unscheduled" only when it clearly describes a breakdown, emergency or repair call-out.
+- Numbers only, without currency symbols or thousands separators.
+- If the document is not an invoice, receipt or quote, set isInvoice to false and return no lines.`;
+
+let invoiceModelPromise = null;
+function invoiceModel(){
+  if(!invoiceModelPromise){
+    invoiceModelPromise = (async ()=>{
+      const appMod = await import('https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js');
+      const ai = await import('https://www.gstatic.com/firebasejs/12.19.0/firebase-ai.js');
+      const app = appMod.getApps().find(a=>a.name==='invoice-reader') || appMod.initializeApp(FIREBASE_CONFIG, 'invoice-reader');
+      const S = ai.Schema;
+      const schema = S.object({
+        properties: {
+          isInvoice: S.boolean(),
+          supplier: S.object({ properties:{ name:S.string(), contactName:S.string(), phone:S.string(), email:S.string() }, optionalProperties:['name','contactName','phone','email'] }),
+          invoiceNumber: S.string(),
+          invoiceDate: S.string(),
+          currency: S.string(),
+          amountsIncludeVat: S.boolean(),
+          vatAmount: S.number(),
+          total: S.number(),
+          lines: S.array({ items: S.object({ properties:{
+            description: S.string(), quantity: S.number(), amount: S.number(),
+            category: S.enumString({ enum: FIN_CATEGORIES.map(c=>c.id) })
+          }, optionalProperties:['quantity'] }) })
+        },
+        optionalProperties: ['supplier','invoiceNumber','invoiceDate','currency','vatAmount','total']
+      });
+      return ai.getGenerativeModel(ai.getAI(app, { backend: new ai.GoogleAIBackend() }), {
+        model: INVOICE_MODEL,
+        generationConfig: { responseMimeType:'application/json', responseSchema:schema, temperature:0 }
+      });
+    })().catch(err=>{ invoiceModelPromise = null; throw err; });
+  }
+  return invoiceModelPromise;
+}
+
+function invoiceErrorText(err){
+  const s = String((err && (err.code || '')) + ' ' + (err && err.message || err));
+  if(/api-not-enabled|SERVICE_DISABLED|has not been used|is disabled/i.test(s))
+    return 'Invoice reading isn\'t switched on yet. The OCEANHUB admin needs to open the Firebase console, go to AI Logic and click "Get started" with the Gemini Developer API.';
+  if(/429|quota|RESOURCE_EXHAUSTED|rate limit/i.test(s))
+    return 'The free daily allowance for reading invoices has been used up. Try again later, or add these costs by hand with "+ Add cost".';
+  if(/failed to fetch|network|offline/i.test(s)) return 'No connection — check your internet and try again.';
+  if(/import|dynamically imported module/i.test(s)) return 'Couldn\'t load the invoice reader — check your connection and try again.';
+  return 'Couldn\'t read that invoice: ' + ((err && err.message) || s);
+}
+
+function fmtRand2(n){ return (n < 0 ? '-R' : 'R') + Math.abs(Number(n)||0).toLocaleString('en-ZA', { minimumFractionDigits:2, maximumFractionDigits:2 }); }
+const round2 = n => Math.round((Number(n)||0) * 100) / 100;
+function dataUrlBytes(dataUrl){ return Math.round((dataUrl.length - dataUrl.indexOf(',') - 1) * 0.75); }
+
+function renderInvoiceScan(m){
+  if(m.step === 'reading') return `
+    <h3>Scan invoice</h3>
+    <div class="inv-reading"><span class="inv-spin"></span><span>Reading the invoice… this can take up to a minute.</span></div>
+    <div class="modal-actions"><button type="button" class="btn ghost" data-action="close-modal">Cancel</button></div>`;
+  if(m.step === 'review') return renderInvoiceReview(m);
+  const files = m.files || [];
+  return `
+    <h3>Scan invoice</h3>
+    <p class="section-sub" style="margin-top:-6px;">Take a photo of an invoice, or choose a PDF or picture of one. Each line on it becomes its own cost, and you check them all before anything is saved.</p>
+    ${m.error ? `<div class="inv-error">${esc(m.error)}</div>` : ''}
+    <div class="inv-pick">
+      <label class="btn primary">${files.length ? 'Photograph another page' : 'Take photo'}<input type="file" accept="image/*" capture="environment" data-inv-file></label>
+      <label class="btn">Choose file<input type="file" accept="image/*,application/pdf" multiple data-inv-file></label>
+    </div>
+    ${files.length ? `<div style="margin-bottom:6px;">${files.map((f,i)=>`
+      <div class="inv-file">
+        <span style="display:flex; align-items:center; gap:10px; min-width:0;">${f.mime.startsWith('image/') ? `<img src="${f.dataUrl}" alt="">` : '<b style="color:var(--navy);">PDF</b>'}<span style="overflow-wrap:anywhere;">${esc(f.name)}</span></span>
+        <button type="button" class="btn small danger" data-inv="remove-file" data-index="${i}">Remove</button>
+      </div>`).join('')}</div>
+      <p class="fin-hint" style="margin:6px 0 0;">Several pages of one invoice can be added before reading it.</p>` : ''}
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" data-action="close-modal">Cancel</button>
+      <button type="button" class="btn primary" data-inv="read" ${files.length ? '' : 'disabled'}>Read invoice</button>
+    </div>`;
+}
+
+function invoiceLineRow(l){
+  return `
+    <div class="inv-line${l.include === false ? ' off' : ''}">
+      <input type="checkbox" name="lineOn" ${l.include === false ? '' : 'checked'} title="Add this line as a cost">
+      <input name="lineDesc" value="${esc(l.description||'')}" placeholder="Description">
+      <select name="lineCat">${FIN_CATEGORIES.map(c=>`<option value="${c.id}" ${l.category===c.id?'selected':''}>${c.label}</option>`).join('')}</select>
+      <input name="lineAmount" type="number" step="0.01" value="${l.amount===''||l.amount==null ? '' : round2(l.amount)}" placeholder="Amount" inputmode="decimal">
+    </div>`;
+}
+
+function renderInvoiceReview(m){
+  const r = m.result || {};
+  const sup = r.supplier || {};
+  const vatExcluded = !r.amountsIncludeVat && Number(r.vatAmount) > 0;
+  const defVessel = state.fin.vessel !== 'all' ? state.fin.vessel : (finScopeVessels()[0] || state.vessels[0] || {}).id || '';
+  const names = [...knownProviders().values()].map(p=>p.name);
+  const currency = String(r.currency||'').toUpperCase();
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(r.invoiceDate||'') ? r.invoiceDate : localISODate(new Date());
+  return `
+    <form id="invoiceForm">
+      <h3>Check the invoice costs</h3>
+      ${currency && currency !== 'ZAR' ? `<div class="inv-warn">This invoice is in ${esc(currency)}. Amounts aren't converted — change them to rand before saving.</div>` : ''}
+      ${!/^\d{4}-\d{2}-\d{2}$/.test(r.invoiceDate||'') ? `<div class="inv-warn">The invoice date couldn't be read, so today's date is filled in — check it.</div>` : ''}
+      ${fieldRow(
+        `<label class="field">Vessel<select name="vesselId" required>${state.vessels.map(v=>`<option value="${v.id}" ${defVessel===v.id?'selected':''}>${esc(v.name)}</option>`).join('')}</select></label>`,
+        `<label class="field">Invoice date${dateField('date', date, { required:true })}</label>`
+      )}
+      <label class="field">Invoice / quote reference<input name="invoiceRef" value="${esc(r.invoiceNumber||'')}"></label>
+      <div class="detail-section" style="margin-top:4px;"><h4>Service provider</h4></div>
+      ${fieldRow(
+        `<label class="field">Company / name<input name="providerName" value="${esc(sup.name||'')}" ${names.length?'list="invProviderNames"':''} autocomplete="off"></label>`,
+        `<label class="field">Contact person<input name="providerContact" value="${esc(sup.contactName||'')}"></label>`
+      )}
+      ${names.length ? `<datalist id="invProviderNames">${names.map(n=>`<option value="${esc(n)}">`).join('')}</datalist>` : ''}
+      ${fieldRow(
+        `<label class="field">Phone<input name="providerPhone" type="tel" value="${esc(sup.phone||'')}"></label>`,
+        `<label class="field">Email<input name="providerEmail" type="email" value="${esc(sup.email||'')}" autocapitalize="none" autocorrect="off" spellcheck="false"></label>`
+      )}
+      <div class="detail-section" style="margin-top:4px;"><h4>Invoice lines — each ticked line is saved as a cost</h4></div>
+      <div id="invLines">${(m.lines||[]).map(invoiceLineRow).join('')}</div>
+      <button type="button" class="btn small ghost" data-inv="add-line" style="margin:2px 0 8px;">+ Add line</button>
+      ${vatExcluded ? `
+        <label class="field" style="margin-top:6px;">VAT of ${fmtRand2(r.vatAmount)} on this invoice
+          <select name="vatMode">
+            <option value="spread">Add it to each line (costs include VAT)</option>
+            <option value="line">Save it as a separate cost</option>
+            <option value="exclude">Leave it out (costs excl. VAT)</option>
+          </select>
+        </label>` : ''}
+      <div class="inv-totals"><span>Costs to add: <b id="invAddTotal"></b></span>${Number(r.total) ? `<span>Invoice total: <b>${fmtRand2(r.total)}</b></span>` : ''}</div>
+      <div id="invTotalNote" class="fin-hint" style="margin:4px 0 0;"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn ghost" data-action="close-modal">Cancel</button>
+        <button type="submit" class="btn primary" id="invSaveBtn">Add costs</button>
+      </div>
+    </form>`;
+}
+
+/* What the ticked lines come to, with the chosen VAT handling applied. */
+function invoiceCostsFromForm(form, m){
+  const r = m.result || {};
+  const rows = [...form.querySelectorAll('.inv-line')].map(row=>({
+    include: row.querySelector('[name=lineOn]').checked,
+    description: row.querySelector('[name=lineDesc]').value.trim(),
+    category: row.querySelector('[name=lineCat]').value,
+    amount: Number(row.querySelector('[name=lineAmount]').value) || 0
+  }));
+  const picked = rows.filter(l=>l.include && (l.description || l.amount));
+  const allSum = rows.reduce((s,l)=>s+l.amount, 0);
+  const pickedSum = picked.reduce((s,l)=>s+l.amount, 0);
+  const vat = Number(r.vatAmount) || 0;
+  const mode = form.elements.vatMode ? form.elements.vatMode.value : 'none';
+  let costs = picked.map(l=>({ ...l, vatNote:'' }));
+  if(mode === 'spread' && allSum){
+    const rate = vat / allSum; /* VAT rate implied by the invoice, so unticked lines don't push their VAT onto others */
+    costs = costs.map(l=>({ ...l, amount: l.amount * (1 + rate), vatNote:'incl. VAT' }));
+  } else if(mode === 'line' && allSum && pickedSum){
+    const biggest = picked.slice().sort((a,b)=>b.amount-a.amount)[0];
+    costs.push({ description:'VAT' + (form.elements.invoiceRef.value.trim() ? ` — invoice ${form.elements.invoiceRef.value.trim()}` : ''), category:biggest.category, amount: vat * pickedSum / allSum, vatNote:'' });
+  }
+  return { costs: costs.map(c=>({ ...c, amount: round2(c.amount) })), rows };
+}
+
+function updateInvoiceTotals(form, m){
+  const { costs, rows } = invoiceCostsFromForm(form, m);
+  const total = costs.reduce((s,c)=>s+c.amount, 0);
+  document.getElementById('invAddTotal').textContent = `${fmtRand2(total)} (${costs.length} cost${costs.length===1?'':'s'})`;
+  form.querySelectorAll('.inv-line').forEach((row, i)=>row.classList.toggle('off', !rows[i].include));
+  const invTotal = Number((m.result||{}).total) || 0;
+  const mode = form.elements.vatMode ? form.elements.vatMode.value : 'none';
+  const allTicked = rows.every(l=>l.include);
+  const note = document.getElementById('invTotalNote');
+  note.style.color = '';
+  if(invTotal && allTicked && mode !== 'exclude' && Math.abs(total - invTotal) > 1){
+    note.textContent = `These come to ${fmtRand2(Math.abs(total - invTotal))} ${total > invTotal ? 'more' : 'less'} than the invoice total — check the amounts against the invoice.`;
+    note.style.color = 'var(--brass)';
+  } else note.textContent = '';
+  document.getElementById('invSaveBtn').textContent = costs.length ? `Add ${costs.length} cost${costs.length===1?'':'s'}` : 'Add costs';
+}
+
+async function addInvoiceFiles(input){
+  const m = state.modal;
+  const files = [...(input.files || [])];
+  input.value = '';
+  if(!files.length || !m) return;
+  m.error = '';
+  for(const file of files){
+    try{
+      if(file.type === 'application/pdf' || /\.pdf$/i.test(file.name)){
+        const dataUrl = await readFileAsDataURL(file);
+        m.files.push({ name:file.name, mime:'application/pdf', dataUrl: dataUrl.replace(/^data:[^;,]*/, 'data:application/pdf') });
+      } else if(/^image\//.test(file.type) || /\.(jpe?g|png|heic|heif|webp)$/i.test(file.name)){
+        /* big enough to keep small print legible, small enough to send and store */
+        m.files.push({ name:file.name || `Photo ${m.files.length+1}.jpg`, mime:'image/jpeg', dataUrl: await resizeImageFile(file, 2000, 0.82) });
+      } else {
+        m.error = `${file.name} isn't a photo or PDF.`;
+      }
+    }catch(e){
+      m.error = `Couldn't open ${file.name || 'that file'} — try a different photo or file.`;
+    }
+  }
+  if(m.files.reduce((s,f)=>s+dataUrlBytes(f.dataUrl), 0) > INVOICE_MAX_BYTES){
+    m.files.pop();
+    m.error = 'That makes the invoice too large to read in one go (15 MB). Use a smaller PDF, or photograph the pages instead.';
+  }
+  if(state.modal === m) renderModal();
+}
+
+async function readInvoice(){
+  const m = state.modal;
+  if(!m || !m.files.length) return;
+  m.step = 'reading'; m.error = '';
+  renderModal();
+  try{
+    const model = await invoiceModel();
+    const parts = [{ text: INVOICE_PROMPT }, ...m.files.map(f=>({ inlineData:{ mimeType:f.mime, data:f.dataUrl.slice(f.dataUrl.indexOf(',') + 1) } }))];
+    const res = await model.generateContent(parts);
+    const r = JSON.parse(res.response.text());
+    if(state.modal !== m) return; /* cancelled while reading */
+    if(!r.isInvoice || !(r.lines||[]).length){
+      m.step = 'pick';
+      m.error = r.isInvoice === false ? "That doesn't look like an invoice, receipt or quote. Try a clearer photo, or add the cost by hand." : 'No lines could be read from that invoice. Try a clearer, flatter photo in good light.';
+      renderModal();
+      return;
+    }
+    m.result = r;
+    m.lines = r.lines.map(l=>({ description: (Number(l.quantity) > 1 && !/^\s*\d/.test(l.description||'') ? `${Number(l.quantity)} × ` : '') + (l.description||''),
+      category: FIN_CATEGORIES.some(c=>c.id===l.category) ? l.category : 'parts', amount: Number(l.amount)||0 }));
+    m.step = 'review';
+    renderModal();
+  }catch(err){
+    console.warn('Invoice reading failed', err);
+    if(state.modal !== m) return;
+    m.step = 'pick';
+    m.error = invoiceErrorText(err);
+    renderModal();
+  }
+}
+
+async function saveInvoiceCosts(form){
+  const m = state.modal;
+  const btn = document.getElementById('invSaveBtn');
+  const { costs } = invoiceCostsFromForm(form, m);
+  const fd = new FormData(form);
+  const t = k => String(fd.get(k)||'').trim();
+  if(!fd.get('date')){ alert('Enter the invoice date as dd/mm/yyyy.'); return; }
+  if(!costs.length){ alert('Tick at least one line to add.'); return; }
+  if(costs.some(c=>!c.description)){ alert('Every ticked line needs a description.'); return; }
+  btn.disabled = true; btn.textContent = 'Saving…';
+  let fileRefs = m.files.map((f, i)=>({ id:uid('invf'), name: m.files.length > 1 ? `Invoice page ${i+1}` : (f.name || 'Invoice') }));
+  try{ await Promise.all(fileRefs.map((ref, i)=>storeDocFile(ref.id, m.files[i].dataUrl))); }
+  catch(e){
+    if(!confirm("Couldn't save a copy of the invoice. Add the costs without it?")){ btn.disabled = false; updateInvoiceTotals(form, m); return; }
+    fileRefs = [];
+  }
+  const shared = { vesselId:fd.get('vesselId'), date:fd.get('date'), invoiceRef:t('invoiceRef'),
+    provider:{ name:t('providerName'), contactName:t('providerContact'), phone:t('providerPhone'), email:t('providerEmail') },
+    invoiceFiles:fileRefs, createdBy: session ? session.email : '', createdDate: localISODate(new Date()) };
+  const items = costs.map(c=>({ id:uid('fi'), ...shared, category:c.category, description:c.description, cost:c.amount, notes:c.vatNote }));
+  const saved = await persistArray('financeItems', fresh => [...fresh, ...items]);
+  if(!saved){
+    await removeDocFiles(fileRefs);
+    alert("Couldn't save the costs — check your connection and try again.");
+    btn.disabled = false; updateInvoiceTotals(form, m);
+    return;
+  }
+  state.modal = null;
+  render();
+}
+
+function wireInvoiceScan(){
+  const m = state.modal;
+  document.querySelectorAll('[data-inv-file]').forEach(input=>input.addEventListener('change', ()=>addInvoiceFiles(input)));
+  document.querySelectorAll('[data-inv]').forEach(btn=>btn.addEventListener('click', e=>{
+    e.preventDefault();
+    const what = btn.dataset.inv;
+    if(what === 'remove-file'){ m.files.splice(Number(btn.dataset.index), 1); m.error = ''; renderModal(); }
+    else if(what === 'read') readInvoice();
+    else if(what === 'add-line'){
+      document.getElementById('invLines').insertAdjacentHTML('beforeend', invoiceLineRow({ description:'', category:'parts', amount:'' }));
+      updateInvoiceTotals(document.getElementById('invoiceForm'), m);
+      const rows = document.querySelectorAll('#invLines .inv-line');
+      rows[rows.length-1].querySelector('[name=lineDesc]').focus();
+    }
+  }));
+  const form = document.getElementById('invoiceForm');
+  if(!form) return;
+  form.addEventListener('input', ()=>updateInvoiceTotals(form, m));
+  form.addEventListener('change', ()=>updateInvoiceTotals(form, m));
+  form.addEventListener('submit', e=>{ e.preventDefault(); saveInvoiceCosts(form); });
+  /* a provider used before fills in their details where still blank */
+  form.elements.providerName.addEventListener('input', ()=>{
+    const p = knownProviders().get(form.elements.providerName.value.trim().toLowerCase());
+    if(!p) return;
+    [['providerContact','contactName'],['providerPhone','phone'],['providerEmail','email']].forEach(([field, key])=>{
+      if(!form.elements[field].value && p[key]) form.elements[field].value = p[key];
+    });
+  });
+  updateInvoiceTotals(form, m);
+}
+
 /* Typing a provider used before fills in their details where still blank. */
 function wireFinanceItemForm(){
   const form = document.getElementById('modalForm');
@@ -3770,6 +4119,12 @@ function renderModal(){
     attachModalEvents();
     return;
   }
+  if(modal.type==='invoice-scan'){
+    root.innerHTML = `<div class="modal-overlay" data-action="overlay-close"><div class="modal" onclick="event.stopPropagation()">${renderInvoiceScan(modal)}</div></div>`;
+    attachModalEvents();
+    wireInvoiceScan();
+    return;
+  }
   if(modal.type==='view-tender'){
     root.innerHTML = `<div class="modal-overlay" data-action="overlay-close"><div class="modal" onclick="event.stopPropagation()">${renderTenderDetail(modal.vesselId, modal.tenderId)}</div></div>`;
     attachModalEvents();
@@ -4491,11 +4846,18 @@ function attachContentEvents(){
         case 'fin-generate': generateCostReport(); break;
         case 'fin-view': captureFinControls(); state.fin.view = el.dataset.view; render(); break;
         case 'add-fin-item': state.modal = { type:'finance-item', data:null }; renderModal(); break;
+        case 'scan-invoice': state.modal = { type:'invoice-scan', step:'pick', files:[] }; renderModal(); break;
+        case 'open-invoice-file': await openFileById(el.dataset.file); break;
         case 'edit-fin-item': state.modal = { type:'finance-item', data: state.financeItems.find(x=>x.id===id) }; renderModal(); break;
         case 'delete-fin-item': {
           const x = state.financeItems.find(i=>i.id===id);
           if(x && confirm(`Delete this cost — ${x.description} (${fmtCurrency(x.cost)})?`)){
-            await persistArray('financeItems', fresh => fresh.filter(i=>i.id!==id));
+            const fresh = await persistArray('financeItems', fresh => fresh.filter(i=>i.id!==id));
+            /* the invoice copy goes once no other cost from that invoice still uses it */
+            if(fresh){
+              const stillUsed = new Set(fresh.flatMap(i=>(i.invoiceFiles||[]).map(f=>f.id)));
+              await removeDocFiles((x.invoiceFiles||[]).filter(f=>!stillUsed.has(f.id)));
+            }
             render();
           }
           break;
