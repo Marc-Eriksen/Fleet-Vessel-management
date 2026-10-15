@@ -1111,6 +1111,31 @@ function qualStatus(expiry){
   if(dd <= 60) return 'advisory';
   return 'valid';
 }
+/* Vessel and tender documents with an expiry date warn from 30 days out. */
+const DOC_EXPIRY_WARN_DAYS = 30;
+function docStatus(doc){
+  if(!doc || !doc.expiry) return null;
+  const dd = daysUntil(doc.expiry);
+  if(dd < 0) return 'expired';
+  if(dd <= DOC_EXPIRY_WARN_DAYS) return 'red-alert';
+  return 'valid';
+}
+function docExpiryText(doc){
+  const st = docStatus(doc);
+  if(!st) return '';
+  const dd = daysUntil(doc.expiry);
+  const label = st==='expired' ? `Expired ${fmtDate(doc.expiry)}` : st==='red-alert' ? `Expires in ${dd} day${dd===1?'':'s'}` : `Expires ${fmtDate(doc.expiry)}`;
+  return ` <span class="stamp ${st}" style="font-size:10px;">${label}</span>`;
+}
+/* every vessel and tender document expired or expiring within 30 days, soonest first */
+function docExpiryAlerts(){
+  const out = [];
+  state.vessels.forEach(v=>{
+    (v.documents||[]).forEach(doc=>{ const st = docStatus(doc); if(st && st!=='valid') out.push({ vessel:v, tender:null, doc, status:st }); });
+    (v.tenders||[]).forEach(t=> (t.documents||[]).forEach(doc=>{ const st = docStatus(doc); if(st && st!=='valid') out.push({ vessel:v, tender:t, doc, status:st }); }));
+  });
+  return out.sort((a,b)=> String(a.doc.expiry).localeCompare(String(b.doc.expiry)));
+}
 function stampLabel(s){
   return { overdue:'Overdue', 'due-soon':'Due soon', upcoming:'Upcoming', completed:'Completed',
            active:'Active', docked:'Docked', 'in-maintenance':'In maintenance',
@@ -1197,6 +1222,9 @@ function renderDashboard(){
   const clOutstanding = checklistAssignments().filter(a=>!a.run || a.run.status!=='completed').length;
   const lowStock = stockRows().filter(r=>r.low).length;
   const svcAlerts = serviceAlerts();
+  const docAlerts = docExpiryAlerts();
+  docAlerts.forEach(a=> events.push({ date:a.doc.expiry, kind:'Document', title:a.doc.name,
+    sub: a.vessel.name + (a.tender ? ` — ${a.tender.name || 'tender'} (tender)` : ''), status:a.status, label: a.status==='expired' ? 'Expired' : 'Expiring' }));
   svcAlerts.forEach(a=> events.push({ date:a.d.dateDue && a.d.status!=='critical' ? a.d.dateDue : localISODate(new Date()), kind:'Service',
     title:`${a.task.name}`, sub:`${a.vessel.name} — ${svcCap(a.meter.label)} · ${a.d.reason}`, status:SVC_STAMP[a.d.status], label:SVC_LABEL[a.d.status] }));
   events.sort((a,b)=> new Date(a.date) - new Date(b.date));
@@ -1214,17 +1242,18 @@ function renderDashboard(){
     </div>
     <div class="kpi-grid">
       <div class="kpi"><div class="label">Vessels on register</div><div class="value">${state.vessels.length}</div></div>
-      <div class="kpi ${overdue>0?'alert':''}"><div class="label">Overdue maintenance</div><div class="value">${overdue}</div></div>
+      <div class="kpi ${overdue>0?'alert':''}"><div class="label">Overdue tasks</div><div class="value">${overdue}</div></div>
       <div class="kpi ${dueSoon>0?'warn':''}"><div class="label">Due within 14 days / 75 hrs</div><div class="value">${dueSoon}</div></div>
       <div class="kpi ${qualsExpired>0?'alert':''}"><div class="label">Quals expired</div><div class="value">${qualsExpired}</div></div>
       <div class="kpi ${qualsRedAlert>0?'alert':''}"><div class="label">Quals red alert (≤30 days)</div><div class="value">${qualsRedAlert}</div></div>
       <div class="kpi ${qualsAdvisory>0?'warn':''}"><div class="label">Quals advisory (≤60 days)</div><div class="value">${qualsAdvisory}</div></div>
       <div class="kpi ${clOutstanding>0?'warn':''}"><div class="label">Checklists due</div><div class="value">${clOutstanding}</div></div>
       <div class="kpi ${lowStock>0?'alert':''}"><div class="label">Low stock items</div><div class="value">${lowStock}</div></div>
-      <div class="kpi ${svcAlerts.some(a=>a.d.status==='critical')?'alert':svcAlerts.length?'warn':''}"><div class="label">Service items due</div><div class="value">${svcAlerts.length}</div></div>
+      <div class="kpi ${svcAlerts.some(a=>a.d.status==='critical')?'alert':svcAlerts.length?'warn':''}"><div class="label">Manufacturer services due</div><div class="value">${svcAlerts.length}</div></div>
+      <div class="kpi ${docAlerts.length?'alert':''}"><div class="label">Vessel docs expiring (≤${DOC_EXPIRY_WARN_DAYS} days)</div><div class="value">${docAlerts.length}</div></div>
     </div>
     <h2 class="section-title" style="font-size:18px;">Upcoming events</h2>
-    <p class="section-sub">Merged view of maintenance due dates, engine and equipment services, and certificate expiries.</p>
+    <p class="section-sub">Merged view of maintenance due dates, engine and equipment services, vessel document and certificate expiries.</p>
     <div class="timeline">
       ${upcoming.length===0 ? '<div class="empty-note">Nothing on the horizon.</div>' : upcoming.map(e=>`
         <div class="tl-item">
@@ -2119,8 +2148,9 @@ function renderVesselDetail(id){
       <h4>Documents</h4>
       ${(v.documents||[]).length===0 ? '<div class="empty-note" style="padding:10px 0;">No documents on file.</div>' : v.documents.map(doc=>`
         <div class="mini-row">
-          <span>${esc(doc.name)} <span style="color:var(--ink-soft); font-size:11px;">(${fmtDate(doc.addedDate)})</span></span>
+          <span>${esc(doc.name)} <span style="color:var(--ink-soft); font-size:11px;">(${fmtDate(doc.addedDate)})</span>${docExpiryText(doc)}</span>
           <span style="display:flex; align-items:center; gap:8px;">
+            <button class="btn small ghost" data-action="doc-expiry" data-id="${v.id}" data-doc-id="${doc.id}">Expiry</button>
             <button class="btn small ghost" data-action="view-doc" data-scope="vessel" data-id="${v.id}" data-doc-id="${doc.id}">View</button>
             <button class="btn small danger" data-action="delete-vessel-doc" data-id="${v.id}" data-doc-id="${doc.id}">Remove</button>
           </span>
@@ -2192,8 +2222,9 @@ function renderTenderDetail(vesselId, tenderId){
       <h4>Documents</h4>
       ${(t.documents||[]).length===0 ? '<div class="empty-note" style="padding:10px 0;">No documents on file.</div>' : t.documents.map(doc=>`
         <div class="mini-row">
-          <span>${esc(doc.name)} <span style="color:var(--ink-soft); font-size:11px;">(${fmtDate(doc.addedDate)})</span></span>
+          <span>${esc(doc.name)} <span style="color:var(--ink-soft); font-size:11px;">(${fmtDate(doc.addedDate)})</span>${docExpiryText(doc)}</span>
           <span style="display:flex; align-items:center; gap:8px;">
+            <button class="btn small ghost" data-action="doc-expiry" data-id="${v.id}" data-tender-id="${t.id}" data-doc-id="${doc.id}">Expiry</button>
             <button class="btn small ghost" data-action="view-doc" data-scope="tender" data-id="${v.id}" data-tender-id="${t.id}" data-doc-id="${doc.id}">View</button>
             <button class="btn small danger" data-action="delete-tender-doc" data-id="${v.id}" data-tender-id="${t.id}" data-doc-id="${doc.id}">Remove</button>
           </span>
@@ -2633,7 +2664,7 @@ function renderMaintenanceTasks(){
       ${BILLING_STAGES.map(b=>`<button type="button" class="subtab ${billing===b.id?'active':''}" data-action="billing-tab" data-billing="${b.id}">${b.label}<span class="cnt">${billingCount(b.id)}</span></button>`).join('')}
       <button type="button" class="subtab ${billing==='none'?'active':''}" data-action="billing-tab" data-billing="none">Not billed<span class="cnt">${billingCount('none')}</span></button>
     </div>` : '';
-  const colspan = 7 + (admin ? 1 : 0) + (showCost ? 1 : 0);
+  const colspan = 8 + (admin ? 1 : 0) + (showCost ? 1 : 0);
 
   return `
     ${admin && showCost ? `<div class="cost-total-bar">
@@ -2670,7 +2701,7 @@ function renderMaintenanceTasks(){
     <div class="table-wrap">
       <table>
         <thead><tr>
-          <th>Task</th><th>Vessel</th><th>Type</th><th>Due</th><th>Priority</th>${showCost ? '<th class="num">Cost</th>' : ''}<th>Status</th>${admin?'<th>Billing</th>':''}<th></th>
+          <th>Task</th><th>Vessel</th><th>Equipment</th><th>Type</th><th>Due</th><th>Priority</th>${showCost ? '<th class="num">Cost</th>' : ''}<th>Status</th>${admin?'<th>Billing</th>':''}<th></th>
         </tr></thead>
         <tbody>
           ${rows.length===0 ? `<tr><td colspan="${colspan}"><div class="empty-note">No tasks match these filters.</div></td></tr>` : rows.map(m=>{
@@ -2681,8 +2712,9 @@ function renderMaintenanceTasks(){
             const deleteAttrs = isTender ? `data-action="delete-tender-task" data-id="${m.vesselId}" data-tender-id="${m._tenderId}" data-task-id="${m.id}"` : `data-action="delete-maintenance" data-id="${m.id}"`;
             return `
             <tr>
-              <td><b>${esc(m.title)}</b>${m.meterId ? `<div style="color:var(--ink-soft); font-size:11.5px; margin-top:2px;">⚙ ${esc(maintMeterLabel(m.vesselId, m.meterId) || m.meterLabel || 'Equipment')}</div>` : ''}${m.description?`<div style="color:var(--ink-soft); font-size:11.5px; margin-top:2px;">${esc(m.description)}</div>`:''}</td>
+              <td><b>${esc(m.title)}</b>${m.description?`<div style="color:var(--ink-soft); font-size:11.5px; margin-top:2px;">${esc(m.description)}</div>`:''}</td>
               <td>${vesselLabel}</td>
+              <td>${isTender ? '<span style="color:var(--ink-soft);">—</span>' : `<select class="row-meter" data-id="${m.id}" title="Engine / equipment this task is for" style="max-width:200px;">${maintMeterOptions(m.vesselId, m.meterId||'', m.meterLabel)}</select>`}</td>
               <td style="text-transform:capitalize;">${m.category}</td>
               <td>${fmtDate(m.dueDate)}${(hl=> Number(m.dueHours) > 0 && m.meterId ? `<div style="color:var(--ink-soft); font-size:11.5px; margin-top:2px; white-space:nowrap;">or at ${Number(m.dueHours).toLocaleString()} hrs${hl!==null && m.status!=='completed' ? ` · ${hl > 0 ? hl.toLocaleString() + ' hrs left' : Math.abs(hl).toLocaleString() + ' hrs over'}` : ''}</div>` : '')(maintHoursLeft(m))}</td>
               <td style="text-transform:capitalize;">${m.priority}</td>
@@ -3682,9 +3714,12 @@ function vesselEngineForm(en, list){
   `;
 }
 
-function documentForm(){
+function documentForm(opts){
+  opts = opts || {};
   return `
     <label class="field">Document name<input name="docName" placeholder="e.g. Registration certificate, ID, insurance policy" required></label>
+    ${opts.expiry ? `<label class="field">Expiry date (optional)${dateField('docExpiry', '')}</label>
+    <div class="cl-hint" style="font-size:12px; margin:-4px 0 10px;">The dashboard warns when the document is within ${DOC_EXPIRY_WARN_DAYS} days of expiring.</div>` : ''}
     <label class="field">File (photo or PDF, max 4MB)
       <input type="file" id="docFileInput" accept="image/*,application/pdf" capture="environment">
     </label>
@@ -3809,12 +3844,13 @@ function renderModal(){
   else if(modal.type==='qual'){ title = modal.data ? 'Edit qualification' : 'Add qualification'; body = qualForm(modal.data); }
   else if(modal.type==='vessel-cost'){ title = 'Add fixed cost'; body = vesselCostForm(); }
   else if(modal.type==='vessel-engine'){ const eq = modal.list==='equipment'; title = (modal.data ? 'Edit ' : 'Add ') + (eq ? 'equipment' : 'engine'); body = vesselEngineForm(modal.data, modal.list); }
-  else if(modal.type==='vessel-doc'){ title = 'Add vessel document'; body = documentForm(); }
+  else if(modal.type==='vessel-doc'){ title = 'Add vessel document'; body = documentForm({ expiry:true }); }
+  else if(modal.type==='doc-expiry'){ title = 'Document expiry date'; body = `<p style="margin-top:0;"><b>${esc(modal.data.name)}</b></p><label class="field">Expiry date${dateField('docExpiry', modal.data.expiry||'')}</label><div class="cl-hint" style="font-size:12px; margin:-4px 0 10px;">Clear the date if this document doesn't expire.</div>`; }
   else if(modal.type==='crew-doc'){ title = 'Add crew document'; body = documentForm(); }
   else if(modal.type==='tender'){ title = modal.data ? 'Edit tender' : 'Add tender'; body = tenderForm(modal.data); }
   else if(modal.type==='tender-engine'){ title = modal.data ? 'Edit engine' : 'Add engine'; body = vesselEngineForm(modal.data); }
   else if(modal.type==='tender-task'){ title = modal.data ? 'Edit task' : 'Add task'; body = tenderMaintenanceForm(modal.data); }
-  else if(modal.type==='tender-doc'){ title = 'Add tender document'; body = documentForm(); }
+  else if(modal.type==='tender-doc'){ title = 'Add tender document'; body = documentForm({ expiry:true }); }
   else if(modal.type==='company'){ title = modal.data ? 'Edit company' : 'Add company'; body = companyForm(modal.data); }
   else if(modal.type==='checklist'){ title = modal.data ? 'Edit checklist' : 'New checklist'; body = checklistForm(modal.data); }
   else if(modal.type==='checklist-import'){ title = 'Import standard checklists'; body = checklistImportForm(); }
@@ -3945,6 +3981,14 @@ function attachModalEvents(){
     state.modal = { type:'view-vessel', id:vesselId };
     await persistArray('vessels', fresh => fresh.map(v=> v.id===vesselId ? { ...v, [list]:(v[list]||[]).filter(en=>en.id!==engineId) } : v));
     render();
+  }));
+  document.querySelectorAll('[data-action="doc-expiry"]').forEach(b=>b.addEventListener('click', ()=>{
+    const v = state.vessels.find(x=>x.id===b.dataset.id);
+    const t = b.dataset.tenderId ? ((v && v.tenders) || []).find(x=>x.id===b.dataset.tenderId) : null;
+    const doc = ((b.dataset.tenderId ? t && t.documents : v && v.documents) || []).find(d=>d.id===b.dataset.docId);
+    if(!doc) return;
+    state.modal = { type:'doc-expiry', vesselId:b.dataset.id, tenderId:b.dataset.tenderId || null, data:doc };
+    renderModal();
   }));
   document.querySelectorAll('[data-action="add-vessel-doc"]').forEach(b=>b.addEventListener('click', ()=>{
     state.modal = { type:'vessel-doc', id:b.dataset.id };
@@ -4176,7 +4220,7 @@ async function handleFormSubmit(e){
     const dataUrl = fd.get('docData');
     if(!dataUrl){ alert('Please choose a file first.'); return; }
     const vesselId = modal.id;
-    const docData = { id:uid('doc'), name:fd.get('docName'), fileName:fd.get('docFileName')||'', addedDate:new Date().toISOString().slice(0,10) };
+    const docData = { id:uid('doc'), name:fd.get('docName'), fileName:fd.get('docFileName')||'', addedDate:new Date().toISOString().slice(0,10), expiry:fd.get('docExpiry')||'' };
     try{ await storeDocFile(docData.id, dataUrl); }
     catch(err){ alert("Couldn't upload the document — check your connection and try again."); return; }
     targetKey = 'vessels';
@@ -4247,11 +4291,21 @@ async function handleFormSubmit(e){
     });
     nextModal = { type:'view-tender', vesselId, tenderId };
   }
+  else if(modal.type==='doc-expiry'){
+    const expiry = fd.get('docExpiry') || '';
+    const { vesselId, tenderId } = modal, docId = modal.data.id;
+    const setExp = docs => (docs||[]).map(d=> d.id===docId ? { ...d, expiry } : d);
+    targetKey = 'vessels';
+    mutateFn = fresh => fresh.map(v=> v.id!==vesselId ? v : tenderId
+      ? { ...v, tenders:(v.tenders||[]).map(t=> t.id===tenderId ? { ...t, documents:setExp(t.documents) } : t) }
+      : { ...v, documents:setExp(v.documents) });
+    nextModal = tenderId ? { type:'view-tender', vesselId, tenderId } : { type:'view-vessel', id:vesselId };
+  }
   else if(modal.type==='tender-doc'){
     const dataUrl = fd.get('docData');
     if(!dataUrl){ alert('Please choose a file first.'); return; }
     const vesselId = modal.vesselId, tenderId = modal.tenderId;
-    const docData = { id:uid('doc'), name:fd.get('docName'), fileName:fd.get('docFileName')||'', addedDate:new Date().toISOString().slice(0,10) };
+    const docData = { id:uid('doc'), name:fd.get('docName'), fileName:fd.get('docFileName')||'', addedDate:new Date().toISOString().slice(0,10), expiry:fd.get('docExpiry')||'' };
     try{ await storeDocFile(docData.id, dataUrl); }
     catch(err){ alert("Couldn't upload the document — check your connection and try again."); return; }
     targetKey = 'vessels';
@@ -4558,6 +4612,16 @@ function attachContentEvents(){
   const fm = document.getElementById('filterMeter');
   if(fv) fv.addEventListener('change', ()=>{ state.filters.vessel=fv.value; state.filters.meter='all'; render(); });
   if(fm) fm.addEventListener('change', ()=>{ state.filters.meter=fm.value; render(); });
+  /* Equipment column: set a task's engine / equipment straight from the list */
+  document.querySelectorAll('select.row-meter').forEach(sel=> sel.addEventListener('change', async ()=>{
+    const task = state.maintenance.find(m=>m.id===sel.dataset.id);
+    if(!task) return;
+    const meterId = sel.value;
+    const meterLabel = meterId ? (maintMeterLabel(task.vesselId, meterId) || task.meterLabel || '') : '';
+    await persistArray('maintenance', fresh => fresh.map(m=> m.id===task.id
+      ? { ...m, meterId, meterLabel, dueHours: meterId === m.meterId ? (m.dueHours ?? null) : null } : m));
+    render();
+  }));
   if(fc) fc.addEventListener('change', ()=>{ state.filters.category=fc.value; render(); });
   if(fs) fs.addEventListener('change', ()=>{ state.filters.status=fs.value; render(); });
   attachChecklistPageEvents();
