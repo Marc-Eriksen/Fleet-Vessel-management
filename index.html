@@ -2705,8 +2705,7 @@ const MONTH_NAMES = ['January','February','March','April','May','June','July','A
 const FIN_PERIODS = [
   { id:'monthly', label:'Monthly', title:'Monthly cost report' },
   { id:'yearly', label:'Yearly', title:'Yearly cost report' },
-  { id:'all', label:'All time', title:'All-time cost report' },
-  { id:'open', label:'Open work', title:'Open work cost report' }
+  { id:'all', label:'All time', title:'All-time cost report' }
 ];
 const FIN_CATEGORIES = [
   { id:'parts', label:'Parts' },
@@ -2769,22 +2768,14 @@ function renderFinScope(){
     </div>`;
 }
 
-/* Every cost line in the current company / vessel: costs entered on Finance plus the costs on
-   maintenance tasks. `spent` is true for money actually spent — a Finance entry, or a task
-   that's been completed — which is what the budget is worked out from. */
+/* Every cost line in the current company / vessel: the costs entered on Finance. Costs
+   left on maintenance tasks don't count — move them in with "Move maintenance costs to Finance". */
 function costLines(){
-  const tasks = getAllMaintenanceTasks().filter(m=>inFinScope(m.vesselId)).map(m=>({
-    source:'Maintenance task', date: taskCostDate(m), title: m.title || '', description: m.description || '',
-    vesselId: m.vesselId, vessel: vesselName(m.vesselId), tender: m._tenderName || '', category: taskFinCategory(m), provider:'',
-    status: stampLabel(maintStatus(m)), statusId: maintStatus(m), spent: m.status === 'completed',
-    cost: Number(m.cost)||0
-  }));
-  const entries = state.financeItems.filter(x=>inFinScope(x.vesselId)).map(x=>({
+  return state.financeItems.filter(x=>inFinScope(x.vesselId)).map(x=>({
     source:'Finance entry', date: x.date || '', title: x.description || finCategoryLabel(x.category), description: x.invoiceRef ? `Ref ${x.invoiceRef}` : '',
     vesselId: x.vesselId, vessel: vesselName(x.vesselId), tender:'', category: x.category, provider: (x.provider && x.provider.name) || '',
     status:'Recorded', statusId:'completed', spent:true, cost: Number(x.cost)||0
   }));
-  return [...tasks, ...entries];
 }
 function sumBy(rows, keyFn){
   const out = {};
@@ -2804,20 +2795,16 @@ function costReportData(p){
   } else if(p.period === 'yearly'){
     from = p.from; to = p.to;
     periodLabel = `${fmtDate(from)} to ${fmtDate(to)}`;
-  } else if(p.period === 'open'){
-    periodLabel = `Open as of ${fmtDate(localISODate(new Date()))}`;
   } else {
     periodLabel = `All recorded costs to ${fmtDate(localISODate(new Date()))}`;
   }
-  if(p.period === 'open') lines = lines.filter(l=>!l.spent);
   if(from) lines = lines.filter(l=> l.date && l.date >= from && l.date <= to);
   const rows = lines.sort((a,b)=> (a.date||'').localeCompare(b.date||''));
   const total = rows.reduce((s,r)=>s+r.cost,0);
-  const openTotal = rows.filter(r=>!r.spent).reduce((s,r)=>s+r.cost,0);
   const byCat = sumBy(rows, r=>r.category);
   const byCategory = FIN_CATEGORIES.filter(c=>byCat[c.id]).map(c=>[c.label, byCat[c.id]]);
   const title = (FIN_PERIODS.find(x=>x.id===p.period) || FIN_PERIODS[0]).title;
-  return { title, periodLabel, vesselLabel: finScopeLabel(), rows, total, openTotal, completedTotal: total - openTotal,
+  return { title, periodLabel, vesselLabel: finScopeLabel(), rows, total,
     byVessel: sumBy(rows, r=>r.vessel), byCategory };
 }
 
@@ -3036,7 +3023,7 @@ function renderCostReports(){
       )}
       ${periodFields}
       ${f.period==='yearly' ? '<p class="fin-hint">Pick any start date, such as the first day of your financial year. The end date fills in a year later and can be changed.</p>' : ''}
-      ${f.period==='open' ? '<p class="fin-hint">Every maintenance task not yet completed, whatever its due date.</p>' : '<p class="fin-hint">Includes costs recorded under Costs and the costs on maintenance tasks.</p>'}
+      <p class="fin-hint">Includes the costs recorded under Costs.</p>
       <button type="button" class="btn primary" data-action="fin-generate">Generate report</button>
     </div>
     ${!r ? '<div class="empty-note">Choose a report and press Generate.</div>' : `
@@ -3048,8 +3035,6 @@ function renderCostReports(){
     </div>
     <div class="cost-total-bar">
       <div class="ctb-item"><div class="label">Total cost</div><div class="value">${fmtCurrency(r.total)}</div></div>
-      ${f.report.period!=='open' ? `<div class="ctb-item"><div class="label">Spent</div><div class="value">${fmtCurrency(r.completedTotal)}</div></div>
-      <div class="ctb-item"><div class="label">Still open</div><div class="value">${fmtCurrency(r.openTotal)}</div></div>` : ''}
       <div class="ctb-item"><div class="label">Items</div><div class="value">${r.rows.length}</div></div>
     </div>
     ${renderFinShare('report')}
@@ -3125,7 +3110,7 @@ function renderBudget(){
         `<label class="field">Based on<select id="budBase">${[1,2,3].map(n=>`<option value="${n}" ${b.baseYears===n?'selected':''}>Average of the last ${n===1?'year':n+' years'}</option>`).join('')}</select></label>`,
         `<label class="field">Increase on average (%)<input id="budUplift" type="number" step="0.5" value="${esc(b.uplift)}"></label>`
       )}
-      <p class="fin-hint">Uses money actually spent: costs recorded under Costs, plus completed maintenance tasks. Years with nothing recorded count as zero — choose fewer years if your records are newer than that.</p>
+      <p class="fin-hint">Uses money actually spent: the costs recorded under Costs. Years with nothing recorded count as zero — choose fewer years if your records are newer than that.</p>
     </div>
     <div class="toolbar" style="margin-top:6px;">
       <div>
@@ -3139,7 +3124,7 @@ function renderBudget(){
       ${d.started ? `<div class="ctb-item"><div class="label">Spent so far</div><div class="value">${fmtCurrency(d.total.ytd)}</div></div>
       <div class="ctb-item"><div class="label">Remaining</div><div class="value">${fmtCurrency(d.total.remaining)}</div></div>` : ''}
     </div>
-    ${!d.hasHistory ? `<div class="empty-note" style="margin-bottom:14px;">No spending recorded in ${esc(d.baseLabel)} for ${esc(d.vesselLabel)}, so the budget is R0. Record past costs under Costs, or complete maintenance tasks with their costs, to build history.</div>` : ''}
+    ${!d.hasHistory ? `<div class="empty-note" style="margin-bottom:14px;">No spending recorded in ${esc(d.baseLabel)} for ${esc(d.vesselLabel)}, so the budget is R0. Record past costs under Costs to build history.</div>` : ''}
     ${renderFinShare('budget')}
     ${table(d.categories, 'Category', true)}
     ${d.vessels.length ? `<div class="detail-section"><h4>By vessel</h4></div>${table(d.vessels, 'Vessel', false)}` : ''}
@@ -3302,7 +3287,7 @@ function costReportFiles(){
 
   const { doc, y } = newPdf(r.title, [
     `Period: ${r.periodLabel}`, `Vessels: ${r.vesselLabel}`, `Generated: ${fmtDate(stamp)}`,
-    `Total: ${fmtCurrency(r.total)}${p.period!=='open' ? `   (spent ${fmtCurrency(r.completedTotal)}, still open ${fmtCurrency(r.openTotal)})` : ''}   ·   ${r.rows.length} item${r.rows.length===1?'':'s'}`
+    `Total: ${fmtCurrency(r.total)}   ·   ${r.rows.length} item${r.rows.length===1?'':'s'}`
   ]);
   const cols = [{label:'Date',w:19},{label:'Item',w:44},{label:'Category',w:26},{label:'Vessel',w:25},{label:'Provider',w:28},{label:'Status',w:21},{label:'Cost',w:19,align:'right'}];
   const body = r.rows.map(x=>[fmtDate(x.date), x.title + (x.description ? ` — ${x.description}` : ''), finCategoryLabel(x.category), x.vessel + (x.tender ? ` (${x.tender})` : ''), x.provider, x.status, fmtCurrency(x.cost)]);
