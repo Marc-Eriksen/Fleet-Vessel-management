@@ -1,6 +1,6 @@
 // OCEANHUB service worker: makes the app installable and lets the shell
 // open offline. Data still comes live from Firebase, which is never cached.
-const CACHE = 'ocean-hub-v2';
+const CACHE = 'ocean-hub-v3';
 const SHELL = [
   './',
   './index.html',
@@ -37,9 +37,11 @@ self.addEventListener('fetch', event => {
   const url = new URL(req.url);
 
   // Same-origin: network first so updates show up immediately, cache as fallback.
+  // 'no-cache' revalidates with the server instead of reusing the browser's HTTP cache
+  // (GitHub Pages allows 10 minutes), so a reload right after a deploy gets the new app.
   if (url.origin === self.location.origin) {
     event.respondWith(
-      fetch(req)
+      fetch(req, { cache: 'no-cache' })
         .then(res => {
           if (res.ok) {
             const copy = res.clone();
