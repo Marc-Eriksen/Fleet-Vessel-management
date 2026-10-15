@@ -2982,7 +2982,8 @@ function financeItemForm(x){
    free tier — switched on in the Firebase console under AI Logic). Each invoice line comes back as
    its own cost for the user to check; saving adds them to Finance with a copy of the invoice kept
    at oceanhub/files. The AI library only loads the first time someone scans. */
-const INVOICE_MODEL = 'gemini-3.5-flash';
+/* Tried in order: when Google reports a model as busy, the next one reads the invoice instead. */
+const INVOICE_MODELS = ['gemini-3.5-flash', 'gemini-3.8-flash', 'gemini-3.5-flash-lite'];
 const INVOICE_MAX_BYTES = 15 * 1024 * 1024; /* all pages together, as sent to Gemini */
 const INVOICE_PROMPT = `You are reading a supplier invoice, receipt or quote for a South African boat and vessel operator. Extract it as JSON.
 - supplier: the business that issued the document (not the customer / bill-to).
@@ -2997,10 +2998,10 @@ const INVOICE_PROMPT = `You are reading a supplier invoice, receipt or quote for
 - Numbers only, without currency symbols or thousands separators.
 - If the document is not an invoice, receipt or quote, set isInvoice to false and return no lines.`;
 
-let invoiceModelPromise = null;
-function invoiceModel(){
-  if(!invoiceModelPromise){
-    invoiceModelPromise = (async ()=>{
+const invoiceModelPromises = {};
+function invoiceModel(name){
+  if(!invoiceModelPromises[name]){
+    invoiceModelPromises[name] = (async ()=>{
       const appMod = await import('https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js');
       const ai = await import('https://www.gstatic.com/firebasejs/12.19.0/firebase-ai.js');
       const app = appMod.getApps().find(a=>a.name==='invoice-reader') || appMod.initializeApp(FIREBASE_CONFIG, 'invoice-reader');
@@ -3023,16 +3024,21 @@ function invoiceModel(){
         optionalProperties: ['supplier','invoiceNumber','invoiceDate','currency','vatAmount','total']
       });
       return ai.getGenerativeModel(ai.getAI(app, { backend: new ai.GoogleAIBackend() }), {
-        model: INVOICE_MODEL,
+        model: name,
         generationConfig: { responseMimeType:'application/json', responseSchema:schema, temperature:0 }
       });
-    })().catch(err=>{ invoiceModelPromise = null; throw err; });
+    })().catch(err=>{ delete invoiceModelPromises[name]; throw err; });
   }
-  return invoiceModelPromise;
+  return invoiceModelPromises[name];
 }
 
+/* Google's "try again later" answers: overloaded, unavailable or a temporary server error. */
+function invoiceModelBusy(err){
+  return /high demand|overloaded|UNAVAILABLE|\[(500|502|503|504) |try again later/i.test(String(err && err.message || err));
+}
 function invoiceErrorText(err){
   const s = String((err && (err.code || '')) + ' ' + (err && err.message || err));
+  if(invoiceModelBusy(err)) return "Google's invoice reader is busy right now. Wait a minute and tap Read invoice again, or add these costs by hand with \"+ Add cost\".";
   if(/api-not-enabled|SERVICE_DISABLED|has not been used|is disabled/i.test(s))
     return 'Invoice reading isn\'t switched on yet. The OCEANHUB admin needs to open the Firebase console, go to AI Logic and click "Get started" with the Gemini Developer API.';
   if(/429|quota|RESOURCE_EXHAUSTED|rate limit/i.test(s))
@@ -3207,9 +3213,16 @@ async function readInvoice(){
   m.step = 'reading'; m.error = '';
   renderModal();
   try{
-    const model = await invoiceModel();
     const parts = [{ text: INVOICE_PROMPT }, ...m.files.map(f=>({ inlineData:{ mimeType:f.mime, data:f.dataUrl.slice(f.dataUrl.indexOf(',') + 1) } }))];
-    const res = await model.generateContent(parts);
+    let res = null;
+    for(let i = 0; i < INVOICE_MODELS.length; i++){
+      try{ res = await (await invoiceModel(INVOICE_MODELS[i])).generateContent(parts); break; }
+      catch(err){
+        if(state.modal !== m) return;
+        if(!invoiceModelBusy(err) || i === INVOICE_MODELS.length - 1) throw err;
+        console.warn(`${INVOICE_MODELS[i]} is busy, trying ${INVOICE_MODELS[i+1]}`, err);
+      }
+    }
     const r = JSON.parse(res.response.text());
     if(state.modal !== m) return; /* cancelled while reading */
     if(!r.isInvoice || !(r.lines||[]).length){
