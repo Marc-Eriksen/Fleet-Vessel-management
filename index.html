@@ -820,6 +820,7 @@ function loadState(){
         render();
         resolve();
         if(session.role === 'admin') moveInlineDocFiles();
+        addDueRepeatingCosts();
       } else if(session && !state.modal && !state.clDirty){
         /* live update from another device/user — only refresh if nobody's mid-edit in a form */
         render();
@@ -2895,6 +2896,56 @@ const FIN_CATEGORIES = [
   { id:'scheduled', label:'Scheduled maintenance' },
   { id:'fixed', label:'Fixed costs' } /* recurring running costs: insurance, registration, management fees, berthing, subscriptions */
 ];
+/* ---------- Monthly repeating costs ---------- */
+/* A cost saved with "Repeat every month" is copied on the same day of each later month (the last
+   day in shorter months), up to today and any end month. There's no server to schedule this, so
+   it happens when the app is opened or brought back to the screen. Each copy's id is the original's
+   id plus the month, and the write is a transaction, so two devices can't add the same month twice.
+   Deleting a copy records its month in repeat.skip so it isn't added again. */
+function dueRepeatingCosts(items, todayIso){
+  const have = new Set(items.map(i=>i.id));
+  const out = [];
+  items.forEach(x=>{
+    const r = x.repeat;
+    if(!r || r.every !== 'monthly' || !/^\d{4}-\d{2}-\d{2}$/.test(x.date || '')) return;
+    const [y, m, d] = x.date.split('-').map(Number);
+    const skip = new Set(asArray(r.skip));
+    for(let k = 1; k <= 240; k++){
+      const idx = m - 1 + k, yy = y + Math.floor(idx / 12), mon = idx % 12;
+      const day = Math.min(d, new Date(yy, mon + 1, 0).getDate());
+      const iso = `${yy}-${String(mon + 1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+      if(iso > todayIso || (r.until && iso.slice(0,7) > r.until.slice(0,7))) break;
+      const month = iso.slice(0,7), id = `${x.id}_${month}`;
+      if(have.has(id) || skip.has(month)) continue;
+      out.push({ id, repeatOf:x.id, vesselId:x.vesselId, category:x.category, description:x.description, date:iso,
+        cost:x.cost, invoiceRef:'', notes:x.notes || '', provider:x.provider || {}, createdBy:'Added automatically (monthly)', createdDate:todayIso });
+    }
+  });
+  return out;
+}
+let repeatsRunning = false;
+async function addDueRepeatingCosts(){
+  if(!session || !fbInitialized || repeatsRunning) return;
+  repeatsRunning = true;
+  try{
+    const today = localISODate(new Date());
+    await firebase.database().ref('oceanhub/data/financeItems').transaction(cur=>{
+      /* cur can be null before the local copy has loaded; writing null back is conditional, so the
+         server answers with the real list and this runs again on it */
+      if(cur === null) return null;
+      const fresh = normalizeKey('financeItems', cur);
+      const add = dueRepeatingCosts(fresh, today);
+      if(!add.length) return; /* nothing due — leave it alone */
+      return JSON.parse(JSON.stringify([...fresh, ...add])); /* Firebase refuses undefined anywhere in a write */
+    });
+  }catch(e){
+    console.warn('Adding monthly costs failed — will try again next time the app opens', e);
+  }finally{
+    repeatsRunning = false;
+  }
+}
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'visible') addDueRepeatingCosts(); });
+
 const FIN_EMAIL_KEY = 'oceanhub_fin_email';
 try{ state.fin.emailTo = localStorage.getItem(FIN_EMAIL_KEY) || ''; }catch(e){}
 
@@ -3069,7 +3120,7 @@ function renderFinEntries(){
             <tr>
               <td style="white-space:nowrap;">${fmtDate(x.date)}</td>
               <td>${esc(finCategoryLabel(x.category))}</td>
-              <td><b>${esc(x.description)}</b>${x.invoiceRef ? `<div style="color:var(--ink-soft); font-size:11.5px;">Ref ${esc(x.invoiceRef)}</div>` : ''}${x.notes ? `<div style="color:var(--ink-soft); font-size:11.5px;">${esc(x.notes)}</div>` : ''}</td>
+              <td><b>${esc(x.description)}</b>${x.repeat ? ` <span class="stamp upcoming" style="font-size:10px;">Repeats monthly${x.repeat.until ? ` to ${fmtDate(x.repeat.until)}` : ''}</span>` : x.repeatOf ? ' <span class="stamp upcoming" style="font-size:10px;">Monthly</span>' : ''}${x.invoiceRef ? `<div style="color:var(--ink-soft); font-size:11.5px;">Ref ${esc(x.invoiceRef)}</div>` : ''}${x.notes ? `<div style="color:var(--ink-soft); font-size:11.5px;">${esc(x.notes)}</div>` : ''}</td>
               <td>${esc(vesselName(x.vesselId))}</td>
               <td>${pv.name ? `<b>${esc(pv.name)}</b>` : '<span style="color:var(--ink-soft);">—</span>'}${[pv.contactName, pv.phone, pv.email].filter(Boolean).map(v=>`<div style="color:var(--ink-soft); font-size:11.5px;">${esc(v)}</div>`).join('')}</td>
               <td class="num">${fmtCurrency(x.cost)}</td>
@@ -3117,6 +3168,15 @@ function financeItemForm(x){
       `<label class="field">Cost (R)<input name="cost" type="number" min="0" step="0.01" value="${x.cost===''||x.cost==null?'':esc(x.cost)}" required></label>`
     )}
     <label class="field">Invoice / quote reference<input name="invoiceRef" value="${esc(x.invoiceRef||'')}" placeholder="optional"></label>
+    ${x.repeatOf ? `<p class="fin-hint" style="margin:-4px 0 12px;">Added automatically for this month from a monthly cost. Changes here affect this month only — edit the original cost to change future months.</p>` : `
+    <label style="display:flex; align-items:center; gap:9px; font-size:13px; font-weight:600; color:var(--ink); margin:0 0 10px;">
+      <input type="checkbox" name="repeatMonthly" value="1" id="finRepeatCheck" ${x.repeat ? 'checked' : ''} style="width:auto;">
+      Repeat every month (e.g. management fees, insurance)
+    </label>
+    <div id="finRepeatFields" style="${x.repeat ? '' : 'display:none;'}">
+      <label class="field">Last month to add (optional)${dateField('repeatUntil', (x.repeat && x.repeat.until) || '')}</label>
+      <p class="fin-hint">The same cost is added on this day each month, up to today, whenever the app is opened. Leave the end blank to keep repeating; untick to stop.</p>
+    </div>`}
 
     <div class="detail-section" style="margin-top:4px;"><h4>Service provider</h4></div>
     ${fieldRow(
@@ -3466,6 +3526,8 @@ function wireFinanceItemForm(){
   const form = document.getElementById('modalForm');
   const name = form && state.modal && state.modal.type==='finance-item' ? form.elements.providerName : null;
   if(!name) return;
+  const repeat = document.getElementById('finRepeatCheck');
+  if(repeat) repeat.addEventListener('change', ()=>{ document.getElementById('finRepeatFields').style.display = repeat.checked ? '' : 'none'; });
   name.addEventListener('input', ()=>{
     const p = knownProviders().get(name.value.trim().toLowerCase());
     if(!p) return;
@@ -4566,7 +4628,7 @@ async function handleFormSubmit(e){
   e.preventDefault();
   const fd = new FormData(e.target);
   const modal = state.modal;
-  let targetKey = null, mutateFn = null, nextModal = null;
+  let targetKey = null, mutateFn = null, nextModal = null, afterSave = null;
 
   if(modal.type==='vessel'){
     const data = { name:fd.get('name'), type:fd.get('type'), reg:fd.get('reg'), status:fd.get('status'), engineHours:Number(fd.get('engineHours'))||0, notes:fd.get('notes')||'', photo:fd.get('photo')||'', ownerName:fd.get('ownerName')||'', ownerPhone:fd.get('ownerPhone')||'', ownerEmail:fd.get('ownerEmail')||'' };
@@ -4815,8 +4877,13 @@ async function handleFormSubmit(e){
     const data = { vesselId:fd.get('vesselId'), category:fd.get('category'), description:t('description'), date:fd.get('date'),
       cost: Math.round(cost*100)/100, invoiceRef:t('invoiceRef'), notes:t('notes'),
       provider:{ name:t('providerName'), contactName:t('providerContact'), phone:t('providerPhone'), email:t('providerEmail') } };
+    if(!(modal.data && modal.data.repeatOf)){
+      const was = modal.data && modal.data.repeat;
+      data.repeat = fd.get('repeatMonthly') === '1' ? { every:'monthly', until: fd.get('repeatUntil') || '', skip: (was && was.skip) || [] } : null;
+    }
     const editId = modal.data ? modal.data.id : null;
     targetKey = 'financeItems';
+    afterSave = addDueRepeatingCosts;
     mutateFn = fresh => editId
       ? fresh.map(x=> x.id===editId ? { ...x, ...data } : x)
       : [...fresh, { id:uid('fi'), createdBy: session ? session.email : '', createdDate: localISODate(new Date()), ...data }];
@@ -4848,6 +4915,7 @@ async function handleFormSubmit(e){
 
   if(targetKey && mutateFn){
     await persistArray(targetKey, mutateFn);
+    if(afterSave) await afterSave();
   }
   state.modal = nextModal;
   render();
@@ -4986,8 +5054,11 @@ function attachContentEvents(){
         case 'edit-fin-item': state.modal = { type:'finance-item', data: state.financeItems.find(x=>x.id===id) }; renderModal(); break;
         case 'delete-fin-item': {
           const x = state.financeItems.find(i=>i.id===id);
-          if(x && confirm(`Delete this cost — ${x.description} (${fmtCurrency(x.cost)})?`)){
-            const fresh = await persistArray('financeItems', fresh => fresh.filter(i=>i.id!==id));
+          const extra = x && x.repeat ? ' It stops repeating; months already added are kept.' : x && x.repeatOf ? " This month won't be added again." : '';
+          if(x && confirm(`Delete this cost — ${x.description} (${fmtCurrency(x.cost)})?${extra}`)){
+            const month = String(x.date||'').slice(0,7);
+            const fresh = await persistArray('financeItems', fresh => fresh.filter(i=>i.id!==id).map(i=>
+              x.repeatOf && i.id===x.repeatOf && i.repeat ? { ...i, repeat:{ ...i.repeat, skip:[...new Set([...(i.repeat.skip||[]), month])] } } : i));
             /* the invoice copy goes once no other cost from that invoice still uses it */
             if(fresh){
               const stillUsed = new Set(fresh.flatMap(i=>(i.invoiceFiles||[]).map(f=>f.id)));
