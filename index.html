@@ -1207,7 +1207,7 @@ function renderDashboard(){
     events.push({ date:m.dueDate, kind:'Maintenance', title:m.title, sub:`${vesselLabel} · ${m.category==='scheduled'?'Scheduled':m.category==='daily'?'Daily':'Unscheduled'}`, status:maintStatus(m) });
   });
   state.crew.forEach(c=>c.quals.forEach(q=>{
-    events.push({ date:q.expiry, kind:'Qualification', title:q.name, sub:`${c.name} (${c.role})`, status:qualStatus(q.expiry) });
+    events.push({ date:q.expiry, kind:'Crew doc', title:q.name, sub:`${c.name} (${c.role})`, status:qualStatus(q.expiry) });
   }));
   const clOutstanding = checklistAssignments().filter(a=>!a.run || a.run.status!=='completed').length;
   const lowStock = stockRows().filter(r=>r.low).length;
@@ -1234,9 +1234,9 @@ function renderDashboard(){
       <div class="kpi"><div class="label">Vessels on register</div><div class="value">${state.vessels.length}</div></div>
       <div class="kpi ${overdue>0?'alert':''}"><div class="label">Overdue tasks</div><div class="value">${overdue}</div></div>
       <div class="kpi ${dueSoon>0?'warn':''}"><div class="label">Due within 14 days / 75 hrs</div><div class="value">${dueSoon}</div></div>
-      <div class="kpi ${qualsExpired>0?'alert':''}"><div class="label">Quals expired</div><div class="value">${qualsExpired}</div></div>
-      <div class="kpi ${qualsRedAlert>0?'alert':''}"><div class="label">Quals red alert (≤30 days)</div><div class="value">${qualsRedAlert}</div></div>
-      <div class="kpi ${qualsAdvisory>0?'warn':''}"><div class="label">Quals advisory (≤60 days)</div><div class="value">${qualsAdvisory}</div></div>
+      <div class="kpi ${qualsExpired>0?'alert':''}"><div class="label">Crew docs expired</div><div class="value">${qualsExpired}</div></div>
+      <div class="kpi ${qualsRedAlert>0?'alert':''}"><div class="label">Crew docs red alert (≤30 days)</div><div class="value">${qualsRedAlert}</div></div>
+      <div class="kpi ${qualsAdvisory>0?'warn':''}"><div class="label">Crew docs advisory (≤60 days)</div><div class="value">${qualsAdvisory}</div></div>
       <div class="kpi ${clOutstanding>0?'warn':''}"><div class="label">Checklists due</div><div class="value">${clOutstanding}</div></div>
       <div class="kpi ${lowStock>0?'alert':''}"><div class="label">Low stock items</div><div class="value">${lowStock}</div></div>
       <div class="kpi ${svcAlerts.some(a=>a.d.status==='critical')?'alert':svcAlerts.length?'warn':''}"><div class="label">Manufacturer services due</div><div class="value">${svcAlerts.length}</div></div>
