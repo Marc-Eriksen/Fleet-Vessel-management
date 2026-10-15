@@ -472,7 +472,7 @@ let state = {
   hoursSaved: false,
   activeTab: 'dashboard',
   modal: null,
-  filters: { vessel:'all', category:'all', status:'all', billing:'all' },
+  filters: { vessel:'all', meter:'all', category:'all', status:'all', billing:'all' },
   clView: { vesselId:null, checklistId:null, period:null },
   clDirty: false,
   clSaved: false,
@@ -2603,6 +2603,7 @@ function renderMaintenanceTasks(){
   const allTasks = getAllMaintenanceTasks();
   let rows = allTasks.slice();
   if(f.vessel!=='all') rows = rows.filter(m=>m.vesselId===f.vessel);
+  if(f.vessel!=='all' && f.meter!=='all') rows = rows.filter(m=> f.meter==='general' ? !m.meterId : m.meterId===f.meter);
   if(f.category!=='all') rows = rows.filter(m=>m.category===f.category);
   if(f.status!=='all') rows = rows.filter(m=>maintStatus(m)===f.status);
 
@@ -2636,6 +2637,11 @@ function renderMaintenanceTasks(){
           <option value="all">All vessels</option>
           ${state.vessels.map(v=>`<option value="${v.id}" ${f.vessel===v.id?'selected':''}>${esc(v.name)}</option>`).join('')}
         </select>
+        ${f.vessel!=='all' ? `<select id="filterMeter">
+          <option value="all" ${f.meter==='all'?'selected':''}>All equipment</option>
+          <option value="general" ${f.meter==='general'?'selected':''}>Whole vessel / general</option>
+          ${vesselHourMeters(state.vessels.find(v=>v.id===f.vessel)).map(m=>`<option value="${esc(m.id)}" ${f.meter===m.id?'selected':''}>${esc(m.label)}</option>`).join('')}
+        </select>` : ''}
         <select id="filterCategory">
           <option value="all" ${f.category==='all'?'selected':''}>All types</option>
           <option value="scheduled" ${f.category==='scheduled'?'selected':''}>Scheduled</option>
@@ -2666,7 +2672,7 @@ function renderMaintenanceTasks(){
             const deleteAttrs = isTender ? `data-action="delete-tender-task" data-id="${m.vesselId}" data-tender-id="${m._tenderId}" data-task-id="${m.id}"` : `data-action="delete-maintenance" data-id="${m.id}"`;
             return `
             <tr>
-              <td><b>${esc(m.title)}</b>${m.description?`<div style="color:var(--ink-soft); font-size:11.5px; margin-top:2px;">${esc(m.description)}</div>`:''}</td>
+              <td><b>${esc(m.title)}</b>${m.meterId ? `<div style="color:var(--ink-soft); font-size:11.5px; margin-top:2px;">⚙ ${esc(maintMeterLabel(m.vesselId, m.meterId) || m.meterLabel || 'Equipment')}</div>` : ''}${m.description?`<div style="color:var(--ink-soft); font-size:11.5px; margin-top:2px;">${esc(m.description)}</div>`:''}</td>
               <td>${vesselLabel}</td>
               <td style="text-transform:capitalize;">${m.category}</td>
               <td>${fmtDate(m.dueDate)}</td>
@@ -3492,6 +3498,22 @@ function vesselForm(v){
   `;
 }
 
+/* Options for the equipment a maintenance task is for: the vessel's hour meters (engines,
+   other equipment and tender engines from its vessel details), or the vessel as a whole. */
+const METER_GROUPS = [ { kind:'engine', label:'Engines' }, { kind:'equipment', label:'Other equipment' }, { kind:'tender', label:'Tender engines' } ];
+function maintMeterOptions(vesselId, selectedId, savedLabel){
+  const meters = vesselHourMeters(state.vessels.find(v=>v.id===vesselId));
+  const opt = m => `<option value="${esc(m.id)}" ${m.id===selectedId?'selected':''}>${esc([m.label, m.model].filter(Boolean).join(' — '))} (${m.hours.toLocaleString()} hrs)</option>`;
+  const missing = selectedId && !meters.some(m=>m.id===selectedId)
+    ? `<option value="${esc(selectedId)}" data-label="${esc(savedLabel||'')}" selected>${esc(savedLabel || 'Equipment')} (no longer on vessel)</option>` : '';
+  return `<option value="">Whole vessel / general</option>${missing}`
+    + METER_GROUPS.map(g=>{ const ms = meters.filter(m=>m.kind===g.kind); return ms.length ? `<optgroup label="${g.label}">${ms.map(opt).join('')}</optgroup>` : ''; }).join('');
+}
+function maintMeterLabel(vesselId, meterId){
+  const m = vesselHourMeters(state.vessels.find(v=>v.id===vesselId)).find(x=>x.id===meterId);
+  return m ? [m.label, m.model].filter(Boolean).join(' — ') : '';
+}
+
 function maintenanceForm(m){
   m = m || { vesselId:state.vessels[0]?.id||'', category:'scheduled', title:'', description:'', dueDate:new Date().toISOString().slice(0,10), cost:0, priority:'medium' };
   return `
@@ -3505,6 +3527,7 @@ function maintenanceForm(m){
         <option value="daily" ${m.category==='daily'?'selected':''}>Daily</option>
       </select></label>`
     )}
+    <label class="field">Engine / equipment<select name="meterId" data-meter-select>${maintMeterOptions(m.vesselId, m.meterId||'', m.meterLabel)}</select></label>
     ${fieldRow(
       `<label class="field">Due date${dateField('dueDate', m.dueDate, { required:true })}</label>`,
       `<label class="field">Priority<select name="priority">
@@ -3818,6 +3841,8 @@ function attachModalEvents(){
     costField.style.display = show ? '' : 'none';
     costField.querySelector('input').disabled = !show;
   });
+  const meterSelect = form && form.querySelector('[data-meter-select]');
+  if(meterSelect && costVessel) costVessel.addEventListener('change', ()=>{ meterSelect.innerHTML = maintMeterOptions(costVessel.value, ''); });
   const photoInput = document.getElementById('vesselPhotoInput');
   if(photoInput){
     photoInput.addEventListener('change', async (e)=>{
@@ -4065,7 +4090,8 @@ async function handleFormSubmit(e){
       : [...fresh, { id:uid('v'), fixedCosts:[], documents:[], engines:[], ...data }];
   }
   else if(modal.type==='maintenance'){
-    const data = { vesselId:fd.get('vesselId'), category:fd.get('category'), title:fd.get('title'), description:fd.get('description')||'', dueDate:fd.get('dueDate'), cost: fd.has('cost') ? Number(fd.get('cost'))||0 : (modal.data ? modal.data.cost||0 : 0), priority:fd.get('priority'),
+    const meterId = fd.get('meterId') || '';
+    const data = { vesselId:fd.get('vesselId'), meterId, meterLabel: meterId ? (maintMeterLabel(fd.get('vesselId'), meterId) || (modal.data && modal.data.meterLabel) || '') : '', category:fd.get('category'), title:fd.get('title'), description:fd.get('description')||'', dueDate:fd.get('dueDate'), cost: fd.has('cost') ? Number(fd.get('cost'))||0 : (modal.data ? modal.data.cost||0 : 0), priority:fd.get('priority'),
       billing: fd.get('billing') || (modal.data ? billingOf(modal.data) : 'none') };
     const editId = modal.data ? modal.data.id : null;
     targetKey = 'maintenance';
@@ -4513,7 +4539,9 @@ function attachContentEvents(){
   const fv = document.getElementById('filterVessel');
   const fc = document.getElementById('filterCategory');
   const fs = document.getElementById('filterStatus');
-  if(fv) fv.addEventListener('change', ()=>{ state.filters.vessel=fv.value; render(); });
+  const fm = document.getElementById('filterMeter');
+  if(fv) fv.addEventListener('change', ()=>{ state.filters.vessel=fv.value; state.filters.meter='all'; render(); });
+  if(fm) fm.addEventListener('change', ()=>{ state.filters.meter=fm.value; render(); });
   if(fc) fc.addEventListener('change', ()=>{ state.filters.category=fc.value; render(); });
   if(fs) fs.addEventListener('change', ()=>{ state.filters.status=fs.value; render(); });
   attachChecklistPageEvents();
