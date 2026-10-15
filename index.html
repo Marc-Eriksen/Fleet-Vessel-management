@@ -284,6 +284,21 @@
   tr.total-row td{border-top:2px solid var(--border);}
   .fin-panel{background:var(--white-card); border:1px solid var(--border); border-radius:12px; padding:16px 16px 14px; margin-bottom:18px; max-width:640px;}
   .fin-hint{font-size:12px; color:var(--ink-soft); margin:-4px 0 12px;}
+  /* In-app document viewer */
+  .doc-viewer{position:fixed; inset:0; z-index:300; display:flex; flex-direction:column; background:#262625;}
+  .dv-bar{display:flex; align-items:center; gap:8px; padding:calc(env(safe-area-inset-top) + 8px) 12px 8px; background:linear-gradient(135deg, #026b71 0%, #014c50 100%); color:#fff; box-shadow:0 2px 8px rgba(0,0,0,0.3);}
+  .dv-title{flex:1; min-width:0; font-weight:700; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .dv-btn{font:inherit; font-size:13px; font-weight:700; color:#fff; background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.3); border-radius:8px; padding:7px 11px; cursor:pointer; text-decoration:none; white-space:nowrap; min-height:36px; display:inline-flex; align-items:center;}
+  .dv-btn:hover{background:rgba(255,255,255,0.22);}
+  .dv-btn:disabled{opacity:0.4; cursor:default;}
+  .dv-close{background:#fff; color:#014c50; border-color:#fff;}
+  .dv-close:hover{background:#e8f7f7;}
+  .dv-body{flex:1; overflow:auto; -webkit-overflow-scrolling:touch; padding:12px 12px calc(12px + env(safe-area-inset-bottom));}
+  .dv-pages{display:flex; flex-direction:column; align-items:center; gap:12px; min-width:min-content;}
+  .dv-pages canvas, .dv-pages img{display:block; background:#fff; box-shadow:0 2px 10px rgba(0,0,0,0.4); max-width:none;}
+  .dv-msg{color:#d6d5cf; font-size:14px; text-align:center; padding:48px 16px; line-height:1.5;}
+  .dv-msg a{color:#8fe0e4;}
+  @media (max-width:640px){ .dv-btn{padding:7px 9px;} .dv-hide-sm{display:none;} }
   /* Invoice scanning */
   .inv-pick{display:flex; gap:8px; flex-wrap:wrap; margin:4px 0 14px;}
   .inv-pick label.btn{display:inline-flex; align-items:center; cursor:pointer;}
@@ -1042,25 +1057,161 @@ function removeDocFiles(docs){
 async function openDocument(ds){
   const doc = findStoredDoc(ds);
   if(!doc){ alert('That document has no file attached.'); return; }
-  if(doc.dataUrl){ openStoredDocument(doc.dataUrl); return; }
-  await openFileById(doc.id);
+  if(doc.dataUrl){ openStoredDocument(doc.dataUrl, doc.name, doc.fileName); return; }
+  await openFileById(doc.id, doc.name, doc.fileName);
 }
-/* Opens a file kept at oceanhub/files/<fileId> in a new tab. */
-async function openFileById(fileId){
-  /* open the window now, while the tap still counts, so pop-up blockers allow it */
-  const win = window.open('', '_blank');
-  if(!win){ alert('Your browser blocked the document window — allow pop-ups for this site and try again.'); return; }
-  try{ win.document.body.innerHTML = '<p style="font:16px sans-serif; padding:24px;">Loading document…</p>'; }catch(e){}
+/* Opens a file kept at oceanhub/files/<fileId> in the document viewer. */
+async function openFileById(fileId, title, fileName){
+  const token = openDocViewer(title);
   try{
     const file = (await firebase.database().ref(FILES_PATH + fileId).once('value')).val();
-    if(!file || !file.dataUrl){ win.close(); alert('That document has no file attached.'); return; }
-    const url = URL.createObjectURL(dataUrlToBlob(file.dataUrl));
-    win.location.href = url;
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    if(!docViewerIs(token)) return;
+    if(!file || !file.dataUrl){ docViewerMessage(token, 'That document has no file attached.'); return; }
+    await showInDocViewer(token, file.dataUrl, fileName);
   }catch(e){
-    win.close();
-    alert("Couldn't open that document — check your connection and try again.");
+    docViewerMessage(token, "Couldn't open that document — check your connection and try again.");
   }
+}
+
+/* ============================= DOCUMENT VIEWER ============================= */
+/* Documents and invoice copies open full-screen inside the app, with a Close button (and the
+   phone's back gesture) to return, so an installed app never hands off to another tab.
+   PDFs are drawn with PDF.js because phones can't show a PDF inside a page; it loads the
+   first time a PDF is opened. */
+const PDFJS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+const PDFJS_WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const DV_ZOOMS = [1, 1.5, 2, 3]; /* 1 = page fits the screen width */
+let pdfjsPromise = null;
+let docViewer = null; /* { token, el, blobUrl, pdf, image, zoom, fromHistory } */
+
+function loadPdfJs(){
+  if(!pdfjsPromise){
+    pdfjsPromise = new Promise((resolve, reject)=>{
+      if(window.pdfjsLib) return resolve(window.pdfjsLib);
+      const s = document.createElement('script');
+      s.src = PDFJS_URL;
+      s.onload = ()=>{ window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL; resolve(window.pdfjsLib); };
+      s.onerror = ()=>{ pdfjsPromise = null; reject(new Error('Could not load the PDF viewer')); };
+      document.head.appendChild(s);
+    });
+  }
+  return pdfjsPromise;
+}
+
+function openDocViewer(title){
+  const reuseHistory = !!(docViewer && docViewer.fromHistory);
+  closeDocViewer(true);
+  const el = document.createElement('div');
+  el.className = 'doc-viewer';
+  el.setAttribute('role', 'dialog');
+  el.setAttribute('aria-modal', 'true');
+  el.innerHTML = `
+    <div class="dv-bar">
+      <div class="dv-title">${esc(title || 'Document')}</div>
+      <button type="button" class="dv-btn" data-dv="zoom-out" aria-label="Zoom out" disabled>−</button>
+      <button type="button" class="dv-btn" data-dv="zoom-in" aria-label="Zoom in" disabled>+</button>
+      <a class="dv-btn dv-hide-sm" data-dv="download" style="display:none;">Download</a>
+      <button type="button" class="dv-btn dv-close" data-dv="close">✕ Close</button>
+    </div>
+    <div class="dv-body"><div class="dv-pages"><div class="dv-msg">Loading document…</div></div></div>`;
+  document.body.appendChild(el);
+  document.body.style.overflow = 'hidden';
+  const token = {};
+  docViewer = { token, el, blobUrl:null, pdf:null, image:null, zoom:0, fromHistory:false };
+  /* a history entry, so the phone's back gesture closes the viewer instead of leaving the app */
+  if(reuseHistory) docViewer.fromHistory = true;
+  else try{ history.pushState({ docViewer:true }, ''); docViewer.fromHistory = true; }catch(e){}
+  el.querySelector('[data-dv="close"]').addEventListener('click', ()=>closeDocViewer());
+  el.querySelector('[data-dv="zoom-in"]').addEventListener('click', ()=>zoomDocViewer(1));
+  el.querySelector('[data-dv="zoom-out"]').addEventListener('click', ()=>zoomDocViewer(-1));
+  el.querySelector('[data-dv="close"]').focus();
+  return token;
+}
+function docViewerIs(token){ return !!(docViewer && docViewer.token === token); }
+function docViewerMessage(token, text){
+  if(!docViewerIs(token)) return;
+  docViewer.el.querySelector('.dv-pages').innerHTML = `<div class="dv-msg">${esc(text)}</div>`;
+}
+
+/* silent: replacing one document with another, so leave the history entry alone */
+function closeDocViewer(silent){
+  if(!docViewer) return;
+  const dv = docViewer;
+  docViewer = null;
+  dv.el.remove();
+  document.body.style.overflow = '';
+  if(dv.pdf) dv.pdf.destroy().catch(()=>{});
+  if(dv.blobUrl) URL.revokeObjectURL(dv.blobUrl);
+  if(!silent && dv.fromHistory && history.state && history.state.docViewer) history.back();
+}
+window.addEventListener('popstate', ()=>{ if(docViewer){ docViewer.fromHistory = false; closeDocViewer(); } });
+document.addEventListener('keydown', e=>{ if(e.key === 'Escape' && docViewer) closeDocViewer(); });
+
+async function showInDocViewer(token, dataUrl, fileName){
+  if(!docViewerIs(token)) return;
+  const dv = docViewer;
+  const blob = dataUrlToBlob(dataUrl);
+  dv.blobUrl = URL.createObjectURL(blob);
+  const dl = dv.el.querySelector('[data-dv="download"]');
+  dl.href = dv.blobUrl;
+  dl.download = fileName || (dv.el.querySelector('.dv-title').textContent.replace(/[^\w.-]+/g, '-') + (blob.type === 'application/pdf' ? '.pdf' : ''));
+  dl.style.display = '';
+  if(blob.type === 'application/pdf' || /\.pdf$/i.test(fileName || '')){
+    let pdfjs;
+    try{ pdfjs = await loadPdfJs(); }
+    catch(e){ docViewerMessage(token, "Couldn't load the PDF viewer — check your connection and try again."); return; }
+    if(!docViewerIs(token)) return;
+    try{ dv.pdf = await pdfjs.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) }).promise; }
+    catch(e){ docViewerMessage(token, "That PDF couldn't be opened — it may be damaged."); return; }
+    if(!docViewerIs(token)){ dv.pdf.destroy().catch(()=>{}); return; }
+    await renderDocViewer();
+  } else if(/^image\//.test(blob.type)){
+    dv.image = dv.blobUrl;
+    await renderDocViewer();
+  } else {
+    dv.el.querySelector('.dv-pages').innerHTML = `<div class="dv-msg">This type of file can't be shown here.<br><a href="${dv.blobUrl}" download="${esc(dl.download)}">Download it</a> to open it on this device.</div>`;
+  }
+}
+
+async function renderDocViewer(){
+  const dv = docViewer;
+  if(!dv) return;
+  const zoom = DV_ZOOMS[dv.zoom];
+  dv.el.querySelector('[data-dv="zoom-out"]').disabled = dv.zoom === 0;
+  dv.el.querySelector('[data-dv="zoom-in"]').disabled = dv.zoom === DV_ZOOMS.length - 1;
+  const pages = dv.el.querySelector('.dv-pages');
+  const fitWidth = Math.max(200, Math.min(dv.el.querySelector('.dv-body').clientWidth - 24, 1000));
+  if(dv.image){
+    pages.innerHTML = `<img src="${dv.image}" alt="" style="width:${Math.round(fitWidth * zoom)}px;">`;
+    return;
+  }
+  pages.innerHTML = '';
+  const pass = dv.renderPass = {};
+  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  for(let n = 1; n <= dv.pdf.numPages; n++){
+    if(docViewer !== dv || dv.renderPass !== pass) return; /* closed, or zoom changed mid-render */
+    const page = await dv.pdf.getPage(n);
+    const base = page.getViewport({ scale:1 });
+    const viewport = page.getViewport({ scale: fitWidth * zoom / base.width });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.floor(viewport.width * ratio);
+    canvas.height = Math.floor(viewport.height * ratio);
+    canvas.style.width = Math.floor(viewport.width) + 'px';
+    canvas.style.height = Math.floor(viewport.height) + 'px';
+    canvas.setAttribute('aria-label', `Page ${n} of ${dv.pdf.numPages}`);
+    pages.appendChild(canvas);
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport, transform: ratio !== 1 ? [ratio, 0, 0, ratio, 0, 0] : null }).promise;
+  }
+}
+function zoomDocViewer(step){
+  if(!docViewer) return;
+  const next = Math.max(0, Math.min(DV_ZOOMS.length - 1, docViewer.zoom + step));
+  if(next === docViewer.zoom) return;
+  const body = docViewer.el.querySelector('.dv-body');
+  const at = body.scrollTop / Math.max(1, body.scrollHeight); /* keep roughly the same place in the document */
+  docViewer.zoom = next;
+  renderDocViewer().catch(()=>{});
+  requestAnimationFrame(()=>{ body.scrollTop = at * body.scrollHeight; });
 }
 function findStoredDoc(ds){
   const pick = list => (list || []).find(d => d.id === ds.docId) || null;
@@ -1075,22 +1226,11 @@ function findStoredDoc(ds){
   }
   return pick(v && v.documents);
 }
-function openStoredDocument(dataUrl){
+function openStoredDocument(dataUrl, title, fileName){
   if(!dataUrl){ alert('That document has no file attached.'); return; }
-  try{
-    if(dataUrl.slice(0, 5) === 'data:'){
-      const url = URL.createObjectURL(dataUrlToBlob(dataUrl));
-      /* no 'noopener' here: with it window.open always returns null and we
-         couldn't tell a real pop-up block from success */
-      const win = window.open(url, '_blank');
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-      if(!win) alert('Your browser blocked the document window — allow pop-ups for this site and try again.');
-    } else {
-      window.open(dataUrl, '_blank', 'noopener');
-    }
-  }catch(e){
-    alert("Couldn't open that document.");
-  }
+  if(dataUrl.slice(0, 5) !== 'data:'){ window.open(dataUrl, '_blank', 'noopener'); return; } /* a link, not a stored file */
+  const token = openDocViewer(title);
+  showInDocViewer(token, dataUrl, fileName).catch(()=>docViewerMessage(token, "Couldn't open that document."));
 }
 
 async function processDocumentFile(file){
@@ -2950,7 +3090,7 @@ function renderFinEntries(){
               <td>${pv.name ? `<b>${esc(pv.name)}</b>` : '<span style="color:var(--ink-soft);">—</span>'}${[pv.contactName, pv.phone, pv.email].filter(Boolean).map(v=>`<div style="color:var(--ink-soft); font-size:11.5px;">${esc(v)}</div>`).join('')}</td>
               <td class="num">${fmtCurrency(x.cost)}</td>
               <td style="white-space:nowrap;">
-                ${(x.invoiceFiles||[]).map((f,i,all)=>`<button class="btn small ghost" data-action="open-invoice-file" data-file="${esc(f.id)}">${all.length > 1 ? `Invoice p${i+1}` : 'Invoice'}</button>`).join(' ')}
+                ${(x.invoiceFiles||[]).map((f,i,all)=>`<button class="btn small ghost" data-action="open-invoice-file" data-file="${esc(f.id)}" data-title="${esc(['Invoice', x.invoiceRef, all.length > 1 ? `page ${i+1}` : ''].filter(Boolean).join(' '))}">${all.length > 1 ? `Invoice p${i+1}` : 'Invoice'}</button>`).join(' ')}
                 <button class="btn small ghost" data-action="edit-fin-item" data-id="${x.id}">Edit</button>
                 <button class="btn small danger" data-action="delete-fin-item" data-id="${x.id}">Delete</button>
               </td>
@@ -4890,7 +5030,7 @@ function attachContentEvents(){
         case 'fin-view': captureFinControls(); state.fin.view = el.dataset.view; render(); break;
         case 'add-fin-item': state.modal = { type:'finance-item', data:null }; renderModal(); break;
         case 'scan-invoice': state.modal = { type:'invoice-scan', step:'pick', files:[] }; renderModal(); break;
-        case 'open-invoice-file': await openFileById(el.dataset.file); break;
+        case 'open-invoice-file': await openFileById(el.dataset.file, el.dataset.title || 'Invoice'); break;
         case 'edit-fin-item': state.modal = { type:'finance-item', data: state.financeItems.find(x=>x.id===id) }; renderModal(); break;
         case 'delete-fin-item': {
           const x = state.financeItems.find(i=>i.id===id);
