@@ -1930,6 +1930,11 @@ function installHtml(){
   if(isStandalone()) return '';
   if(installPrompt) return `<div class="install-bar"><span>Install OCEANHUB Contractors on this device for one-tap access.</span><button type="button" class="btn small primary" id="installAppBtn">Install app</button></div>`;
   if(isIOS()) return `<div class="install-bar"><span>To install on iPhone or iPad: open this page in Safari, tap <b>Share</b> <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px"><path d="M12 3v12M8 7l4-4 4 4"/><path d="M5 12v8h14v-8"/></svg>, then <b>Add to Home Screen</b>.</span></div>`;
+  /* Chrome and Edge don't always offer the prompt straight away, so say where install lives in their menu. */
+  const ua = navigator.userAgent;
+  if(/Android/i.test(ua) && /Chrome/i.test(ua)) return `<div class="install-bar"><span>To install: tap Chrome's <b>⋮</b> menu, then <b>Add to Home screen</b> → <b>Install</b>.</span></div>`;
+  if(/Edg\//.test(ua)) return `<div class="install-bar"><span>To install: open Edge's <b>…</b> menu, then <b>Apps</b> → <b>Install this site as an app</b>.</span></div>`;
+  if(/Chrome\//.test(ua)) return `<div class="install-bar"><span>To install: click the install icon at the right of the address bar, or open Chrome's <b>⋮</b> menu → <b>Cast, save, and share</b> → <b>Install page as app…</b></span></div>`;
   return '';
 }
 function refreshInstallSlots(){
