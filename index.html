@@ -284,6 +284,16 @@
   tr.total-row td{border-top:2px solid var(--border);}
   .fin-panel{background:var(--white-card); border:1px solid var(--border); border-radius:12px; padding:16px 16px 14px; margin-bottom:18px; max-width:640px;}
   .fin-hint{font-size:12px; color:var(--ink-soft); margin:-4px 0 12px;}
+  /* Document lists: name | expiry | buttons, with the expiry boxes lined up in one column */
+  .doc-row{display:grid; grid-template-columns:minmax(0,1fr) 168px auto; gap:10px; align-items:center; padding:7px 0; font-size:13px; border-bottom:1px solid var(--paper-line);}
+  .doc-row:last-of-type{border-bottom:none;}
+  .doc-name{min-width:0; overflow-wrap:anywhere;}
+  .doc-exp .stamp{width:100%; justify-content:center; font-size:11px;}
+  .doc-actions{display:flex; align-items:center; gap:8px; justify-content:flex-end;}
+  @media (max-width:640px){
+    .doc-row{grid-template-columns:minmax(0,1fr) 150px; grid-template-areas:"name exp" "actions actions"; row-gap:8px;}
+    .doc-name{grid-area:name;} .doc-exp{grid-area:exp;} .doc-actions{grid-area:actions;}
+  }
   /* In-app document viewer */
   .doc-viewer{position:fixed; inset:0; z-index:300; display:flex; flex-direction:column; background:#262625;}
   .dv-bar{display:flex; align-items:center; gap:8px; padding:calc(env(safe-area-inset-top) + 8px) 12px 8px; background:linear-gradient(135deg, #026b71 0%, #014c50 100%); color:#fff; box-shadow:0 2px 8px rgba(0,0,0,0.3);}
@@ -527,32 +537,18 @@ function uid(prefix){ return prefix + '_' + Date.now().toString(36) + Math.rando
 function seedData(){
   const v1 = uid('v'), v2 = uid('v'), v3 = uid('v'), v4 = uid('v');
   state.allVessels = [
-    { id:v1, name:'MV Zephyr', type:'Workboat', reg:'ZA-4471-DBN', status:'active', engineHours:4820, notes:'Primary harbour support vessel.', fixedCosts:[
-      { id:uid('fc'), label:'Hull & machinery insurance', amount:3200, frequency:'monthly' },
-      { id:uid('fc'), label:'SAMSA registration & survey', amount:6500, frequency:'annual' },
-      { id:uid('fc'), label:'Satellite comms subscription', amount:450, frequency:'monthly' },
-    ], engines:[
+    { id:v1, name:'MV Zephyr', type:'Workboat', reg:'ZA-4471-DBN', status:'active', engineHours:4820, notes:'Primary harbour support vessel.', engines:[
       { id:uid('en'), label:'Port', type:'Yanmar 6LY440', serial:'YM6LY-002481', hours:4820 },
       { id:uid('en'), label:'Starboard', type:'Yanmar 6LY440', serial:'YM6LY-002482', hours:4790 },
     ]},
-    { id:v2, name:'Sea Otter II', type:'Crew Tender', reg:'ZA-2290-DBN', status:'active', engineHours:2110, notes:'', fixedCosts:[
-      { id:uid('fc'), label:'Hull & machinery insurance', amount:1800, frequency:'monthly' },
-      { id:uid('fc'), label:'SAMSA registration & survey', amount:4200, frequency:'annual' },
-    ], engines:[
+    { id:v2, name:'Sea Otter II', type:'Crew Tender', reg:'ZA-2290-DBN', status:'active', engineHours:2110, notes:'', engines:[
       { id:uid('en'), label:'Main', type:'Volvo Penta D4-260', serial:'VP-D4260-77410', hours:2110 },
     ]},
-    { id:v3, name:'MV Kingfisher', type:'Patrol Vessel', reg:'ZA-3187-RBY', status:'in-maintenance', engineHours:9760, notes:'In yard for shaft seal replacement.', fixedCosts:[
-      { id:uid('fc'), label:'Hull & machinery insurance', amount:5100, frequency:'monthly' },
-      { id:uid('fc'), label:'SAMSA registration & survey', amount:8900, frequency:'annual' },
-      { id:uid('fc'), label:'Tracking & security system', amount:320, frequency:'monthly' },
-    ], engines:[
+    { id:v3, name:'MV Kingfisher', type:'Patrol Vessel', reg:'ZA-3187-RBY', status:'in-maintenance', engineHours:9760, notes:'In yard for shaft seal replacement.', engines:[
       { id:uid('en'), label:'Port', type:'MAN i6-800', serial:'MAN-I6800-51092', hours:9760 },
       { id:uid('en'), label:'Starboard', type:'MAN i6-800', serial:'MAN-I6800-51093', hours:9705 },
     ]},
-    { id:v4, name:'Coral Tug', type:'Tugboat', reg:'ZA-5502-DBN', status:'docked', engineHours:15320, notes:'', fixedCosts:[
-      { id:uid('fc'), label:'Hull & machinery insurance', amount:4400, frequency:'monthly' },
-      { id:uid('fc'), label:'SAMSA registration & survey', amount:7200, frequency:'annual' },
-    ], engines:[
+    { id:v4, name:'Coral Tug', type:'Tugboat', reg:'ZA-5502-DBN', status:'docked', engineHours:15320, notes:'', engines:[
       { id:uid('en'), label:'Main', type:'Caterpillar 3512C', serial:'CAT3512C-88204', hours:15320 },
     ]},
   ];
@@ -789,7 +785,7 @@ function asArray(v){
 }
 
 function normalizeKey(key, raw){
-  if(key==='vessels') return asArray(raw).map(v=>({ ...v, fixedCosts: asArray(v.fixedCosts), documents: asArray(v.documents), engines: asArray(v.engines), equipment: asArray(v.equipment),
+  if(key==='vessels') return asArray(raw).map(v=>({ ...v, documents: asArray(v.documents), engines: asArray(v.engines), equipment: asArray(v.equipment),
     tenders: asArray(v.tenders).map(t=>({ ...t, engines: asArray(t.engines), documents: asArray(t.documents), maintenance: asArray(t.maintenance) })) }));
   if(key==='crew') return asArray(raw).map(c=>({ ...c, quals: asArray(c.quals), documents: asArray(c.documents) }));
   if(key==='companies') return asArray(raw).map(c=>({ ...c, vesselIds: asArray(c.vesselIds) }));
@@ -994,14 +990,6 @@ function getAllMaintenanceTasks(){
   return tasks;
 }
 function crewForVessel(vesselId){ return state.crew.filter(c=>c.vesselId===vesselId || c.vesselId==='all'); }
-function monthlyEquivalent(amount, frequency){
-  amount = Number(amount)||0;
-  if(frequency==='annual') return amount/12;
-  if(frequency==='quarterly') return amount/3;
-  return amount;
-}
-function vesselMonthlyFixed(v){ return (v.fixedCosts||[]).reduce((s,c)=>s+monthlyEquivalent(c.amount,c.frequency),0); }
-function freqLabel(f){ return { monthly:'/month', quarterly:'/quarter', annual:'/year' }[f] || ''; }
 
 function resizeImageFile(file, maxDim, quality){
   return new Promise((resolve, reject)=>{
@@ -1284,6 +1272,14 @@ function docExpiryText(doc){
   const dd = daysUntil(doc.expiry);
   const label = st==='expired' ? `Expired ${fmtDate(doc.expiry)}` : st==='red-alert' ? `Expires in ${dd} day${dd===1?'':'s'}` : `Expires ${fmtDate(doc.expiry)}`;
   return ` <span class="stamp ${st}" style="font-size:10px;">${label}</span>`;
+}
+/* the expiry column in a document list: same-width boxes so they line up; empty when no expiry */
+function docExpiryCell(doc){
+  const st = docStatus(doc);
+  if(!st) return '<span class="doc-exp"></span>';
+  const dd = daysUntil(doc.expiry);
+  const label = st==='expired' ? `Expired ${fmtDate(doc.expiry)}` : st==='red-alert' ? `Expires in ${dd} day${dd===1?'':'s'}` : `Expires ${fmtDate(doc.expiry)}`;
+  return `<span class="doc-exp"><span class="stamp ${st}">${label}</span></span>`;
 }
 /* every vessel and tender document expired or expiring within 30 days, soonest first */
 function docExpiryAlerts(){
@@ -2208,7 +2204,6 @@ function renderVessels(){
             <div class="stat"><b>${v.engineHours.toLocaleString()}</b>Engine hrs</div>
             <div class="stat"><b style="${overdueTasks>0?'color:var(--signal-red)':''}">${openTasks}</b>Open tasks</div>
             <div class="stat"><b>${crewCount}</b>Crew assigned</div>
-            <div class="stat"><b>${fmtCurrency(vesselMonthlyFixed(v))}</b>Fixed costs/mo</div>
           </div>
         </div>
       `}).join('')}
@@ -2289,25 +2284,12 @@ function renderVesselDetail(id){
     </div>
 
     <div class="detail-section">
-      <h4>Fixed costs <span style="text-transform:none; font-weight:400; letter-spacing:0;">(${fmtCurrency(vesselMonthlyFixed(v))}/mo total)</span></h4>
-      ${(v.fixedCosts||[]).length===0 ? '<div class="empty-note" style="padding:10px 0;">No fixed costs recorded.</div>' : v.fixedCosts.map(c=>`
-        <div class="mini-row">
-          <span>${esc(c.label)}</span>
-          <span style="display:flex; align-items:center; gap:10px;">
-            <b>${fmtCurrency(c.amount)}${freqLabel(c.frequency)}</b>
-            <button class="btn small danger" data-action="delete-vessel-cost" data-id="${v.id}" data-cost-id="${c.id}">Remove</button>
-          </span>
-        </div>
-      `).join('')}
-      <div style="margin-top:8px;"><button class="btn small" data-action="add-vessel-cost" data-id="${v.id}">+ Add fixed cost</button></div>
-    </div>
-
-    <div class="detail-section">
       <h4>Documents</h4>
       ${(v.documents||[]).length===0 ? '<div class="empty-note" style="padding:10px 0;">No documents on file.</div>' : v.documents.map(doc=>`
-        <div class="mini-row">
-          <span>${esc(doc.name)} <span style="color:var(--ink-soft); font-size:11px;">(${fmtDate(doc.addedDate)})</span>${docExpiryText(doc)}</span>
-          <span style="display:flex; align-items:center; gap:8px;">
+        <div class="doc-row">
+          <span class="doc-name">${esc(doc.name)}</span>
+          ${docExpiryCell(doc)}
+          <span class="doc-actions">
             <button class="btn small ghost" data-action="doc-expiry" data-id="${v.id}" data-doc-id="${doc.id}">Expiry</button>
             <button class="btn small ghost" data-action="view-doc" data-scope="vessel" data-id="${v.id}" data-doc-id="${doc.id}">View</button>
             <button class="btn small danger" data-action="delete-vessel-doc" data-id="${v.id}" data-doc-id="${doc.id}">Remove</button>
@@ -2379,9 +2361,10 @@ function renderTenderDetail(vesselId, tenderId){
     <div class="detail-section">
       <h4>Documents</h4>
       ${(t.documents||[]).length===0 ? '<div class="empty-note" style="padding:10px 0;">No documents on file.</div>' : t.documents.map(doc=>`
-        <div class="mini-row">
-          <span>${esc(doc.name)} <span style="color:var(--ink-soft); font-size:11px;">(${fmtDate(doc.addedDate)})</span>${docExpiryText(doc)}</span>
-          <span style="display:flex; align-items:center; gap:8px;">
+        <div class="doc-row">
+          <span class="doc-name">${esc(doc.name)}</span>
+          ${docExpiryCell(doc)}
+          <span class="doc-actions">
             <button class="btn small ghost" data-action="doc-expiry" data-id="${v.id}" data-tender-id="${t.id}" data-doc-id="${doc.id}">Expiry</button>
             <button class="btn small ghost" data-action="view-doc" data-scope="tender" data-id="${v.id}" data-tender-id="${t.id}" data-doc-id="${doc.id}">View</button>
             <button class="btn small danger" data-action="delete-tender-doc" data-id="${v.id}" data-tender-id="${t.id}" data-doc-id="${doc.id}">Remove</button>
@@ -3957,7 +3940,7 @@ function renderCrew(){
             <h4>Documents</h4>
             ${(c.documents||[]).length===0 ? '<div class="empty-note" style="padding:8px 0;">No documents on file.</div>' : c.documents.map(doc=>`
               <div class="mini-row">
-                <span>${esc(doc.name)} <span style="color:var(--ink-soft); font-size:11px;">(${fmtDate(doc.addedDate)})</span></span>
+                <span>${esc(doc.name)}</span>
                 <span style="display:flex; align-items:center; gap:8px;">
                   <button class="btn small ghost" data-action="view-doc" data-scope="crew" data-id="${c.id}" data-doc-id="${doc.id}">View</button>
                   <button class="btn small danger" data-action="delete-crew-doc" data-id="${c.id}" data-doc-id="${doc.id}">Remove</button>
@@ -4130,19 +4113,6 @@ function qualForm(q){
   `;
 }
 
-function vesselCostForm(){
-  return `
-    <label class="field">Cost description<input name="label" placeholder="e.g. Insurance, registration, tracking" required></label>
-    ${fieldRow(
-      `<label class="field">Amount (R)<input name="amount" type="number" min="0" required></label>`,
-      `<label class="field">Frequency<select name="frequency">
-        <option value="monthly">Monthly</option>
-        <option value="quarterly">Quarterly</option>
-        <option value="annual">Annual</option>
-      </select></label>`
-    )}
-  `;
-}
 
 function serviceScheduleFields(en){
   return `
@@ -4317,7 +4287,6 @@ function renderModal(){
   else if(modal.type==='maintenance'){ title = modal.data ? 'Edit maintenance task' : 'Add maintenance task'; body = maintenanceForm(modal.data); }
   else if(modal.type==='crew'){ title = modal.data ? 'Edit crew member' : 'Add crew member'; body = crewForm(modal.data); }
   else if(modal.type==='qual'){ title = modal.data ? 'Edit qualification' : 'Add qualification'; body = qualForm(modal.data); }
-  else if(modal.type==='vessel-cost'){ title = 'Add fixed cost'; body = vesselCostForm(); }
   else if(modal.type==='vessel-engine'){ const eq = modal.list==='equipment'; title = (modal.data ? 'Edit ' : 'Add ') + (eq ? 'equipment' : 'engine'); body = vesselEngineForm(modal.data, modal.list); }
   else if(modal.type==='vessel-doc'){ title = 'Add vessel document'; body = documentForm({ expiry:true }); }
   else if(modal.type==='doc-expiry'){ title = 'Document expiry date'; body = `<p style="margin-top:0;"><b>${esc(modal.data.name)}</b></p><label class="field">Expiry date${dateField('docExpiry', modal.data.expiry||'')}</label><div class="cl-hint" style="font-size:12px; margin:-4px 0 10px;">Clear the date if this document doesn't expire.</div>`; }
@@ -4419,17 +4388,6 @@ function attachModalEvents(){
       await persistArray('vessels', fresh => fresh.filter(x=>x.id!==vesselId));
       render();
     }
-  }));
-  document.querySelectorAll('[data-action="add-vessel-cost"]').forEach(b=>b.addEventListener('click', ()=>{
-    state.modal = { type:'vessel-cost', id:b.dataset.id };
-    renderModal();
-  }));
-  document.querySelectorAll('[data-action="delete-vessel-cost"]').forEach(b=>b.addEventListener('click', async ()=>{
-    if(!confirm('Remove this fixed cost?')) return;
-    const vesselId = b.dataset.id, costId = b.dataset.costId;
-    state.modal = { type:'view-vessel', id:vesselId };
-    await persistArray('vessels', fresh => fresh.map(v=> v.id===vesselId ? { ...v, fixedCosts:(v.fixedCosts||[]).filter(c=>c.id!==costId) } : v));
-    render();
   }));
   /* engines and other hour-meter equipment share one form; data-list picks the list */
   document.querySelectorAll('[data-action="add-vessel-engine"]').forEach(b=>b.addEventListener('click', ()=>{
@@ -4615,7 +4573,7 @@ async function handleFormSubmit(e){
     targetKey = 'vessels';
     mutateFn = fresh => editId
       ? fresh.map(v=> v.id===editId ? { ...v, ...data } : v)
-      : [...fresh, { id:uid('v'), fixedCosts:[], documents:[], engines:[], ...data }];
+      : [...fresh, { id:uid('v'), documents:[], engines:[], ...data }];
   }
   else if(modal.type==='maintenance'){
     const meterId = fd.get('meterId') || '';
@@ -4658,13 +4616,6 @@ async function handleFormSubmit(e){
         : [...quals, { id:uid('q'), ...data }];
       return { ...c, quals: newQuals };
     });
-  }
-  else if(modal.type==='vessel-cost'){
-    const data = { label:fd.get('label'), amount:Number(fd.get('amount'))||0, frequency:fd.get('frequency') };
-    const vesselId = modal.id;
-    targetKey = 'vessels';
-    mutateFn = fresh => fresh.map(v=> v.id===vesselId ? { ...v, fixedCosts:[...(v.fixedCosts||[]), { id:uid('fc'), ...data }] } : v);
-    nextModal = { type:'view-vessel', id: vesselId };
   }
   else if(modal.type==='vessel-engine'){
     const list = modal.list === 'equipment' ? 'equipment' : 'engines';
