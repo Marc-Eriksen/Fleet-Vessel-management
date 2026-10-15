@@ -2719,11 +2719,6 @@ try{ state.fin.emailTo = localStorage.getItem(FIN_EMAIL_KEY) || ''; }catch(e){}
 function fileSlug(s){ return String(s||'').replace(/[^a-z0-9]+/gi,'-').replace(/^-|-$/g,'') || 'file'; }
 function finCategoryLabel(id){ return (FIN_CATEGORIES.find(c=>c.id===id) || { label:id || '—' }).label; }
 
-/* The date a task's cost falls on: when it was completed, or when it's due if still open. */
-function taskCostDate(m){ return m.status==='completed' ? (m.completedDate || m.dueDate || '') : (m.dueDate || ''); }
-/* Maintenance tasks report under the two maintenance categories; daily checks count as scheduled. */
-function taskFinCategory(m){ return m.category === 'unscheduled' ? 'unscheduled' : 'scheduled'; }
-
 /* A year that starts on any day: the day before the same date a year later. */
 function yearEndFor(fromIso){
   const [y, m, d] = fromIso.split('-').map(Number);
@@ -2768,8 +2763,7 @@ function renderFinScope(){
     </div>`;
 }
 
-/* Every cost line in the current company / vessel: the costs entered on Finance. Costs
-   left on maintenance tasks don't count — move them in with "Move maintenance costs to Finance". */
+/* Every cost line in the current company / vessel: the costs entered on Finance. */
 function costLines(){
   return state.financeItems.filter(x=>inFinScope(x.vesselId)).map(x=>({
     source:'Finance entry', date: x.date || '', title: x.description || finCategoryLabel(x.category), description: x.invoiceRef ? `Ref ${x.invoiceRef}` : '',
@@ -2861,40 +2855,8 @@ function renderFinance(){
   `;
 }
 
-/* Completed maintenance tasks on a vessel (and its tenders) that still carry a cost —
-   what "Move maintenance costs to Finance" turns into Finance entries. */
-function movableTaskCosts(vesselId){
-  return getAllMaintenanceTasks().filter(m=> m.vesselId===vesselId && m.status==='completed' && Number(m.cost) > 0);
-}
-async function moveTaskCostsToFinance(vesselId){
-  const tasks = movableTaskCosts(vesselId);
-  if(!tasks.length) return;
-  const total = tasks.reduce((s,m)=>s+Number(m.cost),0);
-  if(!confirm(`Move ${tasks.length} completed maintenance cost${tasks.length===1?'':'s'} (${fmtCurrency(total)}) for ${vesselName(vesselId)} into Finance?\n\nEach becomes a Finance entry you can edit, and the cost on the task is set to R0 so nothing is counted twice.`)) return;
-  const today = localISODate(new Date());
-  const moved = {};
-  const entries = tasks.map(m=>{
-    const id = uid('fi');
-    moved[m.id] = id;
-    const equip = m.meterId ? (maintMeterLabel(m.vesselId, m.meterId) || m.meterLabel || '') : '';
-    return { id, vesselId, category: taskFinCategory(m), description: m.title || '', date: taskCostDate(m) || today,
-      cost: Math.round(Number(m.cost)*100)/100, invoiceRef:'',
-      notes: [m._source==='tender' ? `Tender: ${m._tenderName}` : '', equip ? `Equipment: ${equip}` : '', m.description || '', 'Moved from maintenance task'].filter(Boolean).join(' · '),
-      provider:{ name:'', contactName:'', phone:'', email:'' }, sourceTaskId: m.id,
-      createdBy: session ? session.email : '', createdDate: today };
-  });
-  if(!await persistArray('financeItems', fresh => [...fresh, ...entries])){ alert("Couldn't save to Finance — nothing was changed. Check your connection and try again."); return; }
-  const clear = m => moved[m.id] ? { ...m, cost:0, financeItemId: moved[m.id] } : m;
-  const okTasks = tasks.some(m=>m._source!=='tender') ? await persistArray('maintenance', fresh => fresh.map(clear)) : true;
-  const okTenders = tasks.some(m=>m._source==='tender') ? await persistArray('vessels', fresh => fresh.map(v=> v.id!==vesselId ? v
-    : { ...v, tenders:(v.tenders||[]).map(t=>({ ...t, maintenance:(t.maintenance||[]).map(clear) })) })) : true;
-  if(!okTasks || !okTenders) alert('The Finance entries were added, but some task costs could not be set to R0. Those costs are now counted twice; set them to R0 on the tasks.');
-  render();
-}
-
 function renderFinEntries(){
   const cat = state.fin.entryCat || 'all';
-  const movable = isAdmin() && state.fin.vessel !== 'all' ? movableTaskCosts(state.fin.vessel) : [];
   const rows = state.financeItems.filter(x=>inFinScope(x.vesselId) && (cat==='all' || x.category===cat))
     .sort((a,b)=> (b.date||'').localeCompare(a.date||''));
   const total = rows.reduce((s,x)=>s+(Number(x.cost)||0),0);
@@ -2906,10 +2868,7 @@ function renderFinEntries(){
           ${FIN_CATEGORIES.map(c=>`<option value="${c.id}" ${cat===c.id?'selected':''}>${c.label}</option>`).join('')}
         </select>
       </div>
-      <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        ${movable.length ? `<button class="btn" data-action="move-task-costs" data-id="${state.fin.vessel}" title="Turn completed maintenance task costs into Finance entries">Move ${movable.length} maintenance cost${movable.length===1?'':'s'} to Finance</button>` : ''}
-        <button class="btn primary" data-action="add-fin-item">+ Add cost</button>
-      </div>
+      <button class="btn primary" data-action="add-fin-item">+ Add cost</button>
     </div>
     <div class="cost-total-bar">
       <div class="ctb-item"><div class="label">Recorded costs</div><div class="value">${fmtCurrency(total)}</div></div>
@@ -4532,7 +4491,6 @@ function attachContentEvents(){
         case 'fin-generate': generateCostReport(); break;
         case 'fin-view': captureFinControls(); state.fin.view = el.dataset.view; render(); break;
         case 'add-fin-item': state.modal = { type:'finance-item', data:null }; renderModal(); break;
-        case 'move-task-costs': await moveTaskCostsToFinance(id); break;
         case 'edit-fin-item': state.modal = { type:'finance-item', data: state.financeItems.find(x=>x.id===id) }; renderModal(); break;
         case 'delete-fin-item': {
           const x = state.financeItems.find(i=>i.id===id);
