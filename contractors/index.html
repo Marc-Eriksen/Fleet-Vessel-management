@@ -421,10 +421,29 @@
   .card-box{background:var(--white-card); border:1px solid var(--border); border-radius:12px; padding:14px 16px;}
   .pay-row{align-items:flex-start; gap:10px; border-bottom:1px solid var(--paper-line); padding:10px 0;}
   .pay-actions{display:flex; align-items:center; gap:8px; flex-shrink:0; flex-wrap:wrap; justify-content:flex-end;}
+  a.btn{display:inline-block; text-decoration:none;}
+  /* ===== Paint sales ===== */
+  .stamp.ps-quoted{background:var(--brand-tint); color:var(--navy); border-color:var(--border);}
+  .stamp.ps-ordered{background:var(--brass-bg); color:var(--brass); border-color:rgba(250,178,25,0.4);}
+  .stamp.ps-fulfilled{background:var(--paper-2); color:var(--ink-soft); border-color:var(--border);}
+  .stamp.ps-paid{background:rgba(12,163,12,0.12); color:var(--seafoam); border-color:rgba(12,163,12,0.3);}
+  .ps-h{margin:0 0 10px; font-size:11.5px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; color:var(--ink-muted);}
+  .ps-two{display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:14px;}
+  .ps-bars{display:flex; align-items:flex-end; gap:10px; height:180px; padding-top:10px;}
+  .ps-bar-col{flex:1; min-width:0; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:6px;}
+  .ps-bar{width:100%; max-width:40px; background:var(--navy); border-radius:4px 4px 0 0;}
+  .ps-bar-label{font-size:11px; color:var(--ink-soft); white-space:nowrap;}
+  .ps-order{display:flex; background:var(--white-card); border:1px solid var(--border); border-radius:10px; overflow:hidden; margin-bottom:8px;}
+  .ps-swatch{width:10px; flex-shrink:0;}
+  .ps-order-body{flex:1; min-width:0; padding:10px 12px; display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;}
+  .ps-order-title{font-size:13.5px; font-weight:700; overflow-wrap:anywhere;}
+  .ps-sub{font-size:12px; color:var(--ink-soft); margin-top:2px;}
+  .ps-sub a{color:var(--ink-soft);}
   @media (max-width:820px){
     .ct-grid{grid-template-columns:1fr;}
     .pay-row{flex-direction:column;}
     .pay-actions{justify-content:flex-start;}
+    .ps-two{grid-template-columns:1fr;}
   }
 </style>
 </head>
@@ -483,7 +502,8 @@ const MIGRATED_FLAG = 'oceanhub/meta/contractorsMigrated';
 /* ============================= STATE ============================= */
 /* session: null | { role:'admin', uid, email } | { role:'contractor', uid, email, contractorId } */
 let session = null;
-let state = { contractors: [], viewId: null, modal: null };
+let state = { contractors: [], viewId: null, modal: null,
+  section: 'payments', salesTab: 'dashboard', salesClientId: null, salesSearch: '', salesFilter: 'All' };
 let listeners = []; /* [{ ref, fn }] */
 let firstLoadDone = false;
 let authNotice = '';
@@ -615,8 +635,10 @@ const DETAIL_FIELDS = ['name','contactName','email','phone','bankName','accountH
 function toContractor(id, raw){
   raw = raw || {};
   const admin = raw.admin || {};
+  const sales = raw.sales || {};
   return { id, ...(raw.details || {}), notes: admin.notes || '', loginEmail: admin.loginEmail || '', loginUid: admin.loginUid || '',
-    payments: asArray(raw.payments).map(p=>({ ...p, expenses: asArray(p.expenses) })) };
+    payments: asArray(raw.payments).map(p=>({ ...p, expenses: asArray(p.expenses) })),
+    salesSettings: raw.salesSettings || {}, salesClients: asArray(sales.clients), salesOrders: asArray(sales.orders) };
 }
 function findContractor(id){ return state.contractors.find(c=>c.id===id) || null; }
 function outstandingTotal(ct){ return (ct.payments||[]).filter(p=>p.status!=='paid').reduce((s,p)=>s+(Number(p.amount)||0),0); }
@@ -654,15 +676,19 @@ function loadData(){
     migrateLegacyContractors();
   } else {
     const id = session.contractorId, raw = {};
-    let arrived = 0;
-    ['details','payments'].forEach(part=>{
-      listen(ROOT + id + '/' + part, snap=>{
-        raw[part] = snap.val();
-        if(arrived < 2) arrived++;
-        if(arrived < 2) return;
-        state.contractors = raw.details ? [toContractor(id, raw)] : [];
-        afterData();
-      }, onErr);
+    const parts = ['details','payments','salesSettings','sales'];
+    /* Paint sales parts are only readable once the latest database rules are published — until then they load as empty. */
+    const optional = { salesSettings:true, sales:true };
+    const arrived = new Set();
+    const update = (part, val)=>{
+      raw[part] = val;
+      arrived.add(part);
+      if(arrived.size < parts.length) return;
+      state.contractors = raw.details ? [toContractor(id, raw)] : [];
+      afterData();
+    };
+    parts.forEach(part=>{
+      listen(ROOT + id + '/' + part, snap=>update(part, snap.val()), optional[part] ? ()=>update(part, null) : onErr);
     });
   }
 }
@@ -718,6 +744,7 @@ async function handleAuthChange(user){
   detach();
   session = null;
   state.viewId = null; state.modal = null;
+  resetSalesView();
   if(!user){ renderLoginGate(authNotice); authNotice = ''; return; }
   document.getElementById('mainContent').innerHTML = '<div class="empty-note" style="margin-top:60px;">Loading…</div>';
   let rec = null;
@@ -790,7 +817,7 @@ function renderContractorList(){
     const total = outstandingTotal(ct);
     return `
       <tr>
-        <td><button type="button" class="link-btn" data-action="view-contractor" data-id="${ct.id}">${esc(ct.name || 'Unnamed')}</button>${ct.notes ? `<div style="color:var(--ink-soft); font-size:11.5px;">${esc(ct.notes)}</div>` : ''}</td>
+        <td><button type="button" class="link-btn" data-action="view-contractor" data-id="${ct.id}">${esc(ct.name || 'Unnamed')}</button>${salesEnabled(ct) ? ' <span class="stamp upcoming">Paint sales</span>' : ''}${ct.notes ? `<div style="color:var(--ink-soft); font-size:11.5px;">${esc(ct.notes)}</div>` : ''}</td>
         <td>${esc(ct.contactName || '—')}${ct.email ? `<div style="color:var(--ink-soft); font-size:11.5px;">${esc(ct.email)}</div>` : ''}${ct.phone ? `<div style="color:var(--ink-soft); font-size:11.5px;">${esc(ct.phone)}</div>` : ''}</td>
         <td>${esc(ct.bankName || '—')}${ct.accountNumber ? `<div style="color:var(--ink-soft); font-size:11.5px;">Acc <span class="pw-mask" data-pw="${esc(ct.accountNumber)}">••••${esc(String(ct.accountNumber).slice(-4))}</span> <button type="button" class="btn small ghost" data-action="reveal">Show</button></div>` : ''}</td>
         <td>${ct.loginEmail ? esc(ct.loginEmail) : '<span style="color:var(--ink-soft);">No login</span>'}</td>
@@ -838,7 +865,9 @@ function renderContractorPage(id){
   const outstanding = payments.filter(p=>p.status!=='paid');
   const paidTotal = payments.filter(p=>p.status==='paid').reduce((s,p)=>s+(Number(p.amount)||0),0);
   const total = outstandingTotal(ct);
-  return `
+  const sales = salesEnabled(ct);
+  const section = sales ? state.section : 'payments';
+  const head = `
     <div class="toolbar">
       <div>
         ${admin ? '<button type="button" class="btn small ghost" data-action="back" style="margin-bottom:10px;">← All contractors</button>' : ''}
@@ -850,6 +879,12 @@ function renderContractorPage(id){
         ${admin ? '' : '<button class="btn ghost" data-action="logout">Sign out</button>'}
       </div>
     </div>
+    ${sales ? `<div class="subtabs">
+      <button type="button" class="subtab ${section==='payments'?'active':''}" data-action="section" data-section="payments">Payments</button>
+      <button type="button" class="subtab ${section==='sales'?'active':''}" data-action="section" data-section="sales">Paint sales</button>
+    </div>` : ''}`;
+  if(section === 'sales') return head + renderSales(ct);
+  return head + `
     <div class="cost-total-bar">
       <div class="ctb-item"><div class="label">Outstanding</div><div class="value">${fmtCurrency(total)}</div></div>
       <div class="ctb-item"><div class="label">Paid to date</div><div class="value">${fmtCurrency(paidTotal)}</div></div>
@@ -886,6 +921,13 @@ function renderContractorPage(id){
             </div>` : `
             <p style="font-size:12.5px; color:var(--ink-soft); margin:0 0 8px;">No login yet. With one, ${esc(ct.name)} can sign in here to keep their details up to date, record payments and send their statement. They can't mark anything paid.</p>
             <button type="button" class="btn small primary" data-action="create-login" data-id="${ct.id}">Create login</button>`}
+        </div>
+        <div class="detail-section">
+          <h4>Paint sales</h4>
+          ${sales
+            ? `<div class="mini-row"><span>Status</span><b>On · ${commissionRate(ct)}% commission on margin</b></div>`
+            : `<p style="font-size:12.5px; color:var(--ink-soft); margin:0 0 8px;">Off. Turn it on to give ${esc(ct.name)} a Paint sales section for their clients, orders and commission.</p>`}
+          <button type="button" class="btn small" data-action="sales-settings" data-id="${ct.id}" style="margin-top:6px;">Paint sales settings</button>
         </div>` : ''}
       </div>
       <div class="card-box">
@@ -1250,6 +1292,387 @@ async function sendStatement(id, channel){
   }
 }
 
+/* ============================= PAINT SALES ============================= */
+/* A sales rep's paint clients and orders, kept at oceanhub/contractors/<id>/sales/{clients,orders}.
+   Admin switches it on and sets the commission rate at .../salesSettings, which the rep can read but not change.
+   Commission is the rate applied to each Paid order's margin (total after discount, less its cost of sales). */
+const PS_FINISHES = ['Matte','Eggshell','Satin','Limewash','Chalk'];
+const PS_SIZES = ['Sample (100ml)','1 Litre','5 Litre','20 Litre'];
+const PS_STATUSES = ['Quoted','Ordered','Fulfilled','Paid'];
+const PS_DEFAULT_RATE = 10;
+
+function salesEnabled(ct){ return !!(ct && ct.salesSettings && ct.salesSettings.enabled); }
+function commissionRate(ct){ const r = Number(ct && ct.salesSettings && ct.salesSettings.commissionRate); return isFinite(r) ? r : 0; }
+function salesPath(id){ return ROOT + id + '/sales/'; }
+function resetSalesView(){ Object.assign(state, { section:'payments', salesTab:'dashboard', salesClientId:null, salesSearch:'', salesFilter:'All' }); }
+function fmtRand(n){ return 'R' + (Number(n)||0).toLocaleString('en-ZA', { minimumFractionDigits:2, maximumFractionDigits:2 }); }
+function swatchColor(c){ return /^#[0-9a-f]{6}$/i.test(c||'') ? c : 'var(--paper-line)'; }
+const orderSubtotal = o => (Number(o.qty)||0) * (Number(o.unitPrice)||0);
+const orderTotal = o => orderSubtotal(o) * (1 - (Number(o.discountPercent)||0) / 100);
+const orderMargin = o => orderTotal(o) - (Number(o.costOfSales)||0);
+const byDateDesc = (a,b) => (b.date||'').localeCompare(a.date||'');
+function salesClient(ct, clientId){ return ct.salesClients.find(c=>c.id===clientId) || null; }
+function monthLabel(key){ const [y, m] = key.split('-').map(Number); return new Date(y, m-1, 1).toLocaleDateString('en-ZA', { month:'short', year:'2-digit' }); }
+
+function salesStats(ct){
+  const orders = ct.salesOrders, rate = commissionRate(ct);
+  const paid = orders.filter(o=>o.status==='Paid');
+  const revenue = paid.reduce((s,o)=>s+orderTotal(o), 0);
+  const pipeline = orders.filter(o=>o.status!=='Paid').reduce((s,o)=>s+orderTotal(o), 0);
+  const commissionOf = o => orderMargin(o) * rate / 100;
+  const byMonth = valueOf => {
+    const m = {};
+    paid.forEach(o=>{ const k = String(o.date||'').slice(0,7); if(k) m[k] = (m[k]||0) + valueOf(o); });
+    return Object.keys(m).sort().map(k=>({ label:monthLabel(k), total:m[k] }));
+  };
+  const byClient = {};
+  orders.forEach(o=>{ byClient[o.clientId] = (byClient[o.clientId]||0) + orderTotal(o); });
+  const topClients = Object.entries(byClient).sort((a,b)=>b[1]-a[1])
+    .map(([id, total])=>({ client:salesClient(ct, id), total })).filter(x=>x.client).slice(0,5);
+  return { revenue, pipeline, rate, topClients, revenueChart:byMonth(orderTotal), commissionChart:byMonth(commissionOf),
+    totalCommission: paid.reduce((s,o)=>s+commissionOf(o), 0),
+    paidOrders: paid.slice().sort(byDateDesc).map(o=>({ order:o, margin:orderMargin(o), commission:commissionOf(o) })) };
+}
+
+function barChart(data){
+  const max = Math.max(...data.map(d=>d.total), 1);
+  return `<div class="ps-bars">${data.map(d=>`
+    <div class="ps-bar-col"><div class="ps-bar" title="${fmtRand(d.total)}" style="height:${Math.max(Math.max(d.total, 0) / max * 100, 3)}%;"></div><div class="ps-bar-label">${esc(d.label)}</div></div>`).join('')}</div>`;
+}
+
+function renderSales(ct){
+  const tabs = [['dashboard','Dashboard'],['clients','Clients'],['orders','Orders'],['commission','Commission']];
+  const s = salesStats(ct);
+  let body;
+  if(state.salesTab === 'clients') body = state.salesClientId && salesClient(ct, state.salesClientId) ? renderSalesClient(ct, salesClient(ct, state.salesClientId)) : renderSalesClients(ct);
+  else if(state.salesTab === 'orders') body = renderSalesOrders(ct);
+  else if(state.salesTab === 'commission') body = renderSalesCommission(ct, s);
+  else body = renderSalesDashboard(ct, s);
+  return `
+    <div class="toolbar" style="margin-bottom:14px;">
+      <div class="subtabs" style="margin:0;">${tabs.map(([k, label])=>`<button type="button" class="subtab ${state.salesTab===k?'active':''}" data-action="sales-tab" data-tab="${k}">${label}</button>`).join('')}</div>
+      <button type="button" class="btn small ghost" data-action="sales-export" data-id="${ct.id}">Export</button>
+    </div>
+    ${body}`;
+}
+
+function renderSalesDashboard(ct, s){
+  return `
+    <div class="kpi-grid">
+      <div class="kpi"><div class="label">Total to date</div><div class="value">${fmtRand(s.revenue + s.pipeline)}</div></div>
+      <div class="kpi good"><div class="label">Paid revenue</div><div class="value">${fmtRand(s.revenue)}</div></div>
+      <div class="kpi warn"><div class="label">In pipeline</div><div class="value">${fmtRand(s.pipeline)}</div></div>
+      <div class="kpi"><div class="label">Orders</div><div class="value">${ct.salesOrders.length}</div></div>
+      <div class="kpi"><div class="label">Clients</div><div class="value">${ct.salesClients.length}</div></div>
+    </div>
+    <div class="card-box" style="margin-bottom:14px;">
+      <h4 class="ps-h">Revenue by month (paid orders)</h4>
+      ${s.revenueChart.length ? barChart(s.revenueChart) : '<div class="empty-note">No paid orders yet. Once orders are marked Paid, revenue shows up here.</div>'}
+    </div>
+    <div class="ps-two">
+      <div class="card-box">
+        <h4 class="ps-h">Top clients</h4>
+        ${s.topClients.length ? s.topClients.map(({ client, total })=>`
+          <div class="mini-row"><button type="button" class="link-btn" data-action="sales-open-client" data-cid="${client.id}">${esc(client.name)}</button><b>${fmtRand(total)}</b></div>`).join('')
+          : '<div class="empty-note">Add a client and an order to see rankings here.</div>'}
+      </div>
+      <div class="card-box">
+        <h4 class="ps-h">Quick actions</h4>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button type="button" class="btn primary" data-action="sales-add-order" data-id="${ct.id}">+ New order</button>
+          <button type="button" class="btn" data-action="sales-add-client" data-id="${ct.id}">+ New client</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function salesClientRows(ct){
+  const q = state.salesSearch.trim().toLowerCase();
+  const list = ct.salesClients
+    .filter(c=>[c.name, c.email, c.phone].join(' ').toLowerCase().includes(q))
+    .sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  if(!list.length) return `<div class="empty-note">${ct.salesClients.length ? 'No clients match that search.' : 'No clients yet. Add your first client to start tracking their orders.'}</div>`;
+  return list.map(c=>{
+    const total = ct.salesOrders.filter(o=>o.clientId===c.id).reduce((s,o)=>s+orderTotal(o), 0);
+    const contact = [c.phone ? `<a href="tel:${esc(c.phone)}">${esc(c.phone)}</a>` : '', c.email ? `<a href="mailto:${esc(c.email)}">${esc(c.email)}</a>` : ''].filter(Boolean).join(' · ');
+    return `
+      <div class="mini-row pay-row">
+        <span>
+          <button type="button" class="link-btn" data-action="sales-open-client" data-cid="${c.id}">${esc(c.name)}</button>
+          ${contact ? `<div class="ps-sub">${contact}</div>` : ''}
+        </span>
+        <span class="pay-actions">
+          <b>${fmtRand(total)}</b>
+          <button type="button" class="btn small ghost" data-action="sales-edit-client" data-id="${ct.id}" data-cid="${c.id}">Edit</button>
+          <button type="button" class="btn small danger" data-action="sales-delete-client" data-id="${ct.id}" data-cid="${c.id}">Delete</button>
+        </span>
+      </div>`;
+  }).join('');
+}
+
+function renderSalesClients(ct){
+  return `
+    <div class="toolbar">
+      <input type="search" id="salesSearch" data-id="${ct.id}" value="${esc(state.salesSearch)}" placeholder="Search clients by name, email or phone" style="flex:1 1 240px; min-width:0;">
+      <button type="button" class="btn primary" data-action="sales-add-client" data-id="${ct.id}">+ Add client</button>
+    </div>
+    <div class="card-box" id="salesClientList">${salesClientRows(ct)}</div>`;
+}
+
+function renderSalesClient(ct, c){
+  const orders = ct.salesOrders.filter(o=>o.clientId===c.id).sort(byDateDesc);
+  const total = orders.reduce((s,o)=>s+orderTotal(o), 0);
+  return `
+    <button type="button" class="btn small ghost" data-action="sales-back-clients" style="margin-bottom:12px;">← All clients</button>
+    <div class="card-box" style="margin-bottom:16px;">
+      <div class="toolbar" style="margin-bottom:0; align-items:flex-start;">
+        <div>
+          <h3 style="font-size:18px; font-weight:800; margin:0 0 6px; color:var(--heading);">${esc(c.name)}</h3>
+          ${c.phone ? `<div class="ps-sub">Phone: <a href="tel:${esc(c.phone)}">${esc(c.phone)}</a></div>` : ''}
+          ${c.email ? `<div class="ps-sub">Email: <a href="mailto:${esc(c.email)}">${esc(c.email)}</a></div>` : ''}
+          ${c.address ? `<div class="ps-sub">Address: ${esc(c.address)}</div>` : ''}
+          ${c.notes ? `<div style="font-size:13px; margin-top:8px; white-space:pre-wrap;">${esc(c.notes)}</div>` : ''}
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          ${c.phone ? `<a class="btn small ghost" href="tel:${esc(c.phone)}">Call</a>` : ''}
+          ${c.email ? `<a class="btn small ghost" href="mailto:${esc(c.email)}">Email</a>` : ''}
+          <button type="button" class="btn small ghost" data-action="sales-edit-client" data-id="${ct.id}" data-cid="${c.id}">Edit</button>
+          <button type="button" class="btn small danger" data-action="sales-delete-client" data-id="${ct.id}" data-cid="${c.id}">Delete</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-header-row" style="margin-bottom:10px;">
+      <h4 class="ps-h" style="margin:0;">Order history — ${fmtRand(total)} total</h4>
+      <button type="button" class="btn small primary" data-action="sales-add-order" data-id="${ct.id}" data-cid="${c.id}">+ New order</button>
+    </div>
+    ${orders.length ? orders.map(o=>salesOrderItem(ct, o, false)).join('') : '<div class="card-box"><div class="empty-note">No orders for this client yet.</div></div>'}`;
+}
+
+function salesOrderItem(ct, o, showClient){
+  const client = salesClient(ct, o.clientId);
+  const discount = Number(o.discountPercent)||0;
+  const status = PS_STATUSES.includes(o.status) ? o.status : 'Quoted';
+  return `
+    <div class="ps-order">
+      <div class="ps-swatch" style="background:${swatchColor(o.color)};"></div>
+      <div class="ps-order-body">
+        <div style="min-width:0;">
+          <div class="ps-order-title">${esc(o.colorName || 'Untitled colour')} · ${esc(o.finish)}${showClient && client ? ` <span style="font-weight:400; color:var(--ink-soft);">— ${esc(client.name)}</span>` : ''}</div>
+          <div class="ps-sub">${esc(o.size)} × ${Number(o.qty)||0} · ${fmtDate(o.date)}${o.notes ? ` · ${esc(o.notes)}` : ''}</div>
+        </div>
+        <div class="pay-actions">
+          <span class="stamp ps-${status.toLowerCase()}">${status}</span>
+          ${discount > 0 ? `<span class="stamp ps-fulfilled">−${discount}%</span><span style="font-size:12px; color:var(--ink-soft); text-decoration:line-through;">${fmtRand(orderSubtotal(o))}</span>` : ''}
+          <b>${fmtRand(orderTotal(o))}</b>
+          ${client && client.email ? `<a class="btn small ghost" href="${orderMailto(ct, o, client)}" title="Email this order to ${esc(client.email)}">Email</a>` : ''}
+          <button type="button" class="btn small ghost" data-action="sales-copy-order" data-id="${ct.id}" data-oid="${o.id}" title="Copy this order as email text">Copy</button>
+          <button type="button" class="btn small ghost" data-action="sales-edit-order" data-id="${ct.id}" data-oid="${o.id}">Edit</button>
+          <button type="button" class="btn small danger" data-action="sales-delete-order" data-id="${ct.id}" data-oid="${o.id}">Delete</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderSalesOrders(ct){
+  const filter = state.salesFilter;
+  const orders = ct.salesOrders.filter(o=>filter==='All' || o.status===filter).sort(byDateDesc);
+  const count = f => f==='All' ? ct.salesOrders.length : ct.salesOrders.filter(o=>o.status===f).length;
+  return `
+    <div class="toolbar">
+      <div class="subtabs" style="margin:0;">${['All', ...PS_STATUSES].map(f=>`<button type="button" class="subtab ${filter===f?'active':''}" data-action="sales-filter" data-filter="${f}">${f}<span class="cnt">${count(f)}</span></button>`).join('')}</div>
+      <button type="button" class="btn primary" data-action="sales-add-order" data-id="${ct.id}">+ New order</button>
+    </div>
+    ${orders.length ? orders.map(o=>salesOrderItem(ct, o, true)).join('') : '<div class="card-box"><div class="empty-note">No orders match this view yet.</div></div>'}`;
+}
+
+function renderSalesCommission(ct, s){
+  return `
+    <div class="kpi-grid">
+      <div class="kpi good"><div class="label">Commission to date</div><div class="value">${fmtRand(s.totalCommission)}</div></div>
+      <div class="kpi"><div class="label">Commission rate</div><div class="value">${s.rate}%</div></div>
+      <div class="kpi"><div class="label">Paid orders</div><div class="value">${s.paidOrders.length}</div></div>
+    </div>
+    <div class="card-box" style="margin-bottom:14px;">
+      <div class="modal-header-row" style="gap:10px; flex-wrap:wrap;">
+        <p style="font-size:12.5px; color:var(--ink-soft); margin:0; flex:1 1 260px;">${s.rate}% of each paid order's margin (total after discount, less its cost of sales). Orders still Quoted, Ordered or Fulfilled don't count yet.${isAdmin() ? '' : ' The rate is set by the OCEANHUB admin.'}</p>
+        ${isAdmin() ? `<button type="button" class="btn small" data-action="sales-settings" data-id="${ct.id}">Change rate</button>` : ''}
+      </div>
+    </div>
+    <div class="card-box" style="margin-bottom:14px;">
+      <h4 class="ps-h">Commission by month (paid orders)</h4>
+      ${s.commissionChart.length ? barChart(s.commissionChart) : '<div class="empty-note">No paid orders yet. Once orders are marked Paid, commission shows up here.</div>'}
+    </div>
+    <div class="card-box">
+      <h4 class="ps-h">Commission by paid order</h4>
+      ${s.paidOrders.length ? s.paidOrders.map(({ order:o, margin, commission })=>{
+        const client = salesClient(ct, o.clientId);
+        return `
+          <div class="mini-row pay-row">
+            <span>
+              <b>${esc(o.colorName || 'Untitled colour')}</b> <span style="color:var(--ink-soft);">— ${esc(client ? client.name : 'Unknown client')}</span>
+              <div class="ps-sub">${fmtDate(o.date)} · paid ${fmtRand(orderTotal(o))} − cost ${fmtRand(o.costOfSales)} = margin ${fmtRand(margin)}</div>
+            </span>
+            <b style="color:${commission < 0 ? 'var(--signal-red)' : 'var(--seafoam)'};">${fmtRand(commission)}</b>
+          </div>`;
+      }).join('') : '<div class="empty-note">No paid orders yet.</div>'}
+    </div>`;
+}
+
+function orderEmailContent(ct, o, client){
+  const discount = Number(o.discountPercent)||0;
+  const subject = `${o.colorName || 'Your paint order'} — OCEANHUB Paint Sales`;
+  const lines = [
+    client && client.name ? `Hi ${client.name},` : 'Hi,',
+    '',
+    'Here are the details for your order:',
+    `Paint colour: ${o.colorName || 'Untitled colour'}`,
+    `Finish: ${o.finish}`,
+    `Size: ${o.size}`,
+    `Quantity: ${Number(o.qty)||0}`,
+    `Unit price: ${fmtRand(o.unitPrice)}`,
+    discount > 0 ? `Discount: ${discount}%` : null,
+    `Total: ${fmtRand(orderTotal(o))}`,
+    `Status: ${o.status}`,
+    `Date: ${fmtDate(o.date)}`,
+    o.notes ? `Notes: ${o.notes}` : null,
+    '',
+    'Thank you for your business!',
+    '',
+    `${ct.contactName || ct.name}`,
+    'OCEANHUB Sales Representative'
+  ].filter(l=>l!==null);
+  return { subject, body: lines.join('\n') };
+}
+function orderMailto(ct, o, client){
+  const { subject, body } = orderEmailContent(ct, o, client);
+  return esc(mailtoLink(client.email, '', subject, body));
+}
+
+function csvCell(v){ const s = v==null ? '' : String(v); return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }
+function toCSV(headers, rows){ return [headers, ...rows].map(r=>r.map(csvCell).join(',')).join('\r\n'); }
+function downloadCSV(fileName, content){
+  const url = URL.createObjectURL(new Blob([content], { type:'text/csv;charset=utf-8;' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = fileName;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 1000);
+}
+function downloadSalesCSVs(ct){
+  const slug = (ct.name||'rep').replace(/[^a-z0-9]+/gi,'-');
+  const clientName = id => (salesClient(ct, id) || {}).name || 'Unknown client';
+  downloadCSV(`paint-sales-clients-${slug}.csv`, toCSV(['Name','Phone','Email','Address','Notes','Added'],
+    ct.salesClients.map(c=>[c.name, c.phone, c.email, c.address, c.notes, c.createdAt ? fmtDate(c.createdAt) : ''])));
+  downloadCSV(`paint-sales-orders-${slug}.csv`, toCSV(['Date','Client','Paint colour','Swatch hex','Finish','Size','Qty','Unit price (R)','Discount %','Subtotal (R)','Total (R)','Cost of sales (R)','Margin (R)','Status','Notes'],
+    ct.salesOrders.slice().sort(byDateDesc).map(o=>[fmtDate(o.date), clientName(o.clientId), o.colorName || 'Untitled colour', o.color, o.finish, o.size, o.qty,
+      (Number(o.unitPrice)||0).toFixed(2), Number(o.discountPercent)||0, orderSubtotal(o).toFixed(2), orderTotal(o).toFixed(2),
+      (Number(o.costOfSales)||0).toFixed(2), orderMargin(o).toFixed(2), o.status, o.notes])));
+}
+function exportEmailContent(ct){
+  const s = salesStats(ct);
+  const today = fmtDate(localISODate(new Date()));
+  return {
+    subject: `OCEANHUB Paint Sales data export — ${ct.name} — ${today}`,
+    body: [
+      `Paint sales snapshot for ${ct.name} as of ${today}:`,
+      `Paid revenue: ${fmtRand(s.revenue)}`,
+      `Pipeline: ${fmtRand(s.pipeline)}`,
+      `Commission to date: ${fmtRand(s.totalCommission)}`,
+      `Clients: ${ct.salesClients.length}`,
+      `Orders: ${ct.salesOrders.length}`,
+      '',
+      'The full client and order lists are attached as CSV files.'
+    ].join('\n')
+  };
+}
+async function copyText(text){
+  try{ await navigator.clipboard.writeText(text); return true; }
+  catch(e){
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    let ok = false;
+    try{ ok = document.execCommand('copy'); }catch(e2){ ok = false; }
+    ta.remove();
+    return ok;
+  }
+}
+
+function salesClientForm(c){
+  c = c || { name:'', phone:'', email:'', address:'', notes:'' };
+  return `
+    <label class="field">Name<input name="name" value="${esc(c.name)}" required></label>
+    ${fieldRow(
+      `<label class="field">Phone<input name="phone" type="tel" value="${esc(c.phone||'')}"></label>`,
+      `<label class="field">Email<input name="email" type="email" value="${esc(c.email||'')}" autocapitalize="none" autocorrect="off" spellcheck="false"></label>`
+    )}
+    <label class="field">Address<input name="address" value="${esc(c.address||'')}" placeholder="Project or delivery address"></label>
+    <label class="field">Notes<textarea name="notes" rows="3" placeholder="Preferences, referral source, anything worth remembering">${esc(c.notes||'')}</textarea></label>`;
+}
+
+function salesOrderForm(ct, o, presetClientId){
+  o = o || { clientId: presetClientId || '', colorName:'', color:'#B9812E', finish:PS_FINISHES[0], size:PS_SIZES[1], qty:1, unitPrice:45,
+    discountPercent:0, costOfSales:0, status:PS_STATUSES[0], date:localISODate(new Date()), notes:'' };
+  const options = (list, current) => list.map(v=>`<option value="${esc(v)}" ${v===current?'selected':''}>${esc(v)}</option>`).join('');
+  const clients = ct.salesClients.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||''));
+  return `
+    <label class="field">Client<select name="clientId" required>
+      <option value="">Select…</option>
+      ${clients.map(c=>`<option value="${c.id}" ${c.id===o.clientId?'selected':''}>${esc(c.name)}</option>`).join('')}
+    </select></label>
+    <div style="display:grid; grid-template-columns:1fr 64px; gap:12px;">
+      <label class="field">Paint colour name<input name="colorName" value="${esc(o.colorName||'')}" placeholder="e.g. Weathered Sage"></label>
+      <label class="field">Swatch<input name="color" type="color" value="${/^#[0-9a-f]{6}$/i.test(o.color||'') ? o.color : '#B9812E'}" style="height:40px; padding:2px;"></label>
+    </div>
+    ${fieldRow(
+      `<label class="field">Finish<select name="finish">${options(PS_FINISHES, o.finish)}</select></label>`,
+      `<label class="field">Container size<select name="size">${options(PS_SIZES, o.size)}</select></label>`
+    )}
+    ${fieldRow(
+      `<label class="field">Quantity<input name="qty" type="number" min="1" step="1" value="${Number(o.qty)||1}" data-ps-total></label>`,
+      `<label class="field">Unit price (R)<input name="unitPrice" type="number" min="0" step="0.01" value="${Number(o.unitPrice)||0}" data-ps-total></label>`
+    )}
+    ${fieldRow(
+      `<label class="field">Discount %<input name="discountPercent" type="number" min="0" max="100" step="1" value="${Number(o.discountPercent)||0}" data-ps-total></label>`,
+      `<label class="field">Cost of sales (R)<input name="costOfSales" type="number" min="0" step="0.01" value="${Number(o.costOfSales)||0}"></label>`
+    )}
+    <p class="fin-hint">Cost of sales is what this order cost (paint, materials, etc.) — commission is worked out on the margin, not the gross total.</p>
+    ${fieldRow(
+      `<label class="field">Status<select name="status">${options(PS_STATUSES, o.status)}</select></label>`,
+      `<label class="field">Date${dateField('date', o.date, { required:true })}</label>`
+    )}
+    <label class="field">Notes<textarea name="notes" rows="2" placeholder="Mixing notes, delivery instructions, etc.">${esc(o.notes||'')}</textarea></label>
+    <div class="mini-row" style="border-top:1px dashed var(--paper-line); padding-top:10px;"><span>Order total</span><b id="psOrderTotal"></b></div>`;
+}
+function wireSalesOrderForm(form){
+  const recalc = ()=>{
+    const o = { qty:form.qty.value, unitPrice:form.unitPrice.value, discountPercent:Math.min(100, Math.max(0, Number(form.discountPercent.value)||0)) };
+    document.getElementById('psOrderTotal').textContent = o.discountPercent > 0 ? `${fmtRand(orderSubtotal(o))} − ${o.discountPercent}% = ${fmtRand(orderTotal(o))}` : fmtRand(orderTotal(o));
+  };
+  form.querySelectorAll('[data-ps-total]').forEach(el=>el.addEventListener('input', recalc));
+  recalc();
+}
+
+function salesSettingsForm(ct){
+  const on = salesEnabled(ct);
+  const rate = ct.salesSettings && ct.salesSettings.commissionRate != null ? commissionRate(ct) : PS_DEFAULT_RATE;
+  return `
+    <label style="display:flex; align-items:center; gap:9px; font-size:13px; font-weight:600; color:var(--ink); margin:0 0 14px;">
+      <input type="checkbox" name="enabled" value="1" ${on?'checked':''} style="width:auto;">
+      Paint sales is on for ${esc(ct.name)}
+    </label>
+    <label class="field">Commission rate (% of margin on paid orders)<input name="commissionRate" type="number" min="0" max="100" step="0.5" value="${rate}" required></label>
+    <p class="fin-hint">${esc(ct.name)} sees the rate but can't change it. Turning paint sales off hides it and stops them adding to it — their clients and orders are kept.</p>`;
+}
+
+function salesExportForm(ct){
+  return `
+    <p class="section-sub" style="margin-top:-6px;">Download ${ct.salesClients.length} client${ct.salesClients.length===1?'':'s'} and ${ct.salesOrders.length} order${ct.salesOrders.length===1?'':'s'} as CSV files, then email them. Mail apps don't let a web page attach files, so download first and attach them to the draft that opens.</p>
+    <div class="detail-section" style="margin-top:0;"><h4>Step 1 — Download</h4></div>
+    <button type="button" class="btn ghost" data-action="sales-download" data-id="${ct.id}" style="margin-bottom:14px;">Download CSV files</button>
+    <div class="detail-section" style="margin-top:0;"><h4>Step 2 — Email</h4></div>
+    <label class="field">Recipient email<input name="to" type="email" placeholder="someone@example.com" autocapitalize="none" autocorrect="off" spellcheck="false"></label>`;
+}
+
 /* ============================= MODAL ============================= */
 function renderModal(){
   const root = document.getElementById('modalRoot');
@@ -1267,6 +1690,13 @@ function renderModal(){
     if(!ct){ state.modal = null; root.innerHTML = ''; return; }
     title = 'Create contractor login'; body = loginForm(ct); submit = 'Create login';
   }
+  else if(m.type.startsWith('sales-')){
+    if(!ct){ state.modal = null; root.innerHTML = ''; return; }
+    if(m.type === 'sales-client'){ const c = m.clientId ? salesClient(ct, m.clientId) : null; title = c ? 'Edit client' : 'Add client'; body = salesClientForm(c); submit = 'Save client'; }
+    else if(m.type === 'sales-order'){ const o = m.orderId ? ct.salesOrders.find(x=>x.id===m.orderId) : null; title = o ? 'Edit order' : 'New order'; body = salesOrderForm(ct, o, m.presetClientId); submit = 'Save order'; }
+    else if(m.type === 'sales-settings'){ title = 'Paint sales settings'; body = salesSettingsForm(ct); }
+    else if(m.type === 'sales-export'){ title = 'Export & email paint sales'; body = salesExportForm(ct); submit = 'Open email draft'; }
+  }
   root.innerHTML = `
     <div class="modal-overlay" data-overlay>
       <div class="modal">
@@ -1280,6 +1710,7 @@ function renderModal(){
   const form = document.getElementById('modalForm');
   form.addEventListener('submit', handleFormSubmit);
   if(m.type === 'payment') wirePaymentForm(form);
+  if(m.type === 'sales-order') wireSalesOrderForm(form);
 }
 function closeModal(){ state.modal = null; render(); }
 
@@ -1327,6 +1758,34 @@ async function handleFormSubmit(e){
         [ROOT + m.id + '/admin/loginUid']: newUid
       });
     }
+    else if(m.type === 'sales-client'){
+      const ct = findContractor(m.id);
+      const existing = m.clientId ? salesClient(ct, m.clientId) : null;
+      const text = f => String(fd.get(f)||'').trim();
+      if(!text('name')){ alert('Add a name.'); btn.disabled = false; return; }
+      const clientId = m.clientId || uid('psc');
+      await db.ref(salesPath(m.id) + 'clients/' + clientId).set(clean({ id:clientId, name:text('name'), phone:text('phone'), email:text('email'),
+        address:text('address'), notes:text('notes'), createdAt:(existing && existing.createdAt) || new Date().toISOString() }));
+    }
+    else if(m.type === 'sales-order'){
+      const num = f => Number(fd.get(f))||0;
+      const data = { clientId:String(fd.get('clientId')||''), colorName:String(fd.get('colorName')||'').trim(), color:String(fd.get('color')||''),
+        finish:String(fd.get('finish')||''), size:String(fd.get('size')||''), qty:Math.max(1, num('qty')), unitPrice:Math.max(0, num('unitPrice')),
+        discountPercent:Math.min(100, Math.max(0, num('discountPercent'))), costOfSales:Math.max(0, num('costOfSales')),
+        status:PS_STATUSES.includes(fd.get('status')) ? fd.get('status') : PS_STATUSES[0], date:fd.get('date'), notes:String(fd.get('notes')||'').trim() };
+      if(!data.clientId){ alert('Choose a client.'); btn.disabled = false; return; }
+      if(!data.date){ alert('Enter the date as dd/mm/yyyy.'); btn.disabled = false; return; }
+      const orderId = m.orderId || uid('pso');
+      await db.ref(salesPath(m.id) + 'orders/' + orderId).set(clean({ id:orderId, ...data }));
+    }
+    else if(m.type === 'sales-settings'){
+      await db.ref(ROOT + m.id + '/salesSettings').set({ enabled: fd.get('enabled') === '1',
+        commissionRate: Math.min(100, Math.max(0, Number(fd.get('commissionRate'))||0)) });
+    }
+    else if(m.type === 'sales-export'){
+      const { subject, body } = exportEmailContent(findContractor(m.id));
+      window.location.href = mailtoLink(String(fd.get('to')||'').trim(), '', subject, body);
+    }
   }catch(err){
     alert("Couldn't save: " + (err && err.message ? err.message : err));
     btn.disabled = false;
@@ -1345,8 +1804,45 @@ async function handleAction(el){
     case 'logout':
       if(confirm('Sign out? You will need to sign in again to get back in.')) firebase.auth().signOut();
       break;
-    case 'back': state.viewId = null; render(); break;
-    case 'view-contractor': state.viewId = id; render(); window.scrollTo(0,0); break;
+    case 'back': state.viewId = null; resetSalesView(); render(); break;
+    case 'view-contractor': state.viewId = id; resetSalesView(); render(); window.scrollTo(0,0); break;
+    case 'section': state.section = el.dataset.section; render(); break;
+    case 'sales-tab': state.salesTab = el.dataset.tab; state.salesClientId = null; render(); break;
+    case 'sales-filter': state.salesFilter = el.dataset.filter; render(); break;
+    case 'sales-open-client': state.salesTab = 'clients'; state.salesClientId = el.dataset.cid; render(); window.scrollTo(0,0); break;
+    case 'sales-back-clients': state.salesClientId = null; render(); break;
+    case 'sales-settings': state.modal = { type:'sales-settings', id }; renderModal(); break;
+    case 'sales-export': state.modal = { type:'sales-export', id }; renderModal(); break;
+    case 'sales-download': if(ct) downloadSalesCSVs(ct); break;
+    case 'sales-add-client': state.modal = { type:'sales-client', id }; renderModal(); break;
+    case 'sales-edit-client': state.modal = { type:'sales-client', id, clientId:el.dataset.cid }; renderModal(); break;
+    case 'sales-add-order':
+      if(ct && ct.salesClients.length === 0){ alert('Add a client first, then create their order.'); state.salesTab = 'clients'; state.salesClientId = null; render(); break; }
+      state.modal = { type:'sales-order', id, presetClientId:el.dataset.cid || null }; renderModal(); break;
+    case 'sales-edit-order': state.modal = { type:'sales-order', id, orderId:el.dataset.oid }; renderModal(); break;
+    case 'sales-delete-client': {
+      const c = ct && salesClient(ct, el.dataset.cid);
+      if(!c || !confirm(`Remove ${c.name} and their order history?`)) return;
+      const updates = { [salesPath(id) + 'clients/' + c.id]: null };
+      ct.salesOrders.filter(o=>o.clientId===c.id).forEach(o=>{ updates[salesPath(id) + 'orders/' + o.id] = null; });
+      try{ await db.ref().update(updates); if(state.salesClientId === c.id){ state.salesClientId = null; render(); } }
+      catch(err){ alert("Couldn't delete: " + err.message); }
+      break;
+    }
+    case 'sales-delete-order':
+      if(!confirm('Delete this order?')) return;
+      try{ await db.ref(salesPath(id) + 'orders/' + el.dataset.oid).remove(); }
+      catch(err){ alert("Couldn't delete: " + err.message); }
+      break;
+    case 'sales-copy-order': {
+      const o = ct && ct.salesOrders.find(x=>x.id===el.dataset.oid);
+      if(!o) return;
+      const { subject, body } = orderEmailContent(ct, o, salesClient(ct, o.clientId));
+      const ok = await copyText(`Subject: ${subject}\n\n${body}`);
+      el.textContent = ok ? 'Copied' : 'Copy failed';
+      setTimeout(()=>{ el.textContent = 'Copy'; }, 1500);
+      break;
+    }
     case 'add-contractor': state.modal = { type:'details' }; renderModal(); break;
     case 'edit-details': state.modal = { type:'details', id }; renderModal(); break;
     case 'add-payment': state.modal = { type:'payment', id }; renderModal(); break;
@@ -1383,7 +1879,7 @@ async function handleAction(el){
       catch(err){ alert("Couldn't delete: " + err.message); }
       break;
     case 'delete-contractor':
-      if(!ct || !confirm(`Delete ${ct.name} and all their payment records?${ct.loginEmail ? ' Their login stops working too.' : ''}`)) return;
+      if(!ct || !confirm(`Delete ${ct.name} and all their payment${salesEnabled(ct) || ct.salesOrders.length ? ' and paint sales' : ''} records?${ct.loginEmail ? ' Their login stops working too.' : ''}`)) return;
       try{
         const updates = { [ROOT + id]: null };
         if(ct.loginUid) updates['oceanhub/users/' + ct.loginUid] = null;
@@ -1415,6 +1911,13 @@ document.addEventListener('click', e=>{
   if(!el || el.disabled || !session) return;
   if(el.closest('#loginForm')) return;
   handleAction(el);
+});
+/* The client search redraws only the list, so the search box keeps focus while typing. */
+document.addEventListener('input', e=>{
+  if(e.target.id !== 'salesSearch') return;
+  state.salesSearch = e.target.value;
+  const ct = findContractor(e.target.dataset.id), list = document.getElementById('salesClientList');
+  if(ct && list) list.innerHTML = salesClientRows(ct);
 });
 
 /* ============================= INSTALL ============================= */

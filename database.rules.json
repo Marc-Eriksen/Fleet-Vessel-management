@@ -62,6 +62,13 @@
             "$pid": {
               ".write": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'contractor' && root.child('oceanhub/users/' + auth.uid + '/contractorId').val() === $cid && (!data.exists() || data.child('status').val() !== 'paid') && (!newData.exists() || newData.child('status').val() !== 'paid')"
             }
+          },
+          "salesSettings": {
+            ".read": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'contractor' && root.child('oceanhub/users/' + auth.uid + '/contractorId').val() === $cid"
+          },
+          "sales": {
+            ".read": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'contractor' && root.child('oceanhub/users/' + auth.uid + '/contractorId').val() === $cid",
+            ".write": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'contractor' && root.child('oceanhub/users/' + auth.uid + '/contractorId').val() === $cid && root.child('oceanhub/contractors/' + $cid + '/salesSettings/enabled').val() === true"
           }
         }
       },
