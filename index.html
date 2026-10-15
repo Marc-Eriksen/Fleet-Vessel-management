@@ -2459,6 +2459,36 @@ const SERVICE_SCHEDULES = {
       { id:'genvalvelash',       group:'dealer', hours:800, months:null, dealer:true, name:'Adjust valve lash' },
       { id:'genbearing',         group:'dealer', hours:2000, months:60, dealer:true, name:'Inspect generator bearing' }
     ]
+  },
+
+  'yamaha-70b-2s': {
+    name: 'Yamaha 70B 2-stroke outboard (6H3) — Periodic Maintenance',
+    mode: 'rolling',
+    dealerTag: 'Yamaha dealer',
+    note: 'Based on Yamaha\'s periodic maintenance chart for its 2-stroke 60–90 hp outboards — the 100-hour / 6-month service, with the water pump and thermostat yearly — and tightened for salt-water use (anodes every 3 months, impeller every year whatever the hours). It is not copied from the 70B owner\'s manual: check intervals, spark plug type and gap, and gear oil quantity against that manual or the service manual. After every use in salt water, flush the engine with fresh water through the flushing port and check the tell-tale stream. Break-in (first 10 hr) items apply only to a new or rebuilt powerhead.',
+    groups: { '100h':'Every 100 Hours or 6 Months', anodes:'Every 100 Hours or 3 Months (salt water)', '200h':'Every 200 Hours or Annually' },
+    tasks: [
+      { id:'y70gearoil',    group:'100h', hours:100, months:6,  dealer:false, name:'Gear oil — change (Yamalube marine gear lube, SAE 90 hypoid; fill from the bottom plug). Check drained oil for water or metal' },
+      { id:'y70plugs',      group:'100h', hours:100, months:6,  dealer:false, name:'Spark plugs (×3) — inspect, gap, replace if worn or fouled' },
+      { id:'y70grease',     group:'100h', hours:100, months:6,  dealer:false, name:'Grease all lubrication points — swivel bracket, tilt tube, steering, throttle and shift linkage, propeller shaft splines' },
+      { id:'y70prop',       group:'100h', hours:100, months:6,  dealer:false, name:'Propeller, cotter pin and thrust washer — inspect; remove prop and clear any fishing line from the shaft seal' },
+      { id:'y70fuelfilter', group:'100h', hours:100, months:6,  dealer:false, name:'Fuel filter / water separator — drain, inspect and replace element' },
+      { id:'y70fuelsys',    group:'100h', hours:100, months:6,  dealer:false, name:'Fuel lines, primer bulb and connections — inspect for leaks, cracks and hardening' },
+      { id:'y70oilinj',     group:'100h', hours:100, months:6,  dealer:true,  name:'Oil injection — check oil pump linkage adjustment, oil lines and oil tank strainer' },
+      { id:'y70carb',       group:'100h', hours:100, months:6,  dealer:true,  name:'Carburettors — check idle speed and linkage synchronisation' },
+      { id:'y70decarb',     group:'100h', hours:100, months:6,  dealer:false, name:'Combustion chambers — decarbonise (Yamaha Ring Free / combustion chamber cleaner)' },
+      { id:'y70trim',       group:'100h', hours:100, months:6,  dealer:false, name:'Power trim and tilt — check fluid level, operation and for leaks' },
+      { id:'y70battery',    group:'100h', hours:100, months:6,  dealer:false, name:'Battery, cables and charging — check terminals, charge and charging output' },
+      { id:'y70cables',     group:'100h', hours:100, months:6,  dealer:false, name:'Throttle, shift and steering cables — check operation and adjust' },
+      { id:'y70bolts',      group:'100h', hours:100, months:6,  dealer:false, name:'Engine mounting bolts and nuts — check and retighten' },
+      { id:'y70cooling',    group:'100h', hours:100, months:6,  dealer:false, name:'Cooling passages — flush; check tell-tale stream and overheat warning' },
+      { id:'y70anodes',     group:'anodes', hours:100, months:3, dealer:false, name:'Anodes — inspect; replace when a third worn. Do not paint them' },
+      { id:'y70impeller',   group:'200h', hours:200, months:12, dealer:false, name:'Water pump impeller and kit — replace (repair kit 6H3-W0078-A0 · impeller 6H3-44352-00)' },
+      { id:'y70thermostat', group:'200h', hours:200, months:12, dealer:false, name:'Thermostat — inspect and replace if sticking or scaled' },
+      { id:'y70compression',group:'200h', hours:200, months:12, dealer:true,  name:'Compression test (all 3 cylinders) and ignition timing — check' },
+      { id:'y70gearcase',   group:'200h', hours:200, months:12, dealer:true,  name:'Gearcase — pressure / vacuum test seals' },
+      { id:'y70fueltank',   group:'200h', hours:200, months:12, dealer:false, name:'Fuel tank and pickup — inspect and clean' }
+    ]
   }
 };
 
