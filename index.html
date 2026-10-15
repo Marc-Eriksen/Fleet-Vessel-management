@@ -2892,7 +2892,8 @@ const FIN_CATEGORIES = [
   { id:'parts', label:'Parts' },
   { id:'service', label:'Service' },
   { id:'unscheduled', label:'Unscheduled maintenance' },
-  { id:'scheduled', label:'Scheduled maintenance' }
+  { id:'scheduled', label:'Scheduled maintenance' },
+  { id:'fixed', label:'Fixed costs' } /* recurring running costs: insurance, registration, management fees, berthing, subscriptions */
 ];
 const FIN_EMAIL_KEY = 'oceanhub_fin_email';
 try{ state.fin.emailTo = localStorage.getItem(FIN_EMAIL_KEY) || ''; }catch(e){}
@@ -3147,7 +3148,7 @@ const INVOICE_PROMPT = `You are reading a supplier invoice, receipt or quote for
 - Never list VAT, subtotals, totals, balances, payments or deposits as lines.
 - amountsIncludeVat: true only if the printed line amounts already include VAT.
 - vatAmount: total VAT on the document, 0 if none. total: the grand total payable.
-- category for each line: "parts" for goods, parts, consumables and materials; "service" for labour, servicing, call-outs, travel, delivery, hire and other work. Use "scheduled" only when the line clearly says it is a scheduled, routine or interval service, and "unscheduled" only when it clearly describes a breakdown, emergency or repair call-out.
+- category for each line: "parts" for goods, parts, consumables and materials; "service" for labour, servicing, call-outs, travel, delivery, hire and other work. Use "scheduled" only when the line clearly says it is a scheduled, routine or interval service, and "unscheduled" only when it clearly describes a breakdown, emergency or repair call-out. Use "fixed" for recurring running costs such as insurance, registration and survey fees, vessel management fees, berthing or mooring, and subscriptions.
 - Numbers only, without currency symbols or thousands separators.
 - If the document is not an invoice, receipt or quote, set isInvoice to false and return no lines.`;
 
