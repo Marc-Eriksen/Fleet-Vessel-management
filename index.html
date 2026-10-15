@@ -1088,11 +1088,20 @@ async function processDocumentFile(file){
   }
   throw new Error('Please choose an image or PDF file.');
 }
+/* A task tied to an hour meter can also be due at a meter reading — whichever of the
+   date and the hours comes first sets its status. */
+const MAINT_HOURS_SOON = 75;
+function maintHoursLeft(m){
+  if(!m.meterId || !(Number(m.dueHours) > 0)) return null;
+  const meter = vesselHourMeters(state.allVessels.find(v=>v.id===m.vesselId)).find(x=>x.id===m.meterId);
+  return meter ? Math.round((Number(m.dueHours) - meter.hours) * 10) / 10 : null;
+}
 function maintStatus(m){
   if(m.status==='completed') return 'completed';
   const dd = daysUntil(m.dueDate);
-  if(dd < 0) return 'overdue';
-  if(dd <= 14) return 'due-soon';
+  const hl = maintHoursLeft(m);
+  if(dd < 0 || (hl !== null && hl <= 0)) return 'overdue';
+  if(dd <= 14 || (hl !== null && hl <= MAINT_HOURS_SOON)) return 'due-soon';
   return 'upcoming';
 }
 function qualStatus(expiry){
@@ -1206,7 +1215,7 @@ function renderDashboard(){
     <div class="kpi-grid">
       <div class="kpi"><div class="label">Vessels on register</div><div class="value">${state.vessels.length}</div></div>
       <div class="kpi ${overdue>0?'alert':''}"><div class="label">Overdue maintenance</div><div class="value">${overdue}</div></div>
-      <div class="kpi ${dueSoon>0?'warn':''}"><div class="label">Due within 14 days</div><div class="value">${dueSoon}</div></div>
+      <div class="kpi ${dueSoon>0?'warn':''}"><div class="label">Due within 14 days / 75 hrs</div><div class="value">${dueSoon}</div></div>
       <div class="kpi ${qualsExpired>0?'alert':''}"><div class="label">Quals expired</div><div class="value">${qualsExpired}</div></div>
       <div class="kpi ${qualsRedAlert>0?'alert':''}"><div class="label">Quals red alert (≤30 days)</div><div class="value">${qualsRedAlert}</div></div>
       <div class="kpi ${qualsAdvisory>0?'warn':''}"><div class="label">Quals advisory (≤60 days)</div><div class="value">${qualsAdvisory}</div></div>
@@ -2675,7 +2684,7 @@ function renderMaintenanceTasks(){
               <td><b>${esc(m.title)}</b>${m.meterId ? `<div style="color:var(--ink-soft); font-size:11.5px; margin-top:2px;">⚙ ${esc(maintMeterLabel(m.vesselId, m.meterId) || m.meterLabel || 'Equipment')}</div>` : ''}${m.description?`<div style="color:var(--ink-soft); font-size:11.5px; margin-top:2px;">${esc(m.description)}</div>`:''}</td>
               <td>${vesselLabel}</td>
               <td style="text-transform:capitalize;">${m.category}</td>
-              <td>${fmtDate(m.dueDate)}</td>
+              <td>${fmtDate(m.dueDate)}${(hl=> Number(m.dueHours) > 0 && m.meterId ? `<div style="color:var(--ink-soft); font-size:11.5px; margin-top:2px; white-space:nowrap;">or at ${Number(m.dueHours).toLocaleString()} hrs${hl!==null && m.status!=='completed' ? ` · ${hl > 0 ? hl.toLocaleString() + ' hrs left' : Math.abs(hl).toLocaleString() + ' hrs over'}` : ''}</div>` : '')(maintHoursLeft(m))}</td>
               <td style="text-transform:capitalize;">${m.priority}</td>
               ${showCost ? `<td class="num">${costVisible(m.vesselId) ? fmtCurrency(m.cost) : '<span style="color:var(--ink-soft);">—</span>'}</td>` : ''}
               <td><span class="stamp ${maintStatus(m)}">${stampLabel(maintStatus(m))}</span></td>
@@ -3527,7 +3536,10 @@ function maintenanceForm(m){
         <option value="daily" ${m.category==='daily'?'selected':''}>Daily</option>
       </select></label>`
     )}
-    <label class="field">Engine / equipment<select name="meterId" data-meter-select>${maintMeterOptions(m.vesselId, m.meterId||'', m.meterLabel)}</select></label>
+    ${fieldRow(
+      `<label class="field">Engine / equipment<select name="meterId" data-meter-select>${maintMeterOptions(m.vesselId, m.meterId||'', m.meterLabel)}</select></label>`,
+      `<label class="field" data-due-hours-field style="${m.meterId ? '' : 'display:none;'}">Due at hours<input name="dueHours" type="number" min="0" step="0.1" inputmode="decimal" value="${Number(m.dueHours) > 0 ? m.dueHours : ''}" placeholder="optional, e.g. 1500" ${m.meterId ? '' : 'disabled'}></label>`
+    )}
     ${fieldRow(
       `<label class="field">Due date${dateField('dueDate', m.dueDate, { required:true })}</label>`,
       `<label class="field">Priority<select name="priority">
@@ -3842,7 +3854,10 @@ function attachModalEvents(){
     costField.querySelector('input').disabled = !show;
   });
   const meterSelect = form && form.querySelector('[data-meter-select]');
-  if(meterSelect && costVessel) costVessel.addEventListener('change', ()=>{ meterSelect.innerHTML = maintMeterOptions(costVessel.value, ''); });
+  const dueHoursField = form && form.querySelector('[data-due-hours-field]');
+  const syncDueHours = ()=>{ if(!dueHoursField) return; const on = !!meterSelect.value; dueHoursField.style.display = on ? '' : 'none'; dueHoursField.querySelector('input').disabled = !on; };
+  if(meterSelect && costVessel) costVessel.addEventListener('change', ()=>{ meterSelect.innerHTML = maintMeterOptions(costVessel.value, ''); syncDueHours(); });
+  if(meterSelect) meterSelect.addEventListener('change', syncDueHours);
   const photoInput = document.getElementById('vesselPhotoInput');
   if(photoInput){
     photoInput.addEventListener('change', async (e)=>{
@@ -4091,7 +4106,8 @@ async function handleFormSubmit(e){
   }
   else if(modal.type==='maintenance'){
     const meterId = fd.get('meterId') || '';
-    const data = { vesselId:fd.get('vesselId'), meterId, meterLabel: meterId ? (maintMeterLabel(fd.get('vesselId'), meterId) || (modal.data && modal.data.meterLabel) || '') : '', category:fd.get('category'), title:fd.get('title'), description:fd.get('description')||'', dueDate:fd.get('dueDate'), cost: fd.has('cost') ? Number(fd.get('cost'))||0 : (modal.data ? modal.data.cost||0 : 0), priority:fd.get('priority'),
+    const data = { vesselId:fd.get('vesselId'), meterId, meterLabel: meterId ? (maintMeterLabel(fd.get('vesselId'), meterId) || (modal.data && modal.data.meterLabel) || '') : '',
+      dueHours: meterId && Number(fd.get('dueHours')) > 0 ? Math.round(Number(fd.get('dueHours')) * 10) / 10 : null, category:fd.get('category'), title:fd.get('title'), description:fd.get('description')||'', dueDate:fd.get('dueDate'), cost: fd.has('cost') ? Number(fd.get('cost'))||0 : (modal.data ? modal.data.cost||0 : 0), priority:fd.get('priority'),
       billing: fd.get('billing') || (modal.data ? billingOf(modal.data) : 'none') };
     const editId = modal.data ? modal.data.id : null;
     targetKey = 'maintenance';
