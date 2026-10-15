@@ -422,6 +422,19 @@
   .pay-row{align-items:flex-start; gap:10px; border-bottom:1px solid var(--paper-line); padding:10px 0;}
   .pay-actions{display:flex; align-items:center; gap:8px; flex-shrink:0; flex-wrap:wrap; justify-content:flex-end;}
   a.btn{display:inline-block; text-decoration:none;}
+  /* ===== In-app photo viewer (same look as the vessel manager's document viewer) ===== */
+  .doc-viewer{position:fixed; inset:0; z-index:300; display:flex; flex-direction:column; background:#262625;}
+  .dv-bar{display:flex; align-items:center; gap:8px; padding:calc(env(safe-area-inset-top) + 8px) 12px 8px; background:linear-gradient(135deg, #026b71 0%, #014c50 100%); color:#fff; box-shadow:0 2px 8px rgba(0,0,0,0.3);}
+  .dv-title{flex:1; min-width:0; font-weight:700; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .dv-btn{font:inherit; font-size:13px; font-weight:700; color:#fff; background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.3); border-radius:8px; padding:7px 11px; cursor:pointer; text-decoration:none; white-space:nowrap; min-height:36px; display:inline-flex; align-items:center;}
+  .dv-btn:hover{background:rgba(255,255,255,0.22);}
+  .dv-btn:disabled{opacity:0.4; cursor:default;}
+  .dv-close{background:#fff; color:#014c50; border-color:#fff;}
+  .dv-close:hover{background:#e8f7f7;}
+  .dv-body{flex:1; overflow:auto; -webkit-overflow-scrolling:touch; padding:12px 12px calc(12px + env(safe-area-inset-bottom));}
+  .dv-pages{display:flex; flex-direction:column; align-items:center; gap:12px; min-width:min-content;}
+  .dv-pages img{display:block; background:#fff; box-shadow:0 2px 10px rgba(0,0,0,0.4); max-width:none;}
+  @media (max-width:640px){ .dv-btn{padding:7px 9px;} .dv-hide-sm{display:none;} }
   /* ===== Paint sales ===== */
   .stamp.ps-quoted{background:var(--brand-tint); color:var(--navy); border-color:var(--border);}
   .stamp.ps-ordered{background:var(--brass-bg); color:var(--brass); border-color:rgba(250,178,25,0.4);}
@@ -603,15 +616,68 @@ function dataUrlToBlob(dataUrl){
   for(let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
   return new Blob([bytes], { type: mime });
 }
-function openPhoto(dataUrl){
+/* Photos open full-screen inside the app, with a Close button (and the phone's back gesture)
+   to return — the same viewer as the vessel manager's documents, without its PDF support,
+   since this app only stores photos. */
+const PV_ZOOMS = [1, 1.5, 2, 3]; /* 1 = photo fits the screen width */
+let photoViewer = null; /* { el, blobUrl, zoom, fromHistory } */
+function openPhoto(dataUrl, title){
   if(!dataUrl){ alert('No photo attached.'); return; }
-  try{
-    const url = URL.createObjectURL(dataUrlToBlob(dataUrl));
-    const win = window.open(url, '_blank');
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
-    if(!win) alert('Your browser blocked the photo window — allow pop-ups for this site and try again.');
-  }catch(e){ alert("Couldn't open that photo."); }
+  let blobUrl;
+  try{ blobUrl = URL.createObjectURL(dataUrlToBlob(dataUrl)); }
+  catch(e){ alert("Couldn't open that photo."); return; }
+  const reuseHistory = !!(photoViewer && photoViewer.fromHistory);
+  closePhoto(true);
+  const el = document.createElement('div');
+  el.className = 'doc-viewer';
+  el.setAttribute('role', 'dialog');
+  el.setAttribute('aria-modal', 'true');
+  el.innerHTML = `
+    <div class="dv-bar">
+      <div class="dv-title">${esc(title || 'Photo')}</div>
+      <button type="button" class="dv-btn" data-pv="zoom-out" aria-label="Zoom out" disabled>−</button>
+      <button type="button" class="dv-btn" data-pv="zoom-in" aria-label="Zoom in">+</button>
+      <a class="dv-btn dv-hide-sm" href="${blobUrl}" download="${esc((title || 'photo').replace(/[^\w.-]+/g, '-'))}.jpg">Download</a>
+      <button type="button" class="dv-btn dv-close" data-pv="close">✕ Close</button>
+    </div>
+    <div class="dv-body"><div class="dv-pages"><img src="${blobUrl}" alt="${esc(title || 'Photo')}"></div></div>`;
+  document.body.appendChild(el);
+  document.body.style.overflow = 'hidden';
+  photoViewer = { el, blobUrl, zoom:0, fromHistory:false };
+  /* a history entry, so the phone's back gesture closes the photo instead of leaving the app */
+  if(reuseHistory) photoViewer.fromHistory = true;
+  else try{ history.pushState({ photoViewer:true }, ''); photoViewer.fromHistory = true; }catch(e){}
+  el.querySelector('[data-pv="close"]').addEventListener('click', ()=>closePhoto());
+  el.querySelector('[data-pv="zoom-in"]').addEventListener('click', ()=>zoomPhoto(1));
+  el.querySelector('[data-pv="zoom-out"]').addEventListener('click', ()=>zoomPhoto(-1));
+  sizePhoto();
+  el.querySelector('[data-pv="close"]').focus();
 }
+function sizePhoto(){
+  if(!photoViewer) return;
+  const el = photoViewer.el;
+  const fitWidth = Math.max(200, Math.min(el.querySelector('.dv-body').clientWidth - 24, 1000));
+  el.querySelector('.dv-pages img').style.width = Math.round(fitWidth * PV_ZOOMS[photoViewer.zoom]) + 'px';
+  el.querySelector('[data-pv="zoom-out"]').disabled = photoViewer.zoom === 0;
+  el.querySelector('[data-pv="zoom-in"]').disabled = photoViewer.zoom === PV_ZOOMS.length - 1;
+}
+function zoomPhoto(step){
+  if(!photoViewer) return;
+  photoViewer.zoom = Math.max(0, Math.min(PV_ZOOMS.length - 1, photoViewer.zoom + step));
+  sizePhoto();
+}
+/* silent: replacing one photo with another, so leave the history entry alone */
+function closePhoto(silent){
+  if(!photoViewer) return;
+  const pv = photoViewer;
+  photoViewer = null;
+  pv.el.remove();
+  document.body.style.overflow = '';
+  URL.revokeObjectURL(pv.blobUrl);
+  if(!silent && pv.fromHistory && history.state && history.state.photoViewer) history.back();
+}
+window.addEventListener('popstate', ()=>{ if(photoViewer){ photoViewer.fromHistory = false; closePhoto(); } });
+document.addEventListener('keydown', e=>{ if(e.key === 'Escape' && photoViewer) closePhoto(); });
 function authErrorText(err){
   const code = err && err.code || '';
   if(['auth/invalid-credential','auth/wrong-password','auth/user-not-found','auth/invalid-email','auth/invalid-login-credentials'].includes(code)) return 'Incorrect email or password.';
@@ -1862,7 +1928,9 @@ async function handleAction(el){
       const p = ct ? ct.payments.find(x=>x.id===payId) : null;
       if(!p) return;
       const which = el.dataset.which;
-      openPhoto(which==='before' ? p.photoBefore : which==='after' ? p.photoAfter : ((p.expenses||[])[Number(which.split(':')[1])] || {}).photo);
+      const exp = which.startsWith('expense:') ? (p.expenses||[])[Number(which.split(':')[1])] || {} : null;
+      openPhoto(which==='before' ? p.photoBefore : which==='after' ? p.photoAfter : exp.photo,
+        which==='before' ? 'Odometer — before' : which==='after' ? 'Odometer — after' : `${exp.description || 'Expense'} — slip`);
       break;
     }
     case 'toggle-paid': {
