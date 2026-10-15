@@ -168,9 +168,9 @@
   }
   .stamp.overdue, .stamp.expired, .stamp.pay-outstanding{background:rgba(208,59,59,0.14); color:var(--signal-red); border-color:rgba(208,59,59,0.35);}
   .stamp.red-alert{background:var(--signal-red); color:#fff; border-color:var(--signal-red);}
-  .stamp.due-soon, .stamp.advisory, .stamp.in-maintenance, .stamp.bill-invoiced{background:var(--brass-bg); color:var(--brass); border-color:rgba(250,178,25,0.4);}
-  .stamp.completed, .stamp.active, .stamp.valid, .stamp.bill-paid, .stamp.pay-paid{background:rgba(12,163,12,0.12); color:var(--seafoam); border-color:rgba(12,163,12,0.3);}
-  .stamp.upcoming, .stamp.docked, .stamp.bill-quoted{background:var(--brand-tint); color:var(--navy); border-color:var(--border);}
+  .stamp.due-soon, .stamp.advisory, .stamp.in-maintenance{background:var(--brass-bg); color:var(--brass); border-color:rgba(250,178,25,0.4);}
+  .stamp.completed, .stamp.active, .stamp.valid, .stamp.pay-paid{background:rgba(12,163,12,0.12); color:var(--seafoam); border-color:rgba(12,163,12,0.3);}
+  .stamp.upcoming, .stamp.docked{background:var(--brand-tint); color:var(--navy); border-color:var(--border);}
 
   /* ===== Table ===== */
   .table-wrap{background:var(--white-card); border:1px solid var(--border); border-radius:12px; overflow-x:auto;}
@@ -269,7 +269,7 @@
   .vessel-check input{width:auto;}
   .pw-mask{font-family:ui-monospace,monospace; letter-spacing:1px;}
 
-  /* ===== Sub-tabs (billing filter) ===== */
+  /* ===== Sub-tabs ===== */
   .subtabs{display:flex; gap:6px; flex-wrap:wrap; margin:0 0 16px;}
   .subtab{
     font-size:12.5px; font-weight:700; padding:7px 13px;
@@ -472,7 +472,7 @@ let state = {
   hoursSaved: false,
   activeTab: 'dashboard',
   modal: null,
-  filters: { vessel:'all', meter:'all', category:'all', status:'all', billing:'all' },
+  filters: { vessel:'all', meter:'all', category:'all', status:'all' },
   clView: { vesselId:null, checklistId:null, period:null },
   clDirty: false,
   clSaved: false,
@@ -714,16 +714,6 @@ function logout(){
 
 function isAdmin(){ return !!(session && session.role === 'admin'); }
 
-/* Billing lifecycle for a maintenance task (admin-only view). */
-const BILLING_STAGES = [ { id:'quoted', label:'Quoted' }, { id:'invoiced', label:'Invoiced' }, { id:'paid', label:'Paid' } ];
-function billingOf(m){ return m.billing || 'none'; }
-/* Maintenance shows costs only for this company's vessels (Igobgolondo Trust), for every login. */
-const COST_COMPANY_ID = 'co_mttr3ir6kyzzz';
-function costVisible(vesselId){
-  const co = state.companies.find(c=>c.id===COST_COMPANY_ID);
-  return !!co && (co.vesselIds || []).includes(vesselId);
-}
-function billingLabel(b){ return ({ none:'Not billed', quoted:'Quoted', invoiced:'Invoiced', paid:'Paid' })[b] || b; }
 
 
 /* Which vessels the signed-in user may see: all of them for admin, only the
@@ -1214,7 +1204,7 @@ function renderDashboard(){
   const events = [];
   allTasks.filter(m=>m.status!=='completed').forEach(m=>{
     const vesselLabel = m._source==='tender' ? `${vesselName(m.vesselId)} — ${m._tenderName} (tender)` : vesselName(m.vesselId);
-    events.push({ date:m.dueDate, kind:'Maintenance', title:m.title, sub:`${vesselLabel} · ${m.category==='scheduled'?'Scheduled':m.category==='daily'?'Daily':'Unscheduled'} · ${fmtCurrency(m.cost)}`, status:maintStatus(m) });
+    events.push({ date:m.dueDate, kind:'Maintenance', title:m.title, sub:`${vesselLabel} · ${m.category==='scheduled'?'Scheduled':m.category==='daily'?'Daily':'Unscheduled'}`, status:maintStatus(m) });
   });
   state.crew.forEach(c=>c.quals.forEach(q=>{
     events.push({ date:q.expiry, kind:'Qualification', title:q.name, sub:`${c.name} (${c.role})`, status:qualStatus(q.expiry) });
@@ -2270,12 +2260,8 @@ function tenderMaintenanceForm(m){
         <option value="medium" ${m.priority==='medium'?'selected':''}>Medium</option>
         <option value="high" ${m.priority==='high'?'selected':''}>High</option>
       </select></label>`,
-      state.modal && costVisible(state.modal.vesselId) ? `<label class="field">Cost (R)<input name="cost" type="number" min="0" value="${m.cost}"></label>` : `<span></span>`
+      `<span></span>`
     )}
-    ${isAdmin() ? `<label class="field">Billing status<select name="billing">
-      <option value="none" ${billingOf(m)==='none'?'selected':''}>Not billed</option>
-      ${BILLING_STAGES.map(b=>`<option value="${b.id}" ${billingOf(m)===b.id?'selected':''}>${b.label}</option>`).join('')}
-    </select></label>` : ''}
   `;
 }
 
@@ -2647,30 +2633,12 @@ function renderMaintenanceTasks(){
   if(f.category!=='all') rows = rows.filter(m=>m.category===f.category);
   if(f.status!=='all') rows = rows.filter(m=>maintStatus(m)===f.status);
 
-  /* billing sub-tabs (admin only) — counts reflect the other active filters */
-  const billing = admin ? (f.billing || 'all') : 'all';
-  const rowsBeforeBilling = rows.slice();
-  const billingCount = id => rowsBeforeBilling.filter(m => billingOf(m) === id).length;
-  if(billing !== 'all') rows = rows.filter(m => billingOf(m) === billing);
-
   rows.sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate));
 
-  const showCost = state.vessels.some(v=>costVisible(v.id));
-  const invoicedUnpaid = allTasks.filter(m=>billingOf(m)==='invoiced' && costVisible(m.vesselId)).reduce((s,m)=>s+Number(m.cost||0),0);
 
-  const billingTabs = admin ? `
-    <div class="subtabs">
-      <button type="button" class="subtab ${billing==='all'?'active':''}" data-action="billing-tab" data-billing="all">All${''}</button>
-      ${BILLING_STAGES.map(b=>`<button type="button" class="subtab ${billing===b.id?'active':''}" data-action="billing-tab" data-billing="${b.id}">${b.label}<span class="cnt">${billingCount(b.id)}</span></button>`).join('')}
-      <button type="button" class="subtab ${billing==='none'?'active':''}" data-action="billing-tab" data-billing="none">Not billed<span class="cnt">${billingCount('none')}</span></button>
-    </div>` : '';
-  const colspan = 8 + (admin ? 1 : 0) + (showCost ? 1 : 0);
+  const colspan = 8;
 
   return `
-    ${admin && showCost ? `<div class="cost-total-bar">
-      <div class="ctb-item"><div class="label">Invoiced, unpaid</div><div class="value">${fmtCurrency(invoicedUnpaid)}</div></div>
-    </div>` : ''}
-    ${billingTabs}
     <div class="toolbar">
       <div class="filters">
         <select id="filterVessel">
@@ -2701,7 +2669,7 @@ function renderMaintenanceTasks(){
     <div class="table-wrap">
       <table>
         <thead><tr>
-          <th>Task</th><th>Vessel</th><th>Equipment</th><th>Type</th><th>Due</th><th>Priority</th>${showCost ? '<th class="num">Cost</th>' : ''}<th>Status</th>${admin?'<th>Billing</th>':''}<th></th>
+          <th>Task</th><th>Vessel</th><th>Equipment</th><th>Type</th><th>Due</th><th>Priority</th><th>Status</th><th></th>
         </tr></thead>
         <tbody>
           ${rows.length===0 ? `<tr><td colspan="${colspan}"><div class="empty-note">No tasks match these filters.</div></td></tr>` : rows.map(m=>{
@@ -2718,9 +2686,7 @@ function renderMaintenanceTasks(){
               <td style="text-transform:capitalize;">${m.category}</td>
               <td>${fmtDate(m.dueDate)}${(hl=> Number(m.dueHours) > 0 && m.meterId ? `<div style="color:var(--ink-soft); font-size:11.5px; margin-top:2px; white-space:nowrap;">or at ${Number(m.dueHours).toLocaleString()} hrs${hl!==null && m.status!=='completed' ? ` · ${hl > 0 ? hl.toLocaleString() + ' hrs left' : Math.abs(hl).toLocaleString() + ' hrs over'}` : ''}</div>` : '')(maintHoursLeft(m))}</td>
               <td style="text-transform:capitalize;">${m.priority}</td>
-              ${showCost ? `<td class="num">${costVisible(m.vesselId) ? fmtCurrency(m.cost) : '<span style="color:var(--ink-soft);">—</span>'}</td>` : ''}
               <td><span class="stamp ${maintStatus(m)}">${stampLabel(maintStatus(m))}</span></td>
-              ${admin ? `<td>${billingOf(m)==='none' ? '<span style="color:var(--ink-soft);">—</span>' : `<span class="stamp bill-${billingOf(m)}">${billingLabel(billingOf(m))}</span>`}</td>` : ''}
               <td style="white-space:nowrap;">
                 ${m.status!=='completed' ? `<button class="btn small" ${completeAttrs}>Complete</button>` : ''}
                 <button class="btn small ghost" ${editAttrs}>Edit</button>
@@ -2811,12 +2777,12 @@ function costLines(){
     source:'Maintenance task', date: taskCostDate(m), title: m.title || '', description: m.description || '',
     vesselId: m.vesselId, vessel: vesselName(m.vesselId), tender: m._tenderName || '', category: taskFinCategory(m), provider:'',
     status: stampLabel(maintStatus(m)), statusId: maintStatus(m), spent: m.status === 'completed',
-    billing: billingLabel(billingOf(m)), cost: Number(m.cost)||0
+    cost: Number(m.cost)||0
   }));
   const entries = state.financeItems.filter(x=>inFinScope(x.vesselId)).map(x=>({
     source:'Finance entry', date: x.date || '', title: x.description || finCategoryLabel(x.category), description: x.invoiceRef ? `Ref ${x.invoiceRef}` : '',
     vesselId: x.vesselId, vessel: vesselName(x.vesselId), tender:'', category: x.category, provider: (x.provider && x.provider.name) || '',
-    status:'Recorded', statusId:'completed', spent:true, billing:'—', cost: Number(x.cost)||0
+    status:'Recorded', statusId:'completed', spent:true, cost: Number(x.cost)||0
   }));
   return [...tasks, ...entries];
 }
@@ -3089,9 +3055,9 @@ function renderCostReports(){
     ${renderFinShare('report')}
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Date</th><th>Item</th><th>Category</th><th>Vessel</th><th>Service provider</th><th>Status</th>${admin?'<th>Billing</th>':''}<th class="num">Cost</th></tr></thead>
+        <thead><tr><th>Date</th><th>Item</th><th>Category</th><th>Vessel</th><th>Service provider</th><th>Status</th><th class="num">Cost</th></tr></thead>
         <tbody>
-          ${r.rows.length===0 ? `<tr><td colspan="${admin?8:7}"><div class="empty-note">No costs in this period.</div></td></tr>` : r.rows.map(x=>`
+          ${r.rows.length===0 ? `<tr><td colspan="7"><div class="empty-note">No costs in this period.</div></td></tr>` : r.rows.map(x=>`
             <tr>
               <td>${fmtDate(x.date)}</td>
               <td><b>${esc(x.title)}</b>${x.description?`<div style="color:var(--ink-soft); font-size:11.5px; margin-top:2px;">${esc(x.description)}</div>`:''}</td>
@@ -3099,7 +3065,6 @@ function renderCostReports(){
               <td>${esc(x.vessel)}${x.tender?` <span style="color:var(--ink-soft); font-size:11px;">— ${esc(x.tender)} (tender)</span>`:''}</td>
               <td>${x.provider ? esc(x.provider) : '<span style="color:var(--ink-soft);">—</span>'}</td>
               <td><span class="stamp ${x.statusId}">${esc(x.status)}</span></td>
-              ${admin?`<td>${esc(x.billing)}</td>`:''}
               <td class="num">${fmtCurrency(x.cost)}</td>
             </tr>`).join('')}
         </tbody>
@@ -3354,10 +3319,10 @@ function costReportFiles(){
   if(Object.keys(r.byVessel).length > 1) summary('By vessel', Object.entries(r.byVessel));
   pdfFooter(doc);
 
-  const head = ['Date','Item','Details','Category','Source','Vessel','Tender','Service provider','Status', ...(admin?['Billing']:[]), 'Cost (R)'];
+  const head = ['Date','Item','Details','Category','Source','Vessel','Tender','Service provider','Status', 'Cost (R)'];
   const csv = [
     head,
-    ...r.rows.map(x=>[x.date, x.title, x.description, finCategoryLabel(x.category), x.source, x.vessel, x.tender, x.provider, x.status, ...(admin?[x.billing]:[]), Number(x.cost.toFixed(2))]),
+    ...r.rows.map(x=>[x.date, x.title, x.description, finCategoryLabel(x.category), x.source, x.vessel, x.tender, x.provider, x.status, Number(x.cost.toFixed(2))]),
     [...head.slice(0,-2).map(()=> ''), 'Total', Number(r.total.toFixed(2))]
   ];
   return {
@@ -3614,13 +3579,6 @@ function maintenanceForm(m){
         <option value="medium" ${m.priority==='medium'?'selected':''}>Medium</option>
         <option value="high" ${m.priority==='high'?'selected':''}>High</option>
       </select></label>`
-    )}
-    ${fieldRow(
-      `<label class="field" data-cost-field style="${costVisible(m.vesselId) ? '' : 'display:none;'}">Estimated / actual cost (R)<input name="cost" type="number" min="0" value="${m.cost}" ${costVisible(m.vesselId) ? '' : 'disabled'}></label>`,
-      isAdmin() ? `<label class="field">Billing status<select name="billing">
-        <option value="none" ${billingOf(m)==='none'?'selected':''}>Not billed</option>
-        ${BILLING_STAGES.map(b=>`<option value="${b.id}" ${billingOf(m)===b.id?'selected':''}>${b.label}</option>`).join('')}
-      </select></label>` : `<span></span>`
     )}
   `;
 }
@@ -3917,17 +3875,11 @@ function attachModalEvents(){
   wireChecklistItemEditor();
   wireCrewQualAdder();
   wireFinanceItemForm();
-  const costField = form && form.querySelector('[data-cost-field]');
-  const costVessel = form && form.elements.vesselId;
-  if(costField && costVessel) costVessel.addEventListener('change', ()=>{
-    const show = costVisible(costVessel.value);
-    costField.style.display = show ? '' : 'none';
-    costField.querySelector('input').disabled = !show;
-  });
+  const formVessel = form && form.elements.vesselId;
   const meterSelect = form && form.querySelector('[data-meter-select]');
   const dueHoursField = form && form.querySelector('[data-due-hours-field]');
   const syncDueHours = ()=>{ if(!dueHoursField) return; const on = !!meterSelect.value; dueHoursField.style.display = on ? '' : 'none'; dueHoursField.querySelector('input').disabled = !on; };
-  if(meterSelect && costVessel) costVessel.addEventListener('change', ()=>{ meterSelect.innerHTML = maintMeterOptions(costVessel.value, ''); syncDueHours(); });
+  if(meterSelect && formVessel) formVessel.addEventListener('change', ()=>{ meterSelect.innerHTML = maintMeterOptions(formVessel.value, ''); syncDueHours(); });
   if(meterSelect) meterSelect.addEventListener('change', syncDueHours);
   const photoInput = document.getElementById('vesselPhotoInput');
   if(photoInput){
@@ -4186,8 +4138,7 @@ async function handleFormSubmit(e){
   else if(modal.type==='maintenance'){
     const meterId = fd.get('meterId') || '';
     const data = { vesselId:fd.get('vesselId'), meterId, meterLabel: meterId ? (maintMeterLabel(fd.get('vesselId'), meterId) || (modal.data && modal.data.meterLabel) || '') : '',
-      dueHours: meterId && Number(fd.get('dueHours')) > 0 ? Math.round(Number(fd.get('dueHours')) * 10) / 10 : null, category:fd.get('category'), title:fd.get('title'), description:fd.get('description')||'', dueDate:fd.get('dueDate'), cost: fd.has('cost') ? Number(fd.get('cost'))||0 : (modal.data ? modal.data.cost||0 : 0), priority:fd.get('priority'),
-      billing: fd.get('billing') || (modal.data ? billingOf(modal.data) : 'none') };
+      dueHours: meterId && Number(fd.get('dueHours')) > 0 ? Math.round(Number(fd.get('dueHours')) * 10) / 10 : null, category:fd.get('category'), title:fd.get('title'), description:fd.get('description')||'', dueDate:fd.get('dueDate'), priority:fd.get('priority') };
     const editId = modal.data ? modal.data.id : null;
     targetKey = 'maintenance';
     mutateFn = fresh => editId
@@ -4307,8 +4258,7 @@ async function handleFormSubmit(e){
     nextModal = { type:'view-tender', vesselId, tenderId };
   }
   else if(modal.type==='tender-task'){
-    const data = { title:fd.get('title'), description:fd.get('description')||'', category:fd.get('category'), dueDate:fd.get('dueDate'), priority:fd.get('priority'), cost: fd.has('cost') ? Number(fd.get('cost'))||0 : (modal.data ? modal.data.cost||0 : 0),
-      billing: fd.get('billing') || (modal.data ? billingOf(modal.data) : 'none') };
+    const data = { title:fd.get('title'), description:fd.get('description')||'', category:fd.get('category'), dueDate:fd.get('dueDate'), priority:fd.get('priority') };
     const vesselId = modal.vesselId, tenderId = modal.tenderId;
     const editTaskId = modal.data ? modal.data.id : null;
     targetKey = 'vessels';
@@ -4627,10 +4577,6 @@ function attachContentEvents(){
             await persistArray('checklistRuns', fresh => fresh.filter(r=>r.id!==id));
             render();
           }
-          break;
-        case 'billing-tab':
-          state.filters.billing = el.dataset.billing;
-          render();
           break;
         case 'view-doc':
           openDocument(el.dataset);
