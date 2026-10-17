@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en-ZA">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OCEANHUB privacy notice</title>
+<script>
+  try{ if(localStorage.getItem('oceanhub_theme')==='dark') document.documentElement.dataset.theme='dark'; }catch(e){}
+</script>
+<style>
+  :root{
+    --font:system-ui,-apple-system,"Segoe UI",sans-serif;
+    --page-bg:#f9f9f7; --card:#ffffff; --line:#e1e0d9;
+    --ink:#0b0b0b; --ink-soft:#52514e; --accent:#026b71;
+  }
+  :root[data-theme="dark"]{
+    --page-bg:#121212; --card:#1a1a19; --line:#2c2c2a;
+    --ink:#ffffff; --ink-soft:#b5b4ae; --accent:#34abb2;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--page-bg); color:var(--ink); font-family:var(--font); line-height:1.55;}
+  .wrap{max-width:760px; margin:0 auto; padding:28px 16px 48px;}
+  .back{display:inline-block; margin-bottom:18px; color:var(--accent); font-weight:600; text-decoration:none;}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:26px 22px;}
+  a{color:var(--accent);}
+  .privacy-notice h2{font-size:22px; margin:0 0 4px;}
+  .privacy-notice h3{font-size:16px; margin:22px 0 6px;}
+  .privacy-notice p, .privacy-notice li{font-size:14.5px;}
+  .privacy-notice ul{padding-left:20px; margin:6px 0;}
+  .privacy-notice li{margin:3px 0;}
+  .privacy-notice .pn-updated{color:var(--ink-soft); font-size:13px; margin:0 0 14px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="./">&larr; Back to OCEANHUB</a>
+  <div class="card">
+    <!-- The apps show everything inside this article in their own privacy window. -->
+    <article id="privacy-notice" class="privacy-notice">
+      <h2>Privacy notice</h2>
+      <p class="pn-updated">Last updated 17 October 2026</p>
+      <p>This notice explains what personal information the OCEANHUB vessel manager and contractors app keep, why, who can see it, and your rights under the Protection of Personal Information Act, 2013 (POPIA).</p>
+
+      <h3>Who we are</h3>
+      <p>OCEANHUB runs both apps and is the responsible party for the information in them. For any question or request about your information, contact our Information Officer at <a href="mailto:thor@oceanhub.co.za">thor@oceanhub.co.za</a>.</p>
+
+      <h3>What we keep</h3>
+      <ul>
+        <li><b>Sign-in:</b> your email address and account type. Passwords are handled by Google Firebase Authentication. We never see or store them.</li>
+        <li><b>Owners and operators:</b> company name, contact person, email, phone and address, and vessel owner contact details.</li>
+        <li><b>Crew:</b> name, role, vessel, email, phone, qualifications and their expiry dates, and any certificates or documents uploaded. Also the name entered when someone completes a checklist.</li>
+        <li><b>Contractors:</b> name, contact details, bank details (bank, account holder, account number, branch code, account type, SWIFT), payments, work photos and expense slips. If paint sales is turned on: customer names, phone numbers, emails, addresses and orders.</li>
+        <li><b>Finance:</b> costs, invoice copies and supplier contact details.</li>
+      </ul>
+      <p>We don't ask for ID numbers or special personal information such as health details. Uploaded documents (for example a medical certificate) can contain it, so please only upload what is needed.</p>
+
+      <h3>Why we use it</h3>
+      <ul>
+        <li>To run the vessels: maintenance, checklists, engine hours and service records.</li>
+        <li>To keep crew certification current and flag qualifications and documents before they expire.</li>
+        <li>To record costs and invoices and produce budgets and reports.</li>
+        <li>To pay contractors and keep a record of payments.</li>
+        <li>To give each person the right access and keep the apps secure.</li>
+      </ul>
+      <p>We use the information because it's needed for our agreements with owners, operators and contractors, for our legitimate interest in running vessels safely, and to meet legal duties such as keeping financial records. We don't sell it, and we don't use it for advertising.</p>
+
+      <h3>Who can see it</h3>
+      <ul>
+        <li>The OCEANHUB admin can see everything.</li>
+        <li>An owner or operator login sees only its own company's vessels and the crew, maintenance, costs and documents linked to them.</li>
+        <li>A contractor login sees only that contractor's own details and payments.</li>
+      </ul>
+      <p>These limits are enforced by the database itself, not just by the app.</p>
+
+      <h3>Service providers and where the information is stored</h3>
+      <ul>
+        <li><b>Google Firebase</b> stores the data and handles sign-in. Its servers are in the United States.</li>
+        <li><b>Google Gemini</b> reads invoice photos when you use <i>Scan invoice</i>, to fill in the cost lines for you.</li>
+        <li><b>GitHub Pages</b> hosts the app's program files. It holds no personal information.</li>
+        <li>Fonts and program libraries load from Google Fonts and cdnjs, which see your device's IP address, as any website would.</li>
+      </ul>
+      <p>Google is bound by data-protection terms that require it to keep the information secure and use it only to provide its services to us. We rely on these terms when information is sent outside South Africa (section 72 of POPIA).</p>
+      <p>The WhatsApp, email and share buttons only send something when you tap them, and they go through your own apps.</p>
+
+      <h3>On your device</h3>
+      <p>The apps remember your light or dark setting, the last crew name entered on a checklist, and the email address used for finance reports. There are no advertising or tracking cookies, and sign-in isn't remembered: you enter your password each time you open the app.</p>
+
+      <h3>How we protect it</h3>
+      <p>All traffic is encrypted, every screen needs a sign-in, and the database rules limit each login to its own records. If personal information is ever accessed by someone who shouldn't have it, we will tell the Information Regulator and the people affected, as POPIA requires.</p>
+
+      <h3>How long we keep it</h3>
+      <ul>
+        <li><b>Financial records</b> (costs, invoices, supplier details and contractor payments): 7 years, as South African tax and company law require.</li>
+        <li><b>Crew details</b> (contact details, qualifications and documents): 1 year after the crew member stops working on a vessel managed in OCEANHUB.</li>
+        <li><b>Owner, operator and contractor contact details and logins:</b> while the working relationship lasts, then deleted. Anything that forms part of a financial record is kept for the 7 years above.</li>
+      </ul>
+      <p>After these periods we delete the information, or remove anything that identifies you.</p>
+
+      <h3>Your rights</h3>
+      <ul>
+        <li>Ask what information we hold about you, and ask us to correct or delete it.</li>
+        <li>Object to how we use it.</li>
+        <li>Contractors can update their own contact and bank details in the app at any time.</li>
+        <li>Complain to the Information Regulator: <a href="https://inforegulator.org.za" target="_blank" rel="noopener">inforegulator.org.za</a>, <a href="mailto:POPIAComplaints@inforegulator.org.za">POPIAComplaints@inforegulator.org.za</a>.</li>
+      </ul>
+
+      <h3>If you add other people's details</h3>
+      <p>Owners and operators adding crew, and contractors adding customers, should let those people know their details are kept in OCEANHUB and point them to this notice.</p>
+
+      <h3>Changes</h3>
+      <p>We'll update this page if anything changes. The date at the top shows the latest version.</p>
+    </article>
+  </div>
+</div>
+</body>
+</html>

@@ -241,6 +241,19 @@
   .modal h3{font-size:18px; font-weight:800; margin:0 0 16px; color:var(--heading);}
   .modal .modal-actions{display:flex; justify-content:flex-end; flex-wrap:wrap; gap:8px; margin-top:18px; padding-top:14px; border-top:1px solid var(--paper-line);}
   .modal .close-x{position:absolute;}
+  /* privacy notice window (text comes from privacy.html) */
+  .privacy-overlay{z-index:300;}
+  .privacy-notice h2{font-size:20px; font-weight:800; margin:0 0 4px; color:var(--heading);}
+  .privacy-notice h3{font-size:15px; font-weight:800; margin:20px 0 6px; color:var(--heading);}
+  .privacy-notice p, .privacy-notice li{font-size:13.5px; line-height:1.55;}
+  .privacy-notice p{margin:6px 0;}
+  .privacy-notice ul{padding-left:20px; margin:6px 0;}
+  .privacy-notice li{margin:3px 0;}
+  .privacy-notice a{color:var(--accent);}
+  .privacy-notice .pn-updated{color:var(--ink-soft); font-size:12.5px; margin:0 0 12px;}
+  .login-privacy{text-align:center; margin-top:16px; font-size:12.5px;}
+  .login-privacy a, .privacy-hint a{color:var(--accent);}
+  .privacy-hint{font-size:12px; color:var(--ink-soft); margin:2px 0 0;}
   .modal-header-row{display:flex; justify-content:space-between; align-items:center;}
   .detail-section{margin-top:16px;}
   .detail-section h4{font-size:11.5px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; color:var(--ink-muted); margin:0 0 8px; border-bottom:1px solid var(--paper-line); padding-bottom:6px;}
@@ -700,6 +713,7 @@ function renderLoginGate(err, info){
         <button type="submit" class="btn primary" style="width:100%;">Sign in</button>
         <button type="button" class="btn ghost" id="forgotPasswordBtn" style="width:100%; margin-top:8px;">Forgot password?</button>
       </form>
+      <p class="login-privacy"><a href="privacy.html" data-privacy>Privacy notice</a></p>
     </div>`;
   document.getElementById('loginForm').addEventListener('submit', handleLogin);
   document.getElementById('forgotPasswordBtn').addEventListener('click', async ()=>{
@@ -1333,6 +1347,50 @@ function closeDocViewer(silent){
   if(dv.blobUrl) URL.revokeObjectURL(dv.blobUrl);
   if(!silent && dv.fromHistory && history.state && history.state.docViewer) history.back();
 }
+/* ============================= PRIVACY NOTICE ============================= */
+/* The notice lives in privacy.html, which is also a public page. Anything marked data-privacy
+   opens it here in a window instead, because leaving the app would sign you out. */
+const PRIVACY_URL = 'privacy.html';
+let privacyEl = null;
+async function openPrivacy(){
+  if(privacyEl) return;
+  const el = document.createElement('div');
+  el.className = 'modal-overlay privacy-overlay';
+  el.innerHTML = `<div class="modal" role="dialog" aria-modal="true" aria-label="Privacy notice">
+      <div class="privacy-body"><div class="empty-note">Loading…</div></div>
+      <div class="modal-actions"><button type="button" class="btn primary" data-privacy-close>Close</button></div>
+    </div>`;
+  el.addEventListener('click', e=>{ if(e.target === el || e.target.closest('[data-privacy-close]')) closePrivacy(); });
+  document.body.appendChild(el);
+  privacyEl = el;
+  /* a history entry, so the phone's back gesture closes the notice instead of leaving the app */
+  try{ history.pushState({ privacy:true }, ''); }catch(e){}
+  const body = el.querySelector('.privacy-body');
+  try{
+    const res = await fetch(PRIVACY_URL);
+    if(!res.ok) throw new Error(res.status);
+    const notice = new DOMParser().parseFromString(await res.text(), 'text/html').getElementById('privacy-notice');
+    if(!notice) throw new Error('notice missing');
+    if(privacyEl === el) body.replaceChildren(document.importNode(notice, true));
+  }catch(e){
+    if(privacyEl === el) body.innerHTML = `<div class="empty-note">Couldn't load the privacy notice. <a href="${PRIVACY_URL}" target="_blank" rel="noopener">Open it in a new tab</a>.</div>`;
+  }
+}
+function closePrivacy(fromHistory){
+  if(!privacyEl) return;
+  privacyEl.remove();
+  privacyEl = null;
+  if(!fromHistory && history.state && history.state.privacy) history.back();
+}
+window.addEventListener('popstate', ()=>{ if(privacyEl) closePrivacy(true); });
+document.addEventListener('keydown', e=>{ if(e.key === 'Escape' && privacyEl){ e.stopImmediatePropagation(); closePrivacy(); } }, true);
+document.addEventListener('click', e=>{
+  const link = e.target.closest && e.target.closest('[data-privacy]');
+  if(!link) return;
+  e.preventDefault();
+  openPrivacy();
+});
+
 window.addEventListener('popstate', ()=>{ if(docViewer){ docViewer.fromHistory = false; closeDocViewer(); } });
 document.addEventListener('keydown', e=>{ if(e.key === 'Escape' && docViewer) closeDocViewer(); });
 
@@ -1592,6 +1650,7 @@ function renderDashboard(){
         <p class="section-sub" style="margin-bottom:0;">Overview across the register — maintenance and crew certification.</p>
       </div>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button type="button" class="btn ghost" data-privacy>Privacy</button>
         <button class="btn ghost" data-action="logout">Sign out</button>
       </div>
     </div>
@@ -4320,6 +4379,7 @@ function crewForm(c){
       `<label class="field">Email<input name="email" type="email" value="${esc(c.email||'')}" placeholder="crew@example.com"></label>`,
       `<label class="field">Phone / WhatsApp<input name="phone" type="tel" value="${esc(c.phone||'')}" placeholder="+27 82 000 0000"></label>`
     )}
+    <p class="privacy-hint">Let them know their details are kept in OCEANHUB: see the <a href="privacy.html" data-privacy>privacy notice</a>.</p>
     ${!isEdit ? crewQualTemplate() : ''}
   `;
 }
