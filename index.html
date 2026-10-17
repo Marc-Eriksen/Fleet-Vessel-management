@@ -665,6 +665,8 @@ async function handleAuthChange(user){
     return;
   }
   session = { role:rec.role, companyId:rec.companyId || null, uid:user.uid, email:user.email };
+  writeLog([{ action:'signed in' }]);
+  pruneLog();
   state.activeTab = 'dashboard';
   loadState().catch(err=>{
     authNotice = 'Could not load data: ' + (err && err.message ? err.message : err);
@@ -754,6 +756,8 @@ function detachData(){
   detachParts();
   ownerAccess = null;
   adminAccess = null;
+  logPruned = false;
+  logView = freshLogView();
   firstLoadDone = false;
 }
 
@@ -1063,8 +1067,8 @@ async function moveInlineDocFiles(){
     if(!moved.size) return;
     const strip = docs => (docs||[]).map(d=>{ if(!moved.has(d.id)) return d; const { dataUrl, ...rest } = d; return rest; });
     await persistArray('vessels', fresh => fresh.map(v=>({ ...v, documents:strip(v.documents),
-      tenders:(v.tenders||[]).map(t=>({ ...t, documents:strip(t.documents) })) })));
-    await persistArray('crew', fresh => fresh.map(c=>({ ...c, documents:strip(c.documents) })));
+      tenders:(v.tenders||[]).map(t=>({ ...t, documents:strip(t.documents) })) })), { auto:true });
+    await persistArray('crew', fresh => fresh.map(c=>({ ...c, documents:strip(c.documents) })), { auto:true });
   }finally{
     docMoveRunning = false;
   }
@@ -1090,18 +1094,80 @@ async function fetchFresh(key){
   return assembleKey(key, groups);
 }
 
+/* ============================= CHANGE LOG ============================= */
+/* Every save also writes an entry to oceanhub/log, in the same atomic write: who (their own
+   sign-in, checked by the database rules), when (the server's clock), which record and which
+   fields changed. Never the values themselves, so deleted personal details don't live on in
+   the log. The rules let anyone signed in add entries but nobody edit them; the admin app
+   prunes entries older than LOG_KEEP_YEARS, which is all the rules let anyone delete. */
+const LOG_PATH = 'oceanhub/log/';
+const LOG_KEEP_YEARS = 2;
+const LOG_SUMMARY_OVER = 20; /* a save touching more records than this logs one count per action */
+function logBase(app){
+  const u = firebase.auth().currentUser;
+  return { at: firebase.database.ServerValue.TIMESTAMP, uid: u ? u.uid : '', email: (u && u.email) || undefined,
+    role: session ? session.role : undefined, app };
+}
+/* adds the entries to a multi-path update, so they're written with the change itself */
+function addLogEntries(updates, entries){
+  const db = firebase.database();
+  entries.forEach(e=>{ updates[LOG_PATH + db.ref(LOG_PATH).push().key] = cleanForDb({ ...logBase('vessels'), ...e }); });
+  return updates;
+}
+async function writeLog(entries){
+  try{ await firebase.database().ref().update(addLogEntries({}, entries)); }
+  catch(e){ console.warn('Could not write to the change log', e); }
+}
+function changedFields(a, b){
+  /* blank and missing count as the same */
+  const val = v => canonJSON(v === undefined || v === '' ? null : v);
+  return [...new Set([...Object.keys(a || {}), ...Object.keys(b || {})])]
+    .filter(k => k !== 'id' && val(a[k]) !== val(b[k])).sort();
+}
+function changeEntries(key, before, after, opts){
+  const was = new Map(before.filter(Boolean).map(r => [r.id, r]));
+  const now = new Map(after.filter(Boolean).map(r => [r.id, r]));
+  const group = r => key === 'companies' ? undefined : groupOf(key, r);
+  const out = [];
+  now.forEach((r, id)=>{
+    const old = was.get(id);
+    if(!old){ out.push({ key, id, group:group(r), action:'added' }); return; }
+    const fields = changedFields(old, r);
+    if(fields.length) out.push({ key, id, group:group(r), action:'changed', fields });
+  });
+  was.forEach((r, id)=>{ if(!now.has(id)) out.push({ key, id, group:group(r), action:'deleted' }); });
+  const auto = opts && opts.auto ? { auto:true } : {};
+  if(out.length <= LOG_SUMMARY_OVER) return out.map(e => ({ ...e, ...auto }));
+  const counts = {};
+  out.forEach(e=>{ counts[e.action] = (counts[e.action] || 0) + 1; });
+  return Object.keys(counts).map(action => ({ key, action, count:counts[action], ...auto }));
+}
+let logPruned = false;
+async function pruneLog(){
+  if(logPruned || !isAdmin()) return;
+  logPruned = true;
+  /* a week's margin, so a fast device clock can't ask for something the rules refuse */
+  const cut = Date.now() - LOG_KEEP_YEARS * 365.25 * 86400000 - 7 * 86400000;
+  try{
+    const snap = await firebase.database().ref(LOG_PATH).orderByChild('at').endAt(cut).limitToFirst(500).once('value');
+    const updates = {};
+    snap.forEach(c=>{ updates[LOG_PATH + c.key] = null; });
+    if(Object.keys(updates).length) await firebase.database().ref().update(updates);
+  }catch(e){ console.warn('Could not tidy the change log', e); }
+}
+
 /* Every ordinary save goes through here: re-fetch the current server copy of just this
    collection right before writing, apply the mutation to that fresh copy, and write back
    only the records that changed, in one atomic update. This means a save can never clobber
    other people's concurrent changes to other records. A record whose vessel changed moves
    to the new vessel's group, and its stored files are re-tagged to match. */
-async function persistArray(key, mutateFn){
+async function persistArray(key, mutateFn, opts){
   if(!fbInitialized) return null;
   try{
     if(key === 'companies'){
-      const ref = firebase.database().ref('oceanhub/data/companies');
-      const fresh = mutateFn(normalizeKey(key, (await ref.once('value')).val()));
-      await ref.set(cleanForDb(fresh));
+      const before = normalizeKey(key, (await firebase.database().ref('oceanhub/data/companies').once('value')).val());
+      const fresh = mutateFn(JSON.parse(JSON.stringify(before)));
+      await firebase.database().ref().update(addLogEntries({ 'oceanhub/data/companies': cleanForDb(fresh) }, changeEntries(key, before, fresh, opts)));
       state.companies = fresh;
       applyScoping();
       syncAccess();
@@ -1119,7 +1185,7 @@ async function persistArray(key, mutateFn){
     was.forEach((r, path)=>{ if(!now.has(path)) updates[path] = null; });
     const tagsWas = fileTags(key, before), tagsNow = fileTags(key, after);
     tagsNow.forEach((g, fileId)=>{ if(tagsWas.has(fileId) && tagsWas.get(fileId) !== g) updates[FILES_PATH + fileId + '/vesselId'] = g; });
-    if(Object.keys(updates).length) await firebase.database().ref().update(updates);
+    if(Object.keys(updates).length) await firebase.database().ref().update(addLogEntries(updates, changeEntries(key, before, after, opts)));
     state[stateKey(key)] = after;
     applyScoping();
     if(isAdmin() && (key === 'vessels' || key === 'checklists')) syncAccess();
@@ -1605,7 +1671,7 @@ const TABS = [
   { id:'crew', label:'Crew', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20c0-3.5 3-6 6.5-6s6.5 2.5 6.5 6"/><circle cx="18" cy="8" r="2.6"/><path d="M15.5 14.3c2.9.4 5 2.6 5 5.7"/></svg>' },
 ];
 const ADMIN_TABS = [
-  { id:'retention', label:'Retention', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/></svg>' },
+  { id:'data', label:'Data', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/></svg>' },
   { id:'companies', label:'Companies', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18"/><path d="M5 21V8l7-5 7 5v13"/><path d="M9 21v-5h6v5"/><path d="M9 9h.01M15 9h.01M9 12h.01M15 12h.01"/></svg>' },
 ];
 function navTabs(){
@@ -3195,7 +3261,7 @@ async function addDueRepeatingCosts(){
     const today = localISODate(new Date());
     /* each added month has a fixed id (<cost id>_<yyyy-mm>), so two devices adding the same
        month at once just write the same record twice */
-    const saved = await persistArray('financeItems', fresh => [...fresh, ...dueRepeatingCosts(fresh, today)]);
+    const saved = await persistArray('financeItems', fresh => [...fresh, ...dueRepeatingCosts(fresh, today)], { auto:true });
     if(!saved) throw new Error('save failed');
   }catch(e){
     console.warn('Adding monthly costs failed — will try again next time the app opens', e);
@@ -4294,6 +4360,130 @@ function crewCard(c){
       `;
 }
 
+/* ============================= DATA TAB (admin only): change log + due for deletion ============================= */
+const LOG_PAGE = 200;
+function freshLogView(){ return { entries:[], loaded:false, loading:false, more:false, error:'', who:'all', kind:'all' }; }
+let logView = freshLogView();
+let dataView = 'log';
+const contractorNames = new Map(); /* contractor id → name ('' once deleted) */
+
+async function loadLog(older){
+  if(logView.loading) return;
+  logView.loading = true;
+  try{
+    let q = firebase.database().ref(LOG_PATH).orderByChild('at');
+    const last = logView.entries[logView.entries.length - 1];
+    if(older && last) q = q.endAt(last.at - 1);
+    const snap = await q.limitToLast(LOG_PAGE).once('value');
+    const got = [];
+    snap.forEach(c=>{ got.push({ ...c.val(), _id:c.key }); });
+    got.sort((a, b) => b.at - a.at);
+    logView.entries = older ? [...logView.entries, ...got] : got;
+    logView.more = got.length === LOG_PAGE;
+    logView.loaded = true;
+    logView.error = '';
+    /* contractor names come from the contractors' own records, one small read each */
+    const cids = [...new Set(got.filter(e => e.app === 'contractors' && e.cid && !contractorNames.has(e.cid)).map(e => e.cid))];
+    await Promise.all(cids.map(async cid=>{
+      try{ contractorNames.set(cid, (await firebase.database().ref('oceanhub/contractors/' + cid + '/details/name').once('value')).val() || ''); }
+      catch(e){ contractorNames.set(cid, ''); }
+    }));
+  }catch(e){
+    logView.error = "Couldn't load the change log — check your connection, and that the latest database.rules.json is published.";
+  }
+  logView.loading = false;
+  if(state.activeTab === 'data' && dataView === 'log' && !state.modal) render();
+}
+
+const LOG_KINDS = {
+  vessels:'Vessel', maintenance:'Maintenance task', crew:'Crew member', checklists:'Checklist', checklistRuns:'Checklist entry',
+  hourReadings:'Hour reading', serviceLog:'Service record', financeItems:'Cost', companies:'Company',
+  contractor:'Contractor', details:'Contractor details', payment:'Contractor payment', login:'Contractor login',
+  salesClient:'Paint customer', salesOrder:'Paint order', salesSettings:'Paint sales settings', retention:'Old contractor records'
+};
+const LOG_PLURALS = { retention:'old contractor records', financeItems:'costs', crew:'crew members', maintenance:'maintenance tasks', checklistRuns:'checklist entries', hourReadings:'hour readings', serviceLog:'service records' };
+function fieldLabel(k){ return k === 'vesselId' ? 'vessel' : k.replace(/Id$/, '').replace(/([A-Z])/g, ' $1').toLowerCase(); }
+function fmtDateTime(ms){
+  const d = new Date(ms);
+  return `${fmtDate(localISODate(d))} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+/* what the entry is about, named from the current data; nothing is named once it's deleted */
+function logSubject(e){
+  if(!e.key) return { label:'' };
+  const kind = LOG_KINDS[e.key] || e.key;
+  if(e.count) return { label:`${e.count} ${LOG_PLURALS[e.key] || (kind.toLowerCase() + ' records')}` };
+  let name = '';
+  if(e.app === 'contractors'){
+    name = contractorNames.get(e.cid) || '';
+    if(contractorNames.has(e.cid) && !name) name = '(since deleted)';
+  } else if(e.id){
+    const list = e.key === 'companies' ? state.companies : (state[stateKey(e.key)] || []);
+    const r = list.find(x => x.id === e.id);
+    if(!r) name = '(since deleted)';
+    else if(e.key === 'checklistRuns'){ const cl = state.allChecklists.find(c => c.id === r.checklistId); name = `${cl ? cl.name : 'Checklist'}, ${checklistPeriodLabel(r.period)}`; }
+    else if(e.key === 'hourReadings' || e.key === 'serviceLog') name = [r.taskName, fmtDate(r.date)].filter(Boolean).join(', ');
+    else name = r.name || r.title || r.description || '';
+  }
+  const vessel = e.group && e.group !== NO_VESSEL && !['vessels','checklists','companies'].includes(e.key) ? vesselName(e.group) : '';
+  return { label: kind + (name ? ': ' + name : ''), vessel: vessel && vessel !== '—' ? vessel : '' };
+}
+function logActionText(e){
+  if(e.action === 'signed in') return 'Signed in';
+  if(e.count) return e.action.charAt(0).toUpperCase() + e.action.slice(1);
+  const verb = { added:'Added', changed:'Changed', deleted:'Deleted' }[e.action] || e.action;
+  const fields = asArray(e.fields);
+  return fields.length ? `${verb}: ${fields.map(fieldLabel).join(', ')}` : verb;
+}
+
+function renderChangeLog(){
+  if(!logView.loaded && !logView.loading && !logView.error) loadLog();
+  const people = [...new Set(logView.entries.map(e => e.email || e.uid))].sort();
+  const shown = logView.entries.filter(e =>
+    (logView.who === 'all' || (e.email || e.uid) === logView.who) &&
+    (logView.kind === 'all' || (logView.kind === 'signins' ? e.action === 'signed in' : e.action !== 'signed in')));
+  const roleLabel = r => r === 'admin' ? 'admin' : r === 'owner' ? 'owner' : r === 'contractor' ? 'contractor' : '';
+  return `
+    <div class="toolbar">
+      <div>
+        <h2 class="section-title">Change log</h2>
+        <p class="section-sub" style="margin-bottom:0;">Who signed in and what they added, changed or deleted, in both apps. It records which fields changed, not what they changed to, and keeps ${LOG_KEEP_YEARS} years. Nobody can edit it.</p>
+      </div>
+    </div>
+    <div class="filters" style="margin-bottom:12px;">
+      <select id="logWho" aria-label="Person"><option value="all">Everyone</option>${people.map(p=>`<option value="${esc(p)}" ${logView.who===p?'selected':''}>${esc(p)}</option>`).join('')}</select>
+      <select id="logKind" aria-label="Kind">
+        <option value="all" ${logView.kind==='all'?'selected':''}>Changes and sign-ins</option>
+        <option value="changes" ${logView.kind==='changes'?'selected':''}>Changes only</option>
+        <option value="signins" ${logView.kind==='signins'?'selected':''}>Sign-ins only</option>
+      </select>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>When</th><th>Who</th><th>What</th><th>Change</th></tr></thead>
+      <tbody>
+        ${logView.error ? `<tr><td colspan="4"><div class="empty-note">${esc(logView.error)}</div></td></tr>`
+          : !logView.loaded ? `<tr><td colspan="4"><div class="empty-note">Loading…</div></td></tr>`
+          : shown.length === 0 ? `<tr><td colspan="4"><div class="empty-note">Nothing logged yet.</div></td></tr>`
+          : shown.map(e=>`<tr>
+            <td style="white-space:nowrap;">${fmtDateTime(e.at)}</td>
+            <td>${esc(e.email || e.uid || '')}<div style="color:var(--ink-soft); font-size:11.5px;">${[roleLabel(e.role), e.app === 'contractors' ? 'contractors app' : '', e.auto ? 'automatic' : ''].filter(Boolean).join(' · ')}</div></td>
+            <td>${(subj => esc(subj.label) + (subj.vessel ? ` <span style="color:var(--ink-soft);">· ${esc(subj.vessel)}</span>` : ''))(logSubject(e))}</td>
+            <td>${esc(logActionText(e))}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table></div>
+    ${logView.more ? `<div style="margin-top:10px;"><button class="btn ghost" data-action="log-more" ${logView.loading?'disabled':''}>${logView.loading ? 'Loading…' : 'Show older'}</button></div>` : ''}
+    <div style="margin-top:10px;"><button class="btn ghost small" data-action="log-refresh">Refresh</button></div>`;
+}
+
+function renderDataTab(){
+  return `
+    <div class="subtabs">
+      <button type="button" class="subtab ${dataView==='log'?'active':''}" data-action="data-view" data-view="log">Change log</button>
+      <button type="button" class="subtab ${dataView==='retention'?'active':''}" data-action="data-view" data-view="retention">Due for deletion${(n=>n?`<span class="cnt">${n}</span>`:'')(retentionDue().crew.length + retentionDue().finance.length)}</button>
+    </div>
+    ${dataView === 'log' ? renderChangeLog() : renderRetention()}`;
+}
+
 /* ============================= RETENTION (admin only) ============================= */
 /* How long records are kept, as set out in the privacy notice (privacy.html). Nothing is deleted
    automatically: this lists what's past its period and the admin deletes it. */
@@ -5203,6 +5393,7 @@ async function handleFormSubmit(e){
           : "Couldn't update the login: " + ((err && err.message) || err));
         return;
       }
+      if(pw) writeLog([{ key:'companies', id:editId, action:'changed', fields:['password'] }]);
       if(emailChanged) login = { loginEmail, loginUid:prevLogin.loginUid };
     }
     else if(emailChanged){
@@ -5359,6 +5550,9 @@ function attachContentEvents(){
           break;
         case 'add-crew': state.modal = { type:'crew', data:null }; renderModal(); break;
         case 'edit-crew': state.modal = { type:'crew', data: state.crew.find(c=>c.id===id) }; renderModal(); break;
+        case 'data-view': dataView = el.dataset.view; render(); break;
+        case 'log-more': loadLog(true); render(); break;
+        case 'log-refresh': logView = { ...freshLogView(), who:logView.who, kind:logView.kind }; render(); break;
         case 'retention-delete-crew': {
           const c = state.allCrew.find(x=>x.id===id);
           if(c && confirm(`Delete ${c.name} and their documents? This can't be undone.`)){ await deleteCrewRecords(new Set([id])); render(); }
@@ -5522,6 +5716,10 @@ function attachContentEvents(){
   attachHoursPageEvents();
   attachServicePageEvents();
   attachFinancePageEvents();
+  ['logWho','logKind'].forEach(id=>{
+    const sel = document.getElementById(id);
+    if(sel) sel.addEventListener('change', ()=>{ logView[id === 'logWho' ? 'who' : 'kind'] = sel.value; render(); });
+  });
 }
 
 /* ============================= RENDER DISPATCH ============================= */
@@ -5546,7 +5744,7 @@ function render(){
     case 'maintenance': main.innerHTML = renderMaintenance(); break;
     case 'crew': main.innerHTML = renderCrew(); break;
     case 'companies': main.innerHTML = renderCompanies(); break;
-    case 'retention': main.innerHTML = renderRetention(); break;
+    case 'data': main.innerHTML = renderDataTab(); break;
     case 'checklists': main.innerHTML = renderChecklists(); break;
     case 'hours': main.innerHTML = renderHours(); break;
     case 'finance': main.innerHTML = renderFinance(); break;

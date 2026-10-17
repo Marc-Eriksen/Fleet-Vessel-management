@@ -768,6 +768,29 @@ function outstandingTotal(ct){ return (ct.payments||[]).filter(p=>p.status!=='pa
 /* Firebase refuses undefined anywhere in a write. */
 function clean(obj){ return JSON.parse(JSON.stringify(obj)); }
 
+/* Change log: every save also writes an entry to oceanhub/log in the same atomic write — who,
+   when (server clock), which record and which fields changed, never the values. Same format as
+   the vessel manager, whose Data tab shows it. */
+const LOG_PATH = 'oceanhub/log/';
+function withLog(updates, entries){
+  const db = firebase.database(), u = firebase.auth().currentUser;
+  entries.filter(Boolean).forEach(e=>{
+    updates[LOG_PATH + db.ref(LOG_PATH).push().key] = clean({ at: firebase.database.ServerValue.TIMESTAMP, uid: u ? u.uid : '',
+      email: (u && u.email) || undefined, role: session ? session.role : undefined, app:'contractors', ...e });
+  });
+  return updates;
+}
+function changedFields(a, b){
+  const val = v => JSON.stringify(v === undefined || v === '' ? null : v);
+  return [...new Set([...Object.keys(a || {}), ...Object.keys(b || {})])]
+    .filter(k => k !== 'id' && val((a||{})[k]) !== val((b||{})[k])).sort();
+}
+/* a 'changed' entry, or nothing when no field actually changed */
+function changeEntry(base, before, after){
+  const fields = changedFields(before, after);
+  return fields.length ? { ...base, action:'changed', fields } : null;
+}
+
 function detach(){
   listeners.forEach(l=>l.ref.off('value', l.fn));
   listeners = [];
@@ -874,6 +897,7 @@ async function handleAuthChange(user){
   try{ rec = (await firebase.database().ref('oceanhub/users/' + user.uid).once('value')).val(); }catch(e){ rec = null; }
   if(rec && rec.role === 'admin') session = { role:'admin', uid:user.uid, email:user.email };
   else if(rec && rec.role === 'contractor' && rec.contractorId) session = { role:'contractor', uid:user.uid, email:user.email, contractorId:rec.contractorId };
+  if(session) firebase.database().ref().update(withLog({}, [{ action:'signed in' }])).catch(e=>console.warn('Could not write to the change log', e));
   if(!session){
     authNotice = rec && rec.role === 'owner'
       ? 'Owner / operator accounts sign in to the vessel manager, not the contractors app.'
@@ -1893,12 +1917,19 @@ async function handleFormSubmit(e){
       const details = {};
       DETAIL_FIELDS.forEach(f=>{ details[f] = String(fd.get(f)||'').trim(); });
       if(m.id){
+        const ct = findContractor(m.id) || {};
+        const before = {}, after = { ...details };
+        DETAIL_FIELDS.forEach(f=>{ before[f] = ct[f] || ''; });
         const updates = { [ROOT + m.id + '/details']: details };
-        if(isAdmin()) updates[ROOT + m.id + '/admin/notes'] = String(fd.get('notes')||'');
-        await db.ref().update(updates);
+        if(isAdmin()){
+          updates[ROOT + m.id + '/admin/notes'] = String(fd.get('notes')||'');
+          before.notes = ct.notes || ''; after.notes = updates[ROOT + m.id + '/admin/notes'];
+        }
+        await db.ref().update(withLog(updates, [changeEntry({ key:'details', cid:m.id }, before, after)]));
       } else {
         const id = uid('ct');
-        await db.ref(ROOT + id).set({ details, admin:{ notes:String(fd.get('notes')||''), loginEmail:'', loginUid:'' } });
+        await db.ref().update(withLog({ [ROOT + id]: { details, admin:{ notes:String(fd.get('notes')||''), loginEmail:'', loginUid:'' } } },
+          [{ key:'contractor', cid:id, action:'added' }]));
         state.viewId = id;
       }
     }
@@ -1909,7 +1940,9 @@ async function handleFormSubmit(e){
       if(!data.description){ alert('Add a description.'); btn.disabled = false; return; }
       if(!data.date){ alert('Enter the date as dd/mm/yyyy.'); btn.disabled = false; return; }
       const payId = m.payId || uid('pay');
-      await db.ref(ROOT + m.id + '/payments/' + payId).set(clean({ id:payId, ...data }));
+      const rec = clean({ id:payId, ...data });
+      await db.ref().update(withLog({ [ROOT + m.id + '/payments/' + payId]: rec },
+        [existing ? changeEntry({ key:'payment', cid:m.id, id:payId }, clean(existing), rec) : { key:'payment', cid:m.id, id:payId, action:'added' }]));
     }
     else if(m.type === 'login'){
       const email = String(fd.get('loginEmail')||'').trim().toLowerCase();
@@ -1917,11 +1950,11 @@ async function handleFormSubmit(e){
       let newUid;
       try{ newUid = await createLoginAccount(email, password); }
       catch(err){ alert("Couldn't create the login: " + authErrorText(err)); btn.disabled = false; return; }
-      await db.ref().update({
+      await db.ref().update(withLog({
         ['oceanhub/users/' + newUid]: { role:'contractor', contractorId:m.id, email },
         [ROOT + m.id + '/admin/loginEmail']: email,
         [ROOT + m.id + '/admin/loginUid']: newUid
-      });
+      }, [{ key:'login', cid:m.id, action:'added' }]));
     }
     else if(m.type === 'sales-client'){
       const ct = findContractor(m.id);
@@ -1929,8 +1962,10 @@ async function handleFormSubmit(e){
       const text = f => String(fd.get(f)||'').trim();
       if(!text('name')){ alert('Add a name.'); btn.disabled = false; return; }
       const clientId = m.clientId || uid('psc');
-      await db.ref(salesPath(m.id) + 'clients/' + clientId).set(clean({ id:clientId, name:text('name'), phone:text('phone'), email:text('email'),
-        address:text('address'), notes:text('notes'), createdAt:(existing && existing.createdAt) || new Date().toISOString() }));
+      const rec = clean({ id:clientId, name:text('name'), phone:text('phone'), email:text('email'),
+        address:text('address'), notes:text('notes'), createdAt:(existing && existing.createdAt) || new Date().toISOString() });
+      await db.ref().update(withLog({ [salesPath(m.id) + 'clients/' + clientId]: rec },
+        [existing ? changeEntry({ key:'salesClient', cid:m.id, id:clientId }, existing, rec) : { key:'salesClient', cid:m.id, id:clientId, action:'added' }]));
     }
     else if(m.type === 'sales-order'){
       const num = f => Number(fd.get(f))||0;
@@ -1941,11 +1976,15 @@ async function handleFormSubmit(e){
       if(!data.clientId){ alert('Choose a client.'); btn.disabled = false; return; }
       if(!data.date){ alert('Enter the date as dd/mm/yyyy.'); btn.disabled = false; return; }
       const orderId = m.orderId || uid('pso');
-      await db.ref(salesPath(m.id) + 'orders/' + orderId).set(clean({ id:orderId, ...data }));
+      const rec = clean({ id:orderId, ...data });
+      const existing = m.orderId ? (findContractor(m.id) || { salesOrders:[] }).salesOrders.find(o=>o.id===m.orderId) : null;
+      await db.ref().update(withLog({ [salesPath(m.id) + 'orders/' + orderId]: rec },
+        [existing ? changeEntry({ key:'salesOrder', cid:m.id, id:orderId }, existing, rec) : { key:'salesOrder', cid:m.id, id:orderId, action:'added' }]));
     }
     else if(m.type === 'sales-settings'){
-      await db.ref(ROOT + m.id + '/salesSettings').set({ enabled: fd.get('enabled') === '1',
-        commissionRate: Math.min(100, Math.max(0, Number(fd.get('commissionRate'))||0)) });
+      const rec = { enabled: fd.get('enabled') === '1', commissionRate: Math.min(100, Math.max(0, Number(fd.get('commissionRate'))||0)) };
+      await db.ref().update(withLog({ [ROOT + m.id + '/salesSettings']: rec },
+        [changeEntry({ key:'salesSettings', cid:m.id }, (findContractor(m.id) || {}).salesSettings || {}, rec)]));
     }
     else if(m.type === 'sales-export'){
       const { subject, body } = exportEmailContent(findContractor(m.id));
@@ -1990,13 +2029,13 @@ async function handleAction(el){
       if(!c || !confirm(`Remove ${c.name} and their order history?`)) return;
       const updates = { [salesPath(id) + 'clients/' + c.id]: null };
       ct.salesOrders.filter(o=>o.clientId===c.id).forEach(o=>{ updates[salesPath(id) + 'orders/' + o.id] = null; });
-      try{ await db.ref().update(updates); if(state.salesClientId === c.id){ state.salesClientId = null; render(); } }
+      try{ await db.ref().update(withLog(updates, [{ key:'salesClient', cid:id, id:c.id, action:'deleted' }])); if(state.salesClientId === c.id){ state.salesClientId = null; render(); } }
       catch(err){ alert("Couldn't delete: " + err.message); }
       break;
     }
     case 'sales-delete-order':
       if(!confirm('Delete this order?')) return;
-      try{ await db.ref(salesPath(id) + 'orders/' + el.dataset.oid).remove(); }
+      try{ await db.ref().update(withLog({ [salesPath(id) + 'orders/' + el.dataset.oid]: null }, [{ key:'salesOrder', cid:id, id:el.dataset.oid, action:'deleted' }])); }
       catch(err){ alert("Couldn't delete: " + err.message); }
       break;
     case 'sales-copy-order': {
@@ -2036,7 +2075,9 @@ async function handleAction(el){
       const p = ct && ct.payments.find(x=>x.id===payId);
       if(!p) return;
       const paid = p.status !== 'paid';
-      try{ await db.ref(ROOT + id + '/payments/' + payId).update({ status: paid ? 'paid' : 'outstanding', paidDate: paid ? localISODate(new Date()) : null }); }
+      const path = ROOT + id + '/payments/' + payId;
+      try{ await db.ref().update(withLog({ [path + '/status']: paid ? 'paid' : 'outstanding', [path + '/paidDate']: paid ? localISODate(new Date()) : null },
+        [{ key:'payment', cid:id, id:payId, action:'changed', fields:['paid date','status'] }])); }
       catch(err){ alert("Couldn't save: " + err.message); }
       break;
     }
@@ -2045,13 +2086,13 @@ async function handleAction(el){
       if(!items.length || !confirm(`Delete ${items.length} record${items.length===1?'':'s'} older than ${RETAIN_FINANCE_YEARS} years? This can't be undone.`)) return;
       const updates = {};
       items.forEach(x=>{ updates[x.path] = null; });
-      try{ await db.ref().update(updates); }
+      try{ await db.ref().update(withLog(updates, [{ key:'retention', action:'deleted', count:items.length }])); }
       catch(err){ alert("Couldn't delete: " + err.message); }
       break;
     }
     case 'delete-payment':
       if(!confirm('Delete this payment record?')) return;
-      try{ await db.ref(ROOT + id + '/payments/' + payId).remove(); }
+      try{ await db.ref().update(withLog({ [ROOT + id + '/payments/' + payId]: null }, [{ key:'payment', cid:id, id:payId, action:'deleted' }])); }
       catch(err){ alert("Couldn't delete: " + err.message); }
       break;
     case 'delete-contractor':
@@ -2059,7 +2100,7 @@ async function handleAction(el){
       try{
         const updates = { [ROOT + id]: null };
         if(ct.loginUid) updates['oceanhub/users/' + ct.loginUid] = null;
-        await db.ref().update(updates);
+        await db.ref().update(withLog(updates, [{ key:'contractor', cid:id, action:'deleted' }]));
         state.viewId = null; render();
       }catch(err){ alert("Couldn't delete: " + err.message); }
       break;
@@ -2071,11 +2112,11 @@ async function handleAction(el){
     case 'remove-login':
       if(!ct || !confirm(`Remove ${ct.loginEmail}'s login? They will no longer be able to sign in. You can then create a new login.`)) return;
       try{
-        await db.ref().update({
+        await db.ref().update(withLog({
           ['oceanhub/users/' + ct.loginUid]: null,
           [ROOT + id + '/admin/loginEmail']: '',
           [ROOT + id + '/admin/loginUid']: ''
-        });
+        }, [{ key:'login', cid:id, action:'deleted' }]));
       }catch(err){ alert("Couldn't remove the login: " + err.message); }
       break;
     case 'send-statement': sendStatement(id, el.dataset.channel); break;

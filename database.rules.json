@@ -61,6 +61,16 @@
         ".read": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin'",
         ".write": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin'"
       },
+      "log": {
+        ".read": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin'",
+        ".indexOn": [
+          "at"
+        ],
+        "$entry": {
+          ".write": "auth != null && ((!data.exists() && newData.exists() && root.child('oceanhub/users/' + auth.uid + '/role').val() !== null) || (!newData.exists() && auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin' && data.child('at').val() < now - 63115200000))",
+          ".validate": "newData.hasChildren(['at', 'uid', 'role', 'app', 'action']) && newData.child('at').val() === now && newData.child('uid').val() === auth.uid && newData.child('role').val() === root.child('oceanhub/users/' + auth.uid + '/role').val() && (!newData.child('email').exists() || newData.child('email').val() === auth.token.email)"
+        }
+      },
       "files": {
         ".read": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin'",
         ".write": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin'",
