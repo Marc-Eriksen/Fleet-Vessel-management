@@ -1203,7 +1203,11 @@ function getAllMaintenanceTasks(){
   });
   return tasks;
 }
-function crewForVessel(vesselId){ return state.crew.filter(c=>c.vesselId===vesselId || c.vesselId==='all'); }
+/* Crew whose "Left on" date has passed are former crew: no expiry alerts, and their details
+   are due for deletion a year later (see the Retention tab). */
+function crewHasLeft(c){ return !!(c.leftDate && c.leftDate <= localISODate(new Date())); }
+function activeCrew(){ return state.crew.filter(c=>!crewHasLeft(c)); }
+function crewForVessel(vesselId){ return activeCrew().filter(c=>c.vesselId===vesselId || c.vesselId==='all'); }
 
 function resizeImageFile(file, maxDim, quality){
   return new Promise((resolve, reject)=>{
@@ -1601,6 +1605,7 @@ const TABS = [
   { id:'crew', label:'Crew', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20c0-3.5 3-6 6.5-6s6.5 2.5 6.5 6"/><circle cx="18" cy="8" r="2.6"/><path d="M15.5 14.3c2.9.4 5 2.6 5 5.7"/></svg>' },
 ];
 const ADMIN_TABS = [
+  { id:'retention', label:'Retention', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/></svg>' },
   { id:'companies', label:'Companies', icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18"/><path d="M5 21V8l7-5 7 5v13"/><path d="M9 21v-5h6v5"/><path d="M9 9h.01M15 9h.01M9 12h.01M15 12h.01"/></svg>' },
 ];
 function navTabs(){
@@ -1620,16 +1625,16 @@ function renderDashboard(){
   const allTasks = getAllMaintenanceTasks();
   const overdue = allTasks.filter(m=>maintStatus(m)==='overdue').length;
   const dueSoon = allTasks.filter(m=>maintStatus(m)==='due-soon').length;
-  const qualsExpired = state.crew.flatMap(c=>c.quals).filter(q=>qualStatus(q.expiry)==='expired').length;
-  const qualsRedAlert = state.crew.flatMap(c=>c.quals).filter(q=>qualStatus(q.expiry)==='red-alert').length;
-  const qualsAdvisory = state.crew.flatMap(c=>c.quals).filter(q=>qualStatus(q.expiry)==='advisory').length;
+  const qualsExpired = activeCrew().flatMap(c=>c.quals).filter(q=>qualStatus(q.expiry)==='expired').length;
+  const qualsRedAlert = activeCrew().flatMap(c=>c.quals).filter(q=>qualStatus(q.expiry)==='red-alert').length;
+  const qualsAdvisory = activeCrew().flatMap(c=>c.quals).filter(q=>qualStatus(q.expiry)==='advisory').length;
 
   const events = [];
   allTasks.filter(m=>m.status!=='completed').forEach(m=>{
     const vesselLabel = m._source==='tender' ? `${vesselName(m.vesselId)} — ${m._tenderName} (tender)` : vesselName(m.vesselId);
     events.push({ date:m.dueDate, kind:'Maintenance', title:m.title, sub:`${vesselLabel} · ${m.category==='scheduled'?'Scheduled':m.category==='daily'?'Daily':'Unscheduled'}`, status:maintStatus(m) });
   });
-  state.crew.forEach(c=>c.quals.forEach(q=>{
+  activeCrew().forEach(c=>c.quals.forEach(q=>{
     events.push({ date:q.expiry, kind:'Crew doc', title:q.name, sub:`${c.name} (${c.role})`, status:qualStatus(q.expiry) });
   }));
   const clOutstanding = checklistAssignments().filter(a=>!a.run || a.run.status!=='completed').length;
@@ -4199,7 +4204,23 @@ function renderCrew(){
       <button class="btn primary" data-action="add-crew">+ Add crew member</button>
     </div>
     <div class="card-grid">
-      ${state.crew.map(c=>{
+      ${activeCrew().map(crewCard).join('')}
+    </div>
+    ${(()=>{
+      const former = state.crew.filter(crewHasLeft);
+      return former.length ? `
+      <div class="toolbar" style="margin-top:28px;">
+        <div>
+          <h2 class="section-title">Former crew</h2>
+          <p class="section-sub" style="margin-bottom:0;">No longer on a vessel, so no expiry alerts. Their details are deleted a year after they left.</p>
+        </div>
+      </div>
+      <div class="card-grid">${former.map(crewCard).join('')}</div>` : '';
+    })()}
+  `;
+}
+function crewCard(c){
+        const left = crewHasLeft(c);
         const expired = c.quals.filter(q=>qualStatus(q.expiry)==='expired');
         const dueSoon = c.quals.filter(q=>['red-alert','advisory'].includes(qualStatus(q.expiry)));
         const notifyGroup = (label, list, color)=>{
@@ -4228,7 +4249,7 @@ function renderCrew(){
           <div class="card-top">
             <div>
               <h3>${esc(c.name)}</h3>
-              <div class="meta-line">${esc(c.role)} · ${esc(vesselName(c.vesselId))}</div>
+              <div class="meta-line">${esc(c.role)} · ${esc(vesselName(c.vesselId))}${c.leftDate ? ` · ${left ? 'left' : 'leaving'} ${fmtDate(c.leftDate)}` : ''}</div>
             </div>
             <div style="display:flex; gap:6px;">
               <button class="btn small ghost" data-action="edit-crew" data-id="${c.id}">Edit</button>
@@ -4251,8 +4272,8 @@ function renderCrew(){
               </div>
             `).join('')}
           </div>
-          ${notifyGroup('Expired — notify now', expired, 'var(--signal-red)')}
-          ${notifyGroup('Expiring soon — notify', dueSoon, 'var(--brass)')}
+          ${left ? '' : notifyGroup('Expired — notify now', expired, 'var(--signal-red)')}
+          ${left ? '' : notifyGroup('Expiring soon — notify', dueSoon, 'var(--brass)')}
           <div class="detail-section" style="margin-top:10px;">
             <h4>Documents</h4>
             ${(c.documents||[]).length===0 ? '<div class="empty-note" style="padding:8px 0;">No documents on file.</div>' : c.documents.map(doc=>`
@@ -4270,9 +4291,105 @@ function renderCrew(){
             <button class="btn small" data-action="add-qual" data-id="${c.id}">+ Add qualification</button>
           </div>
         </div>
-      `}).join('')}
+      `;
+}
+
+/* ============================= RETENTION (admin only) ============================= */
+/* How long records are kept, as set out in the privacy notice (privacy.html). Nothing is deleted
+   automatically: this lists what's past its period and the admin deletes it. */
+const RETAIN_FINANCE_YEARS = 7;
+const RETAIN_CREW_YEARS = 1;
+function yearsAgoIso(n){ const d = new Date(); return localISODate(new Date(d.getFullYear() - n, d.getMonth(), d.getDate())); }
+/* A monthly cost that's still repeating is kept: deleting it would stop the repeat. */
+function stillRepeating(x, cutIso){ return !!(x.repeat && x.repeat.every && (!x.repeat.until || x.repeat.until.slice(0,7) >= cutIso.slice(0,7))); }
+function retentionDue(){
+  const crewCut = yearsAgoIso(RETAIN_CREW_YEARS), finCut = yearsAgoIso(RETAIN_FINANCE_YEARS);
+  return {
+    crewCut, finCut,
+    crew: state.allCrew.filter(c=>c.leftDate && c.leftDate <= crewCut),
+    finance: state.allFinanceItems.filter(x=>x.date && x.date < finCut && !stillRepeating(x, finCut))
+      .sort((a,b)=>String(a.date).localeCompare(String(b.date))),
+  };
+}
+
+function renderRetention(){
+  const due = retentionDue();
+  const finTotal = due.finance.reduce((sum, x)=>sum + (Number(x.cost)||0), 0);
+  const FIN_SHOWN = 100;
+  return `
+    <div class="toolbar">
+      <div>
+        <h2 class="section-title">Due for deletion</h2>
+        <p class="section-sub" style="margin-bottom:0;">Records past the periods in the <a href="privacy.html" data-privacy style="color:var(--accent);">privacy notice</a>: crew ${RETAIN_CREW_YEARS} year after they left, financial records after ${RETAIN_FINANCE_YEARS} years. Nothing is deleted until you choose to, and deleting can't be undone.</p>
+      </div>
     </div>
+
+    <h3 class="section-title" style="font-size:16px; margin-top:8px;">Former crew</h3>
+    <p class="section-sub">Left on or before ${fmtDate(due.crewCut)}. Deleting removes their contact details, qualifications and documents. Crew without a &ldquo;Left on&rdquo; date count as current &mdash; set it from Crew &rarr; Edit.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Name</th><th>Vessel</th><th>Left on</th><th>Documents</th><th></th></tr></thead>
+      <tbody>
+        ${due.crew.length === 0 ? `<tr><td colspan="5"><div class="empty-note">No crew are due for deletion.</div></td></tr>`
+          : due.crew.map(c=>`<tr>
+            <td><b>${esc(c.name)}</b><div style="color:var(--ink-soft); font-size:11.5px;">${esc(c.role||'')}</div></td>
+            <td>${esc(vesselName(c.vesselId))}</td>
+            <td>${fmtDate(c.leftDate)}</td>
+            <td>${(c.documents||[]).length}</td>
+            <td style="text-align:right;"><button class="btn small danger" data-action="retention-delete-crew" data-id="${c.id}">Delete</button></td>
+          </tr>`).join('')}
+      </tbody>
+    </table></div>
+    ${due.crew.length > 1 ? `<div style="margin-top:10px;"><button class="btn danger" data-action="retention-delete-crew-all">Delete all ${due.crew.length} former crew</button></div>` : ''}
+
+    <h3 class="section-title" style="font-size:16px; margin-top:28px;">Financial records</h3>
+    <p class="section-sub">Costs dated before ${fmtDate(due.finCut)}, with their invoice copies. Monthly costs that are still repeating are kept.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Date</th><th>Vessel</th><th>Description</th><th style="text-align:right;">Cost</th></tr></thead>
+      <tbody>
+        ${due.finance.length === 0 ? `<tr><td colspan="4"><div class="empty-note">No financial records are due for deletion.</div></td></tr>`
+          : due.finance.slice(0, FIN_SHOWN).map(x=>`<tr>
+            <td>${fmtDate(x.date)}</td>
+            <td>${esc(vesselName(x.vesselId))}</td>
+            <td>${esc(x.description||'')}${(x.invoiceFiles||[]).length ? ' <span style="color:var(--ink-soft); font-size:11.5px;">· invoice</span>' : ''}</td>
+            <td style="text-align:right;">${fmtCurrency(x.cost)}</td>
+          </tr>`).join('')}
+        ${due.finance.length > FIN_SHOWN ? `<tr><td colspan="4" style="color:var(--ink-soft);">and ${due.finance.length - FIN_SHOWN} more</td></tr>` : ''}
+      </tbody>
+    </table></div>
+    ${due.finance.length ? `<div style="margin-top:10px;"><button class="btn danger" data-action="retention-delete-finance">Delete all ${due.finance.length} record${due.finance.length===1?'':'s'} (${fmtCurrency(finTotal)})</button></div>` : ''}
+
+    <h3 class="section-title" style="font-size:16px; margin-top:28px;">Done by hand</h3>
+    <ul class="section-sub" style="padding-left:18px; line-height:1.6;">
+      <li>When a company leaves, delete it from Companies. That removes its login's access, but the sign-in account itself stays until you delete it in the Firebase console (Authentication &rarr; Users).</li>
+      <li>Contractor payments and paint sales are listed in the contractors app.</li>
+      <li>Delete old database exports (backups) once they're past these periods too.</li>
+    </ul>
   `;
+}
+
+async function deleteCrewRecords(ids){
+  const gone = state.allCrew.filter(c=>ids.has(c.id));
+  const saved = await persistArray('crew', fresh => fresh.filter(c=>!ids.has(c.id)));
+  if(!saved){ alert("Couldn't delete — check your connection and try again."); return; }
+  await removeDocFiles(gone.flatMap(c=>c.documents||[]));
+}
+async function deleteFinanceRecords(ids){
+  const gone = state.allFinanceItems.filter(x=>ids.has(x.id));
+  const saved = await persistArray('financeItems', fresh=>{
+    /* a deleted month of a cost that's still repeating is marked skipped, so it isn't added back */
+    const skip = new Map();
+    fresh.forEach(x=>{
+      if(!ids.has(x.id) || !x.repeatOf || ids.has(x.repeatOf)) return;
+      if(!skip.has(x.repeatOf)) skip.set(x.repeatOf, []);
+      skip.get(x.repeatOf).push(String(x.date||'').slice(0,7));
+    });
+    return fresh.filter(x=>!ids.has(x.id)).map(x=> skip.has(x.id) && x.repeat
+      ? { ...x, repeat:{ ...x.repeat, skip:[...new Set([...asArray(x.repeat.skip), ...skip.get(x.id)])] } } : x);
+  });
+  if(!saved){ alert("Couldn't delete — check your connection and try again."); return; }
+  /* an invoice copy goes once no remaining cost uses it */
+  const stillUsed = new Set(saved.flatMap(x=>(x.invoiceFiles||[]).map(f=>f.id)));
+  await removeDocFiles(gone.flatMap(x=>x.invoiceFiles||[]).filter(f=>!stillUsed.has(f.id)));
 }
 
 /* ============================= MODALS ============================= */
@@ -4379,6 +4496,8 @@ function crewForm(c){
       `<label class="field">Email<input name="email" type="email" value="${esc(c.email||'')}" placeholder="crew@example.com"></label>`,
       `<label class="field">Phone / WhatsApp<input name="phone" type="tel" value="${esc(c.phone||'')}" placeholder="+27 82 000 0000"></label>`
     )}
+    ${isEdit ? `<label class="field">Left on (optional)${dateField('leftDate', c.leftDate||'')}</label>
+    <p class="privacy-hint" style="margin:-6px 0 12px;">Fill this in when they stop working on the vessel. Their details are deleted a year later.</p>` : ''}
     <p class="privacy-hint">Let them know their details are kept in OCEANHUB: see the <a href="privacy.html" data-privacy>privacy notice</a>.</p>
     ${!isEdit ? crewQualTemplate() : ''}
   `;
@@ -4905,6 +5024,7 @@ async function handleFormSubmit(e){
   }
   else if(modal.type==='crew'){
     const data = { name:fd.get('name'), role:fd.get('role'), vesselId:fd.get('vesselId'), email:fd.get('email')||'', phone:fd.get('phone')||'' };
+    if(modal.data) data.leftDate = fd.get('leftDate') || '';
     const editId = modal.data ? modal.data.id : null;
     const quals = [];
     for(let i=0; fd.has('tqName_' + i); i++){
@@ -5239,6 +5359,21 @@ function attachContentEvents(){
           break;
         case 'add-crew': state.modal = { type:'crew', data:null }; renderModal(); break;
         case 'edit-crew': state.modal = { type:'crew', data: state.crew.find(c=>c.id===id) }; renderModal(); break;
+        case 'retention-delete-crew': {
+          const c = state.allCrew.find(x=>x.id===id);
+          if(c && confirm(`Delete ${c.name} and their documents? This can't be undone.`)){ await deleteCrewRecords(new Set([id])); render(); }
+          break;
+        }
+        case 'retention-delete-crew-all': {
+          const ids = new Set(retentionDue().crew.map(c=>c.id));
+          if(ids.size && confirm(`Delete all ${ids.size} former crew and their documents? This can't be undone.`)){ await deleteCrewRecords(ids); render(); }
+          break;
+        }
+        case 'retention-delete-finance': {
+          const ids = new Set(retentionDue().finance.map(x=>x.id));
+          if(ids.size && confirm(`Delete ${ids.size} financial record${ids.size===1?'':'s'} older than ${RETAIN_FINANCE_YEARS} years, with their invoice copies? This can't be undone.`)){ await deleteFinanceRecords(ids); render(); }
+          break;
+        }
         case 'delete-crew':
           if(confirm('Remove this crew member?')){
             removeDocFiles((state.allCrew.find(c=>c.id===id) || {}).documents);
@@ -5411,6 +5546,7 @@ function render(){
     case 'maintenance': main.innerHTML = renderMaintenance(); break;
     case 'crew': main.innerHTML = renderCrew(); break;
     case 'companies': main.innerHTML = renderCompanies(); break;
+    case 'retention': main.innerHTML = renderRetention(); break;
     case 'checklists': main.innerHTML = renderChecklists(); break;
     case 'hours': main.innerHTML = renderHours(); break;
     case 'finance': main.innerHTML = renderFinance(); break;

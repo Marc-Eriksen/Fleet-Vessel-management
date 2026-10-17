@@ -977,7 +977,46 @@ function renderContractorList(){
             : rows}
         </tbody>
       </table>
-    </div>`;
+    </div>
+    ${renderRetentionDue()}`;
+}
+
+/* ============================= RETENTION (admin only) ============================= */
+/* Financial records are kept for 7 years (see the privacy notice), then listed here for the admin
+   to delete. Nothing is deleted automatically. Unpaid payments are never listed. */
+const RETAIN_FINANCE_YEARS = 7;
+function retentionDue(){
+  const d = new Date();
+  const cut = localISODate(new Date(d.getFullYear() - RETAIN_FINANCE_YEARS, d.getMonth(), d.getDate()));
+  const items = [];
+  state.contractors.forEach(ct=>{
+    ct.payments.filter(p=>p.status==='paid' && p.date && p.date < cut)
+      .forEach(p=>items.push({ path: ROOT + ct.id + '/payments/' + p.id, kind:'Payment', ct, date:p.date, label:p.description || 'Payment' }));
+    const oldOrders = ct.salesOrders.filter(o=>o.date && o.date < cut);
+    oldOrders.forEach(o=>items.push({ path: salesPath(ct.id) + 'orders/' + o.id, kind:'Paint order', ct, date:o.date, label:o.colorName || 'Order' }));
+    /* a customer goes with their last order, once every order of theirs is past the period */
+    ct.salesClients.forEach(c=>{
+      const orders = ct.salesOrders.filter(o=>o.clientId===c.id);
+      if(orders.length && orders.every(o=>oldOrders.includes(o)))
+        items.push({ path: salesPath(ct.id) + 'clients/' + c.id, kind:'Paint customer', ct, date:'', label:c.name || 'Customer' });
+    });
+  });
+  return { cut, items: items.sort((a,b)=>(a.date||'9').localeCompare(b.date||'9')) };
+}
+function renderRetentionDue(){
+  const { cut, items } = retentionDue();
+  return `
+    <h3 class="section-title" style="font-size:16px; margin-top:28px;">Due for deletion</h3>
+    <p class="section-sub">Paid payments and paint orders dated before ${fmtDate(cut)} (${RETAIN_FINANCE_YEARS} years, as in the <a href="../privacy.html" data-privacy style="color:var(--accent);">privacy notice</a>), and paint customers whose orders are all that old. A contractor who no longer works with OCEANHUB can be deleted with the Delete button above.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Date</th><th>Contractor</th><th>Record</th></tr></thead>
+      <tbody>
+        ${items.length === 0 ? `<tr><td colspan="3"><div class="empty-note">Nothing is due for deletion.</div></td></tr>`
+          : items.slice(0, 100).map(x=>`<tr><td>${x.date ? fmtDate(x.date) : '—'}</td><td>${esc(x.ct.name || 'Unnamed')}</td><td>${esc(x.kind)}: ${esc(x.label)}</td></tr>`).join('')}
+        ${items.length > 100 ? `<tr><td colspan="3" style="color:var(--ink-soft);">and ${items.length - 100} more</td></tr>` : ''}
+      </tbody>
+    </table></div>
+    ${items.length ? `<div style="margin-top:10px;"><button class="btn danger" data-action="retention-delete">Delete all ${items.length} record${items.length===1?'':'s'}</button></div>` : ''}`;
 }
 
 function renderContractorPage(id){
@@ -1999,6 +2038,15 @@ async function handleAction(el){
       const paid = p.status !== 'paid';
       try{ await db.ref(ROOT + id + '/payments/' + payId).update({ status: paid ? 'paid' : 'outstanding', paidDate: paid ? localISODate(new Date()) : null }); }
       catch(err){ alert("Couldn't save: " + err.message); }
+      break;
+    }
+    case 'retention-delete': {
+      const { items } = retentionDue();
+      if(!items.length || !confirm(`Delete ${items.length} record${items.length===1?'':'s'} older than ${RETAIN_FINANCE_YEARS} years? This can't be undone.`)) return;
+      const updates = {};
+      items.forEach(x=>{ updates[x.path] = null; });
+      try{ await db.ref().update(updates); }
+      catch(err){ alert("Couldn't delete: " + err.message); }
       break;
     }
     case 'delete-payment':
