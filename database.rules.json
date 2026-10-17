@@ -12,41 +12,26 @@
       },
       "data": {
         ".read": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin'",
+        ".write": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin'"
+      },
+      "access": {
+        ".read": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin'",
         ".write": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin'",
-        "vessels": {
-          ".read": "auth != null && (root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin' || root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner')",
-          ".write": "auth != null && (root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin' || root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner')"
-        },
-        "maintenance": {
-          ".read": "auth != null && (root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin' || root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner')",
-          ".write": "auth != null && (root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin' || root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner')"
-        },
-        "crew": {
-          ".read": "auth != null && (root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin' || root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner')",
-          ".write": "auth != null && (root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin' || root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner')"
-        },
-        "checklists": {
-          ".read": "auth != null && (root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin' || root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner')",
-          ".write": "auth != null && (root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin' || root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner')"
-        },
-        "checklistRuns": {
-          ".read": "auth != null && (root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin' || root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner')",
-          ".write": "auth != null && (root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin' || root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner')"
-        },
-        "hourReadings": {
-          ".read": "auth != null && (root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin' || root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner')",
-          ".write": "auth != null && (root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin' || root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner')"
-        },
-        "serviceLog": {
-          ".read": "auth != null && (root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin' || root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner')",
-          ".write": "auth != null && (root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin' || root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner')"
-        },
-        "financeItems": {
-          ".read": "auth != null && (root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin' || root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner')",
-          ".write": "auth != null && (root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin' || root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner')"
-        },
-        "companies": {
-          ".read": "auth != null && (root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin' || root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner')"
+        "$coId": {
+          ".read": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner' && root.child('oceanhub/users/' + auth.uid + '/companyId').val() === $coId"
+        }
+      },
+      "fleet": {
+        ".read": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin'",
+        ".write": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin'",
+        "$key": {
+          "$group": {
+            ".read": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner' && (($key === 'checklists' && root.child('oceanhub/access/' + root.child('oceanhub/users/' + auth.uid + '/companyId').val() + '/checklists/' + $group).val() === true) || ($key !== 'checklists' && root.child('oceanhub/access/' + root.child('oceanhub/users/' + auth.uid + '/companyId').val() + '/vessels/' + $group).val() === true))",
+            "$rid": {
+              ".write": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner' && $key.matches(/^(vessels|maintenance|crew|checklistRuns|hourReadings|serviceLog|financeItems)$/) && root.child('oceanhub/access/' + root.child('oceanhub/users/' + auth.uid + '/companyId').val() + '/vessels/' + $group).val() === true && ($key !== 'vessels' || (data.exists() && newData.exists()))",
+              ".validate": "newData.child('id').val() === $rid && ((($key === 'vessels' || $key === 'checklists') && $group === $rid) || ($key !== 'vessels' && $key !== 'checklists' && ($group === '_none' || newData.child('vesselId').val() === $group)))"
+            }
+          }
         }
       },
       "contractors": {
@@ -77,8 +62,12 @@
         ".write": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin'"
       },
       "files": {
-        ".read": "auth != null && (root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin' || root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner')",
-        ".write": "auth != null && (root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin' || root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner')"
+        ".read": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin'",
+        ".write": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin'",
+        "$fileId": {
+          ".read": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner' && root.child('oceanhub/access/' + root.child('oceanhub/users/' + auth.uid + '/companyId').val() + '/vessels/' + data.child('vesselId').val()).val() === true",
+          ".write": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'owner' && (!data.exists() || root.child('oceanhub/access/' + root.child('oceanhub/users/' + auth.uid + '/companyId').val() + '/vessels/' + data.child('vesselId').val()).val() === true) && (!newData.exists() || root.child('oceanhub/access/' + root.child('oceanhub/users/' + auth.uid + '/companyId').val() + '/vessels/' + newData.child('vesselId').val()).val() === true)"
+        }
       }
     }
   }

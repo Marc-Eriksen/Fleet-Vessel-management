@@ -612,10 +612,6 @@ const FIREBASE_CONFIG = {
 };
 const ADMIN_EMAIL = ""; /* e.g. "ops@oceanhub.co.za" — leave blank to hide admin notify buttons */
 const ADMIN_PHONE = ""; /* e.g. "+27820000000" — used for WhatsApp links, digits/plus only */
-/* Collections an owner/operator account may read; everything else under oceanhub/data
-   is admin-only in the database rules. */
-const OWNER_KEYS = ['vessels','maintenance','crew','companies','checklists','checklistRuns','hourReadings','serviceLog','financeItems'];
-const OPTIONAL_OWNER_KEYS = ['financeItems']; /* a read error here (e.g. rules not published yet) loads as empty instead of failing sign-in */
 let fbInitialized = false;
 
 function isFirebaseConfigured(){
@@ -731,11 +727,19 @@ async function handleLogin(e){
 
 /* ============================= STORAGE (Firebase Realtime Database, live-synced) ============================= */
 let dataListeners = []; /* [{ ref, fn }] */
+let partListeners = []; /* an owner's per-vessel listeners, redone whenever their access changes */
 let firstLoadDone = false;
 
+function detachParts(){
+  partListeners.forEach(l=>l.ref.off('value', l.fn));
+  partListeners = [];
+}
 function detachData(){
   dataListeners.forEach(l=>l.ref.off('value', l.fn));
   dataListeners = [];
+  detachParts();
+  ownerAccess = null;
+  adminAccess = null;
   firstLoadDone = false;
 }
 
@@ -796,23 +800,74 @@ function normalizeKey(key, raw){
   return asArray(raw);
 }
 
-function applyRemoteData(val){
-  state.allVessels = normalizeKey('vessels', val.vessels);
-  state.allMaintenance = normalizeKey('maintenance', val.maintenance);
-  state.allCrew = normalizeKey('crew', val.crew);
-  state.companies = normalizeKey('companies', val.companies);
-  state.allChecklists = normalizeKey('checklists', val.checklists);
-  state.allChecklistRuns = normalizeKey('checklistRuns', val.checklistRuns);
-  state.allHourReadings = normalizeKey('hourReadings', val.hourReadings);
-  state.allServiceLog = normalizeKey('serviceLog', val.serviceLog);
-  state.allFinanceItems = normalizeKey('financeItems', val.financeItems);
+/* Where things live in the database:
+   - oceanhub/fleet/<collection>/<group>/<recordId>: every vessel-related record, grouped by
+     the vessel it belongs to (a vessel is its own group, a checklist template is its own group,
+     records with no single vessel — like crew on "All vessels" — go in the _none group).
+   - oceanhub/access/<companyId>: { name, vessels:{<id>:true}, checklists:{<id>:true} }, the
+     list of groups an owner company may open. The admin app rebuilds it whenever companies,
+     vessels or checklists change, and the database rules check it on every owner read/write.
+   - oceanhub/data/companies: the company records themselves (admin only).
+   Grouping by vessel is what lets the rules keep each owner to their own vessels. */
+const FLEET_PATH = 'oceanhub/fleet/';
+const ACCESS_PATH = 'oceanhub/access/';
+const FLEET_KEYS = ['vessels','maintenance','crew','checklists','checklistRuns','hourReadings','serviceLog','financeItems'];
+const NO_VESSEL = '_none';
+const BAD_KEY = /[.#$\[\]\/]/;
+let ownerAccess = null; /* an owner's oceanhub/access/<companyId> record */
+let adminAccess = null; /* the admin's latest copy of oceanhub/access */
+
+function vesselGroup(vesselId){
+  return typeof vesselId === 'string' && vesselId && vesselId !== 'all' && !BAD_KEY.test(vesselId) ? vesselId : NO_VESSEL;
+}
+function groupOf(key, r){ return key === 'vessels' || key === 'checklists' ? r.id : vesselGroup(r.vesselId); }
+function recordPath(key, r){ return FLEET_PATH + key + '/' + groupOf(key, r) + '/' + r.id; }
+function stateKey(key){ return key === 'companies' ? key : 'all' + key.charAt(0).toUpperCase() + key.slice(1); }
+/* Firebase refuses undefined anywhere in a write */
+function cleanForDb(v){ return JSON.parse(JSON.stringify(v)); }
+/* JSON with object keys sorted, so two copies of the same record compare equal */
+function canonJSON(v){
+  return JSON.stringify(v, (k, x) => x && typeof x === 'object' && !Array.isArray(x)
+    ? Object.keys(x).sort().reduce((o, kk) => { o[kk] = x[kk]; return o; }, {}) : x);
+}
+
+/* { group: { id: record } } → one list, oldest first (ids start with their creation time) */
+function assembleKey(key, groups){
+  const out = [];
+  Object.keys(groups || {}).forEach(g=>{
+    const recs = groups[g];
+    if(!recs || typeof recs !== 'object') return;
+    Object.keys(recs).forEach(id=>{ const r = recs[id]; if(r && typeof r === 'object') out.push({ ...r, id: r.id || id }); });
+  });
+  out.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+  return normalizeKey(key, out);
+}
+
+function applyRemoteData(fleet, companies){
+  fleet = fleet || {};
+  state.allVessels = assembleKey('vessels', fleet.vessels);
+  state.allMaintenance = assembleKey('maintenance', fleet.maintenance);
+  state.allCrew = assembleKey('crew', fleet.crew);
+  state.companies = normalizeKey('companies', companies);
+  state.allChecklists = assembleKey('checklists', fleet.checklists);
+  state.allChecklistRuns = assembleKey('checklistRuns', fleet.checklistRuns);
+  state.allHourReadings = assembleKey('hourReadings', fleet.hourReadings);
+  state.allServiceLog = assembleKey('serviceLog', fleet.serviceLog);
+  state.allFinanceItems = assembleKey('financeItems', fleet.financeItems);
   applyScoping();
 }
 
-/* Admin listens to the whole data tree; an owner listens to just the collections the
-   database rules let owners read, and the app is drawn once each has arrived. */
+/* The groups of one collection an owner may open, from their access record. */
+function ownerGroups(key){
+  const a = ownerAccess || {};
+  return Object.keys((key === 'checklists' ? a.checklists : a.vessels) || {});
+}
+
+/* Admin listens to the whole fleet; an owner listens to their access record and, through it,
+   to just their own vessels' groups. The app is drawn once everything has arrived. */
 function loadState(){
   return new Promise((resolve, reject)=>{
+    const db = firebase.database();
     const onFirstError = err=>{ if(!firstLoadDone){ firstLoadDone = true; reject(err); } };
     const afterData = ()=>{
       if(!firstLoadDone){
@@ -828,34 +883,150 @@ function loadState(){
     };
     try{
       if(session.role === 'admin'){
-        const ref = firebase.database().ref('oceanhub/data');
-        const fn = snap=>{
-          const val = snap.val();
-          if(val) applyRemoteData(val);
-          else if(!firstLoadDone){ seedData(); persistAll(); }
+        const got = {}, arrived = new Set();
+        const PARTS = { fleet:'oceanhub/fleet', data:'oceanhub/data', access:'oceanhub/access' };
+        const onAdminData = async ()=>{
+          const data = got.data || {}, fleet = got.fleet || {};
+          if(FLEET_KEYS.some(k => data[k] !== undefined)){
+            /* records still in the old layout: move them, and the listeners fire again with the result */
+            if(migrating) return;
+            migrating = true;
+            try{ await migrateToFleet(data, fleet); }
+            catch(err){
+              onFirstError(new Error('The data needs moving to the new layout, but the database refused. Publish the latest database.rules.json in the Firebase console (Realtime Database > Rules), then sign in again. (' + (err && err.message || err) + ')'));
+            }
+            finally{ migrating = false; }
+            return;
+          }
+          if(!firstLoadDone && !Object.keys(fleet).length && !data.companies){
+            seedData();
+            persistAll();
+            return;
+          }
+          adminAccess = got.access || {};
+          applyRemoteData(fleet, data.companies);
           afterData();
+          syncAccess();
         };
-        dataListeners.push({ ref, fn });
-        ref.on('value', fn, onFirstError);
-      } else {
-        const val = {}, arrived = new Set();
-        OWNER_KEYS.forEach(key=>{
-          const ref = firebase.database().ref('oceanhub/data/' + key);
+        Object.keys(PARTS).forEach(part=>{
+          const ref = db.ref(PARTS[part]);
           const fn = snap=>{
-            val[key] = snap.val();
-            arrived.add(key);
-            if(arrived.size < OWNER_KEYS.length) return;
-            applyRemoteData(val);
-            afterData();
+            got[part] = snap.val();
+            arrived.add(part);
+            if(arrived.size === Object.keys(PARTS).length) onAdminData();
           };
           dataListeners.push({ ref, fn });
-          ref.on('value', fn, err => OPTIONAL_OWNER_KEYS.includes(key) ? fn({ val:()=>null }) : onFirstError(err));
+          ref.on('value', fn, onFirstError);
         });
+      } else {
+        const accRef = db.ref(ACCESS_PATH + session.companyId);
+        const accFn = snap=>{
+          ownerAccess = snap.val();
+          detachParts();
+          const fleet = {};
+          const company = ()=> ownerAccess ? [{ id:session.companyId, name:ownerAccess.name || '', vesselIds:Object.keys(ownerAccess.vessels || {}) }] : [];
+          const groups = FLEET_KEYS.flatMap(key => ownerGroups(key).map(group => ({ key, group })));
+          if(!groups.length){ applyRemoteData(fleet, company()); afterData(); return; }
+          const pending = new Set(groups.map(g => g.key + '/' + g.group));
+          groups.forEach(({ key, group })=>{
+            const ref = db.ref(FLEET_PATH + key + '/' + group);
+            const fn = s=>{
+              (fleet[key] = fleet[key] || {})[group] = s.val();
+              pending.delete(key + '/' + group);
+              if(pending.size) return;
+              applyRemoteData(fleet, company());
+              afterData();
+            };
+            partListeners.push({ ref, fn });
+            ref.on('value', fn, onFirstError);
+          });
+        };
+        dataListeners.push({ ref:accRef, fn:accFn });
+        accRef.on('value', accFn, onFirstError);
       }
     }catch(e){
       reject(e);
     }
   });
+}
+
+/* One-off move from the old layout (each collection one list under oceanhub/data) to
+   oceanhub/fleet. It's a single atomic write, so it either all happens or none of it does.
+   Also tags each stored file with its vessel, which is what the rules check to open it.
+   Anything that shows up in the old place later (e.g. from a device still on the old
+   version) is merged in the same way the next time the admin opens the app. */
+let migrating = false;
+async function migrateToFleet(data, fleet){
+  const updates = {};
+  FLEET_KEYS.forEach(key=>{
+    if(data[key] === undefined) return;
+    /* where each id lives now, so a record that changed vessel isn't left in two places */
+    const where = new Map();
+    Object.keys(fleet[key] || {}).forEach(g => Object.keys(fleet[key][g] || {}).forEach(id => where.set(id, g)));
+    const seen = new Map();
+    normalizeKey(key, data[key]).forEach(r=>{
+      if(!r || typeof r !== 'object') return;
+      const rec = { ...r };
+      if(!rec.id || typeof rec.id !== 'string' || BAD_KEY.test(rec.id)) rec.id = uid(key.slice(0, 2));
+      if(seen.has(rec.id)){
+        if(canonJSON(seen.get(rec.id)) === canonJSON(rec)) return; /* exact duplicate */
+        rec.id = uid(key.slice(0, 2));
+      }
+      seen.set(rec.id, rec);
+      const group = groupOf(key, rec);
+      if(where.has(rec.id) && where.get(rec.id) !== group) updates[FLEET_PATH + key + '/' + where.get(rec.id) + '/' + rec.id] = null;
+      updates[FLEET_PATH + key + '/' + group + '/' + rec.id] = cleanForDb(rec);
+      fileTags(key, [rec]).forEach((g, fileId)=>{ updates[FILES_PATH + fileId + '/vesselId'] = g; });
+    });
+    updates['oceanhub/data/' + key] = null;
+  });
+  await firebase.database().ref().update(updates);
+}
+
+/* Which vessel group each stored file belongs to, for files referenced by these records. */
+function fileTags(key, records){
+  const tags = new Map();
+  const tag = (docs, group) => (docs || []).forEach(d=>{ if(d && d.id && !BAD_KEY.test(d.id)) tags.set(d.id, group); });
+  records.forEach(r=>{
+    if(key === 'vessels'){
+      tag(asArray(r.documents), r.id);
+      asArray(r.tenders).forEach(t => tag(asArray(t.documents), r.id));
+    } else if(key === 'crew') tag(asArray(r.documents), vesselGroup(r.vesselId));
+    else if(key === 'financeItems') tag(asArray(r.invoiceFiles), vesselGroup(r.vesselId));
+  });
+  return tags;
+}
+
+/* Admin only: rebuild oceanhub/access from the companies, vessels and checklists, and write it
+   if it changed. An owner sees a vessel only if their company has it ticked, and a checklist
+   only if it applies to one of those vessels. */
+function buildAccess(){
+  const vesselIds = new Set(state.allVessels.map(v => v.id));
+  const out = {};
+  state.companies.forEach(co=>{
+    if(!co || !co.id || BAD_KEY.test(co.id)) return;
+    const vessels = {};
+    (co.vesselIds || []).forEach(id=>{ if(vesselIds.has(id)) vessels[id] = true; });
+    const checklists = {};
+    if(Object.keys(vessels).length){
+      state.allChecklists.forEach(cl=>{
+        if(cl.id && (cl.allVessels || (cl.vesselIds || []).some(id => vessels[id]))) checklists[cl.id] = true;
+      });
+    }
+    const entry = { name: co.name || '' };
+    if(Object.keys(vessels).length) entry.vessels = vessels;
+    if(Object.keys(checklists).length) entry.checklists = checklists;
+    out[co.id] = entry;
+  });
+  return out;
+}
+async function syncAccess(){
+  if(!isAdmin() || !fbInitialized) return;
+  const want = buildAccess();
+  if(canonJSON(want) === canonJSON(adminAccess || {})) return;
+  adminAccess = want;
+  try{ await firebase.database().ref('oceanhub/access').set(Object.keys(want).length ? want : null); }
+  catch(e){ adminAccess = null; console.warn('Could not update owner access', e); }
 }
 
 /* One-off tidy-up for records saved before documents were stored separately: copy each
@@ -867,13 +1038,13 @@ async function moveInlineDocFiles(){
   docMoveRunning = true;
   try{
     const inline = [
-      ...state.allVessels.flatMap(v=>[...(v.documents||[]), ...(v.tenders||[]).flatMap(t=>t.documents||[])]),
-      ...state.allCrew.flatMap(c=>c.documents||[])
-    ].filter(d=>d.dataUrl);
+      ...state.allVessels.flatMap(v=>[...(v.documents||[]), ...(v.tenders||[]).flatMap(t=>t.documents||[])].map(d=>({ d, group:v.id }))),
+      ...state.allCrew.flatMap(c=>(c.documents||[]).map(d=>({ d, group:vesselGroup(c.vesselId) })))
+    ].filter(x=>x.d.dataUrl);
     if(!inline.length) return;
     const moved = new Set();
-    for(const d of inline){
-      try{ await storeDocFile(d.id, d.dataUrl); moved.add(d.id); }catch(e){ console.warn('Could not move document', d.id, e); }
+    for(const { d, group } of inline){
+      try{ await storeDocFile(d.id, d.dataUrl, group); moved.add(d.id); }catch(e){ console.warn('Could not move document', d.id, e); }
     }
     if(!moved.size) return;
     const strip = docs => (docs||[]).map(d=>{ if(!moved.has(d.id)) return d; const { dataUrl, ...rest } = d; return rest; });
@@ -885,34 +1056,62 @@ async function moveInlineDocFiles(){
   }
 }
 
-/* Initial seed only — writes the whole dataset once when the database is empty. */
+/* Initial seed only — writes the demo dataset once when the database is empty. */
 async function persistAll(){
   if(!fbInitialized) return;
-  try{
-    await firebase.database().ref('oceanhub/data').set({
-      vessels: state.allVessels, maintenance: state.allMaintenance, crew: state.allCrew, companies: state.companies
-    });
-  } catch(e){ /* best effort */ }
+  const updates = { 'oceanhub/data/companies': cleanForDb(state.companies) };
+  [['vessels', state.allVessels], ['maintenance', state.allMaintenance], ['crew', state.allCrew]].forEach(([key, list])=>{
+    list.forEach(r=>{ updates[recordPath(key, r)] = cleanForDb(r); });
+  });
+  try{ await firebase.database().ref().update(updates); }catch(e){ /* best effort */ }
+}
+
+/* The current server copy of one collection — all of it for the admin, just the owner's
+   own groups for an owner. */
+async function fetchFresh(key){
+  const db = firebase.database();
+  if(isAdmin()) return assembleKey(key, (await db.ref(FLEET_PATH + key).once('value')).val());
+  const groups = {};
+  await Promise.all(ownerGroups(key).map(async g=>{ groups[g] = (await db.ref(FLEET_PATH + key + '/' + g).once('value')).val(); }));
+  return assembleKey(key, groups);
 }
 
 /* Every ordinary save goes through here: re-fetch the current server copy of just this
-   collection right before writing, apply the mutation to that fresh copy, and write only
-   this collection back. This means a save can never clobber other people's concurrent
-   changes to this or any other record — including sibling fields (like a crew member's
-   documents) that this particular edit never touched. */
+   collection right before writing, apply the mutation to that fresh copy, and write back
+   only the records that changed, in one atomic update. This means a save can never clobber
+   other people's concurrent changes to other records. A record whose vessel changed moves
+   to the new vessel's group, and its stored files are re-tagged to match. */
 async function persistArray(key, mutateFn){
   if(!fbInitialized) return null;
   try{
-    const snap = await firebase.database().ref('oceanhub/data/' + key).once('value');
-    let fresh = normalizeKey(key, snap.val());
-    fresh = mutateFn(fresh);
-    await firebase.database().ref('oceanhub/data/' + key).set(fresh);
-    const allKey = key === 'companies' ? key
-      : 'all' + key.charAt(0).toUpperCase() + key.slice(1);
-    state[allKey] = fresh;
+    if(key === 'companies'){
+      const ref = firebase.database().ref('oceanhub/data/companies');
+      const fresh = mutateFn(normalizeKey(key, (await ref.once('value')).val()));
+      await ref.set(cleanForDb(fresh));
+      state.companies = fresh;
+      applyScoping();
+      syncAccess();
+      return fresh;
+    }
+    const before = await fetchFresh(key);
+    const after = mutateFn(JSON.parse(JSON.stringify(before)));
+    after.forEach(r=>{ if(r && (!r.id || BAD_KEY.test(r.id))) r.id = uid(key.slice(0, 2)); });
+    const at = list => new Map(list.filter(Boolean).map(r => [recordPath(key, r), r]));
+    const was = at(before), now = at(after), updates = {};
+    now.forEach((r, path)=>{
+      const v = cleanForDb(r);
+      if(!was.has(path) || canonJSON(cleanForDb(was.get(path))) !== canonJSON(v)) updates[path] = v;
+    });
+    was.forEach((r, path)=>{ if(!now.has(path)) updates[path] = null; });
+    const tagsWas = fileTags(key, before), tagsNow = fileTags(key, after);
+    tagsNow.forEach((g, fileId)=>{ if(tagsWas.has(fileId) && tagsWas.get(fileId) !== g) updates[FILES_PATH + fileId + '/vesselId'] = g; });
+    if(Object.keys(updates).length) await firebase.database().ref().update(updates);
+    state[stateKey(key)] = after;
     applyScoping();
-    return fresh;
+    if(isAdmin() && (key === 'vessels' || key === 'checklists')) syncAccess();
+    return after;
   }catch(e){
+    console.warn('Save failed', key, e);
     return null;
   }
 }
@@ -1037,9 +1236,10 @@ function dataUrlToBlob(dataUrl){
 }
 /* Document files live at oceanhub/files/<docId>, apart from the fleet records, so signing
    in doesn't download every stored PDF and scan. A document record keeps its name and date;
-   records saved before this change may still carry the file inline as dataUrl. */
+   records saved before this change may still carry the file inline as dataUrl. Each file is
+   tagged with its vessel group, which the database rules check before an owner can open it. */
 const FILES_PATH = 'oceanhub/files/';
-function storeDocFile(docId, dataUrl){ return firebase.database().ref(FILES_PATH + docId).set({ dataUrl }); }
+function storeDocFile(docId, dataUrl, group){ return firebase.database().ref(FILES_PATH + docId).set({ dataUrl, vesselId:group }); }
 function removeDocFiles(docs){
   return Promise.all((docs || []).map(d => firebase.database().ref(FILES_PATH + d.id).remove().catch(()=>{})));
 }
@@ -2929,15 +3129,10 @@ async function addDueRepeatingCosts(){
   repeatsRunning = true;
   try{
     const today = localISODate(new Date());
-    await firebase.database().ref('oceanhub/data/financeItems').transaction(cur=>{
-      /* cur can be null before the local copy has loaded; writing null back is conditional, so the
-         server answers with the real list and this runs again on it */
-      if(cur === null) return null;
-      const fresh = normalizeKey('financeItems', cur);
-      const add = dueRepeatingCosts(fresh, today);
-      if(!add.length) return; /* nothing due — leave it alone */
-      return JSON.parse(JSON.stringify([...fresh, ...add])); /* Firebase refuses undefined anywhere in a write */
-    });
+    /* each added month has a fixed id (<cost id>_<yyyy-mm>), so two devices adding the same
+       month at once just write the same record twice */
+    const saved = await persistArray('financeItems', fresh => [...fresh, ...dueRepeatingCosts(fresh, today)]);
+    if(!saved) throw new Error('save failed');
   }catch(e){
     console.warn('Adding monthly costs failed — will try again next time the app opens', e);
   }finally{
@@ -3470,7 +3665,7 @@ async function saveInvoiceCosts(form){
   if(costs.some(c=>!c.description)){ alert('Every ticked line needs a description.'); return; }
   btn.disabled = true; btn.textContent = 'Saving…';
   let fileRefs = m.files.map((f, i)=>({ id:uid('invf'), name: m.files.length > 1 ? `Invoice page ${i+1}` : (f.name || 'Invoice') }));
-  try{ await Promise.all(fileRefs.map((ref, i)=>storeDocFile(ref.id, m.files[i].dataUrl))); }
+  try{ await Promise.all(fileRefs.map((ref, i)=>storeDocFile(ref.id, m.files[i].dataUrl, vesselGroup(fd.get('vesselId'))))); }
   catch(e){
     if(!confirm("Couldn't save a copy of the invoice. Add the costs without it?")){ btn.disabled = false; updateInvoiceTotals(form, m); return; }
     fileRefs = [];
@@ -4119,7 +4314,7 @@ function crewForm(c){
     <label class="field">Full name<input name="name" value="${esc(c.name)}" required></label>
     ${fieldRow(
       `<label class="field">Role<input name="role" value="${esc(c.role)}" placeholder="e.g. Master, Deckhand" required></label>`,
-      `<label class="field">Assigned vessel<select name="vesselId"><option value="all" ${c.vesselId==='all'?'selected':''}>All vessels</option>${state.vessels.map(v=>`<option value="${v.id}" ${c.vesselId===v.id?'selected':''}>${esc(v.name)}</option>`).join('')}</select></label>`
+      `<label class="field">Assigned vessel<select name="vesselId">${isAdmin() ? `<option value="all" ${c.vesselId==='all'?'selected':''}>All vessels</option>` : ''}${state.vessels.map(v=>`<option value="${v.id}" ${c.vesselId===v.id?'selected':''}>${esc(v.name)}</option>`).join('')}</select></label>`
     )}
     ${fieldRow(
       `<label class="field">Email<input name="email" type="email" value="${esc(c.email||'')}" placeholder="crew@example.com"></label>`,
@@ -4703,7 +4898,7 @@ async function handleFormSubmit(e){
     if(!dataUrl){ alert('Please choose a file first.'); return; }
     const vesselId = modal.id;
     const docData = { id:uid('doc'), name:fd.get('docName'), fileName:fd.get('docFileName')||'', addedDate:new Date().toISOString().slice(0,10), expiry:fd.get('docExpiry')||'' };
-    try{ await storeDocFile(docData.id, dataUrl); }
+    try{ await storeDocFile(docData.id, dataUrl, vesselId); }
     catch(err){ alert("Couldn't upload the document — check your connection and try again."); return; }
     targetKey = 'vessels';
     mutateFn = fresh => fresh.map(v=> v.id===vesselId ? { ...v, documents:[...(v.documents||[]), docData] } : v);
@@ -4714,7 +4909,8 @@ async function handleFormSubmit(e){
     if(!dataUrl){ alert('Please choose a file first.'); return; }
     const crewId = modal.id;
     const docData = { id:uid('doc'), name:fd.get('docName'), fileName:fd.get('docFileName')||'', addedDate:new Date().toISOString().slice(0,10) };
-    try{ await storeDocFile(docData.id, dataUrl); }
+    const member = state.allCrew.find(c=>c.id===crewId) || {};
+    try{ await storeDocFile(docData.id, dataUrl, vesselGroup(member.vesselId)); }
     catch(err){ alert("Couldn't upload the document — check your connection and try again."); return; }
     targetKey = 'crew';
     mutateFn = fresh => fresh.map(c=> c.id===crewId ? { ...c, documents:[...(c.documents||[]), docData] } : c);
@@ -4787,7 +4983,7 @@ async function handleFormSubmit(e){
     if(!dataUrl){ alert('Please choose a file first.'); return; }
     const vesselId = modal.vesselId, tenderId = modal.tenderId;
     const docData = { id:uid('doc'), name:fd.get('docName'), fileName:fd.get('docFileName')||'', addedDate:new Date().toISOString().slice(0,10), expiry:fd.get('docExpiry')||'' };
-    try{ await storeDocFile(docData.id, dataUrl); }
+    try{ await storeDocFile(docData.id, dataUrl, vesselId); }
     catch(err){ alert("Couldn't upload the document — check your connection and try again."); return; }
     targetKey = 'vessels';
     mutateFn = fresh => fresh.map(v=>{
@@ -4885,7 +5081,17 @@ async function handleFormSubmit(e){
     targetKey = 'financeItems';
     afterSave = addDueRepeatingCosts;
     mutateFn = fresh => editId
-      ? fresh.map(x=> x.id===editId ? { ...x, ...data } : x)
+      ? fresh.map(x=>{
+          if(x.id!==editId) return x;
+          const next = { ...x, ...data };
+          if(next.repeat && x.vesselId !== next.vesselId){
+            /* months already added stay with the old vessel (which the new vessel's owner may
+               not see), so mark them done rather than adding them again under the new one */
+            const done = fresh.filter(i=>i.repeatOf===editId).map(i=>String(i.date||'').slice(0,7));
+            next.repeat = { ...next.repeat, skip:[...new Set([...asArray(next.repeat.skip), ...done])] };
+          }
+          return next;
+        })
       : [...fresh, { id:uid('fi'), createdBy: session ? session.email : '', createdDate: localISODate(new Date()), ...data }];
   }
   else if(modal.type==='checklist-import'){
