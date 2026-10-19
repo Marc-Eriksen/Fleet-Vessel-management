@@ -1534,6 +1534,21 @@ function orderDeliveryRate(existing){ return existing && Number(existing.deliver
 
 function salesEnabled(ct){ return !!(ct && ct.salesSettings && ct.salesSettings.enabled); }
 function salesPath(id){ return ROOT + id + '/sales/'; }
+/* Order numbers come from one counter shared by every sales/contractor, so they never repeat: OH-0001, OH-0002… */
+const ORDER_SEQ_PATH = 'oceanhub/salesOrderSeq';
+function fmtOrderNo(n){ return Number(n) > 0 ? 'OH-' + String(Math.floor(n)).padStart(4, '0') : ''; }
+async function nextOrderNo(){
+  const res = await firebase.database().ref(ORDER_SEQ_PATH).transaction(c => (Number(c) || 0) + 1);
+  if(!res.committed) throw new Error('Could not get an order number.');
+  return res.snapshot.val();
+}
+/* Orders made before numbering get theirs the first time they're sent. */
+async function ensureOrderNo(ctId, o){
+  if(!o || o.orderNo) return;
+  const n = await nextOrderNo();
+  await firebase.database().ref(salesPath(ctId) + 'orders/' + o.id + '/orderNo').set(n);
+  o.orderNo = n;
+}
 function sizeKey(size){ return String(size||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,''); }
 function unitPriceFor(size){ const p = Number(((state.salesPricing||{}).unitPrices||{})[sizeKey(size)]); return p > 0 ? p : 0; }
 /* Quantity discounts are ranges, e.g. 1–20 at 0%, 21–50 at 5%, 51+ at 10%. maxQty 0 means "and more". Ranges don't overlap. */
@@ -1707,7 +1722,7 @@ function salesOrderItem(ct, o, showClient){
       <div class="ps-swatch" style="background:${swatchColor(o.color)};"></div>
       <div class="ps-order-body">
         <div style="min-width:0;">
-          <div class="ps-order-title">${esc(o.colorName || 'Untitled colour')} · ${esc(o.finish)}${showClient && client ? ` <span style="font-weight:400; color:var(--ink-soft);">— ${esc(client.name)}</span>` : ''}</div>
+          <div class="ps-order-title">${o.orderNo ? `<span style="color:var(--ink-soft); font-weight:600;">${fmtOrderNo(o.orderNo)}</span> · ` : ''}${esc(o.colorName || 'Untitled colour')} · ${esc(o.finish)}${showClient && client ? ` <span style="font-weight:400; color:var(--ink-soft);">— ${esc(client.name)}</span>` : ''}</div>
           <div class="ps-sub">${esc(o.size)} × ${Number(o.qty)||0} · ${fmtDate(o.date)}${Number(o.deliveryKm) > 0 ? ` · delivery ${Number(o.deliveryKm)} km ${fmtRand(deliveryCost(o))}` : ''}${o.notes ? ` · ${esc(o.notes)}` : ''}</div>
         </div>
         <div class="pay-actions">
@@ -1759,11 +1774,14 @@ function renderPriceList(){
 
 function orderEmailContent(ct, o, client){
   const discount = Number(o.discountPercent)||0;
-  const subject = `${o.colorName || 'Your paint order'} — OCEANHUB Paint Sales`;
+  const no = fmtOrderNo(o.orderNo);
+  const subject = `${no ? 'Order ' + no + ' — ' : ''}${o.colorName || 'Your paint order'} — OCEANHUB Paint Sales`;
   const lines = [
     client && client.name ? `Hi ${client.name},` : 'Hi,',
     '',
     'Here are the details for your order:',
+    no ? `Order number: ${no}` : null,
+    `Order date: ${fmtDate(o.date)}`,
     `Paint colour: ${o.colorName || 'Untitled colour'}`,
     `Finish: ${o.finish}`,
     `Size: ${o.size}`,
@@ -1775,7 +1793,6 @@ function orderEmailContent(ct, o, client){
     Number(o.deliveryKm) > 0 && o.deliveryTo ? `Delivery to: ${o.deliveryTo}` : null,
     `Total: ${fmtRand(orderTotal(o))}`,
     `Status: ${o.status}`,
-    `Date: ${fmtDate(o.date)}`,
     o.notes ? `Notes: ${o.notes}` : null,
     '',
     'Thank you for your business!',
@@ -1822,7 +1839,8 @@ function orderPdf(ct, o, d){
   doc.setFont('helvetica','bold'); doc.setFontSize(16);
   doc.text('OCEANHUB Paint Sales', 50, 24);
   doc.setFont('helvetica','normal'); doc.setFontSize(10);
-  doc.text(`Order${o && o.date ? ' — ' + fmtDate(o.date) : ''}`, 50, 31);
+  const no = o ? fmtOrderNo(o.orderNo) : '';
+  doc.text(`Order${no ? ' ' + no : ''}${o && o.date ? ' — ' + fmtDate(o.date) : ''}`, 50, 31);
   doc.setDrawColor(200); doc.line(14, 48, 196, 48);
   doc.setFontSize(11);
   let y = 58;
@@ -1830,7 +1848,7 @@ function orderPdf(ct, o, d){
     if(y > 282){ doc.addPage(); y = 20; }
     doc.text(line, 14, y); y += 6;
   });
-  const fileName = `Order-${String((o && o.colorName) || 'paint').replace(/[^a-z0-9]+/gi,'-')}-${(o && o.date) || localISODate(new Date())}.pdf`;
+  const fileName = `Order-${(o && fmtOrderNo(o.orderNo)) || String((o && o.colorName) || 'paint').replace(/[^a-z0-9]+/gi,'-')}-${(o && o.date) || localISODate(new Date())}.pdf`;
   return { doc, fileName };
 }
 /* Sends with the PDF: the share menu where the device supports files, otherwise download it
@@ -1873,8 +1891,8 @@ function downloadSalesCSVs(ct){
   const clientName = id => (salesClient(ct, id) || {}).name || 'Unknown client';
   downloadCSV(`paint-sales-clients-${slug}.csv`, toCSV(['Name','Company','Phone','Email','Address','Notes','Added'],
     ct.salesClients.map(c=>[c.name, c.company, c.phone, c.email, c.address, c.notes, c.createdAt ? fmtDate(c.createdAt) : ''])));
-  downloadCSV(`paint-sales-orders-${slug}.csv`, toCSV(['Date','Client','Paint colour','Swatch hex','Finish','Size','Qty','Unit price (R)','Discount %','Discount qty range','Subtotal (R)','Delivery from','Delivery to','Delivery km','Delivery rate (R/km)','Delivery (R)','Total (R)','Status','Notes'],
-    ct.salesOrders.slice().sort(byDateDesc).map(o=>[fmtDate(o.date), clientName(o.clientId), o.colorName || 'Untitled colour', o.color, o.finish, o.size, o.qty,
+  downloadCSV(`paint-sales-orders-${slug}.csv`, toCSV(['Order number','Date','Client','Paint colour','Swatch hex','Finish','Size','Qty','Unit price (R)','Discount %','Discount qty range','Subtotal (R)','Delivery from','Delivery to','Delivery km','Delivery rate (R/km)','Delivery (R)','Total (R)','Status','Notes'],
+    ct.salesOrders.slice().sort(byDateDesc).map(o=>[fmtOrderNo(o.orderNo), fmtDate(o.date), clientName(o.clientId), o.colorName || 'Untitled colour', o.color, o.finish, o.size, o.qty,
       (Number(o.unitPrice)||0).toFixed(2), Number(o.discountPercent)||0, discountRange(o), orderSubtotal(o).toFixed(2), o.deliveryFrom || '', o.deliveryTo || '', Number(o.deliveryKm)||0, Number(o.deliveryKm) > 0 ? (Number(o.deliveryRate)||0).toFixed(2) : '', deliveryCost(o).toFixed(2), orderTotal(o).toFixed(2), o.status, o.notes])));
 }
 function exportEmailContent(ct){
@@ -2205,7 +2223,12 @@ async function handleFormSubmit(e){
       if(!data.unitPrice){ alert(`The OCEANHUB admin hasn't set a price for ${size} yet.`); btn.disabled = false; return; }
       if(!data.date){ alert('Enter the date as dd/mm/yyyy.'); btn.disabled = false; return; }
       const orderId = m.orderId || uid('pso');
-      const rec = clean({ id:orderId, ...data });
+      let orderNo = existing && existing.orderNo;
+      if(!orderNo){
+        try{ orderNo = await nextOrderNo(); }
+        catch(err){ alert("Couldn't get an order number, so this order can't be saved yet. Check your connection and try again." + (err && err.message ? '\n\n' + err.message : '')); btn.disabled = false; return; }
+      }
+      const rec = clean({ id:orderId, orderNo, ...data });
       try{ await db.ref().update(withLog({ [salesPath(m.id) + 'orders/' + orderId]: rec },
         [existing ? changeEntry({ key:'salesOrder', cid:m.id, id:orderId }, existing, rec) : { key:'salesOrder', cid:m.id, id:orderId, action:'added' }])); }
       catch(err){
@@ -2309,7 +2332,12 @@ async function handleAction(el){
       try{ await db.ref().update(withLog({ [salesPath(id) + 'orders/' + el.dataset.oid]: null }, [{ key:'salesOrder', cid:id, id:el.dataset.oid, action:'deleted' }])); }
       catch(err){ alert("Couldn't delete: " + err.message); }
       break;
-    case 'sales-send-order': state.modal = { type:'sales-send', id, orderId:el.dataset.oid }; renderModal(); break;
+    case 'sales-send-order': {
+      const ct = findContractor(id), o = ct && ct.salesOrders.find(x=>x.id===el.dataset.oid);
+      try{ await ensureOrderNo(id, o); }
+      catch(err){ alert("Couldn't give this order a number, so it can't be sent yet. Check your connection and try again." + (err && err.message ? '\n\n' + err.message : '')); return; }
+      state.modal = { type:'sales-send', id, orderId:el.dataset.oid }; renderModal(); break;
+    }
     case 'sales-send-whatsapp': {
       const form = document.getElementById('modalForm');
       if(!form) return;
