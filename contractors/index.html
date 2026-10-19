@@ -1513,6 +1513,14 @@ const PS_SIZES = ['1 Litre','5 Litre'];
 const PS_STATUSES = ['Quoted','Ordered','Fulfilled','Paid'];
 const PS_TIER_ROWS = 5; /* most discount tiers allowed — the database rules check an order against each one by position */
 const PRICING_PATH = 'oceanhub/salesPricing';
+/* Delivery is charged per km driven (there and back) at the admin's delivery rate. Until the admin sets one,
+   this AA-style running cost for a typical SUV applies. The database rules use the same fallback. */
+const AA_SUV_RATE_PER_KM = 6;
+function deliveryRateNow(){ const r = Number((state.salesPricing||{}).deliveryRatePerKm); return r > 0 ? r : AA_SUV_RATE_PER_KM; }
+const round2 = n => Math.round(n * 100) / 100;
+const deliveryCost = o => round2((Number(o.deliveryKm)||0) * (Number(o.deliveryRate)||0));
+/* A saved order keeps its delivery rate; a new delivery (or an order that had none) uses today's rate. */
+function orderDeliveryRate(existing){ return existing && Number(existing.deliveryRate) > 0 ? Number(existing.deliveryRate) : deliveryRateNow(); }
 
 function salesEnabled(ct){ return !!(ct && ct.salesSettings && ct.salesSettings.enabled); }
 function salesPath(id){ return ROOT + id + '/sales/'; }
@@ -1539,7 +1547,8 @@ function resetSalesView(){ Object.assign(state, { section:'payments', salesTab:'
 function fmtRand(n){ return 'R' + (Number(n)||0).toLocaleString('en-ZA', { minimumFractionDigits:2, maximumFractionDigits:2 }); }
 function swatchColor(c){ return /^#[0-9a-f]{6}$/i.test(c||'') ? c : 'var(--paper-line)'; }
 const orderSubtotal = o => (Number(o.qty)||0) * (Number(o.unitPrice)||0);
-const orderTotal = o => orderSubtotal(o) * (1 - (Number(o.discountPercent)||0) / 100);
+const paintTotal = o => orderSubtotal(o) * (1 - (Number(o.discountPercent)||0) / 100);
+const orderTotal = o => paintTotal(o) + deliveryCost(o);
 /* the admin's quantity discount the order got, e.g. "5% (21–50 units)"; orders priced before ranges were recorded show just the % */
 function discountRange(o){ const q = Number(o.discountMinQty)||0; return q ? rangeLabel(q, Number(o.discountMaxQty)||0) : ''; }
 function discountLabel(o){
@@ -1687,11 +1696,11 @@ function salesOrderItem(ct, o, showClient){
       <div class="ps-order-body">
         <div style="min-width:0;">
           <div class="ps-order-title">${esc(o.colorName || 'Untitled colour')} · ${esc(o.finish)}${showClient && client ? ` <span style="font-weight:400; color:var(--ink-soft);">— ${esc(client.name)}</span>` : ''}</div>
-          <div class="ps-sub">${esc(o.size)} × ${Number(o.qty)||0} · ${fmtDate(o.date)}${o.notes ? ` · ${esc(o.notes)}` : ''}</div>
+          <div class="ps-sub">${esc(o.size)} × ${Number(o.qty)||0} · ${fmtDate(o.date)}${Number(o.deliveryKm) > 0 ? ` · delivery ${Number(o.deliveryKm)} km ${fmtRand(deliveryCost(o))}` : ''}${o.notes ? ` · ${esc(o.notes)}` : ''}</div>
         </div>
         <div class="pay-actions">
           <span class="stamp ps-${status.toLowerCase()}">${status}</span>
-          ${discount > 0 ? `<span class="stamp ps-fulfilled" title="Quantity discount from the price list">−${esc(discountLabel(o))}</span><span style="font-size:12px; color:var(--ink-soft); text-decoration:line-through;">${fmtRand(orderSubtotal(o))}</span>` : ''}
+          ${discount > 0 ? `<span class="stamp ps-fulfilled" title="Quantity discount from the price list">−${esc(discountLabel(o))}</span><span style="font-size:12px; color:var(--ink-soft); text-decoration:line-through;" title="Paint before discount">${fmtRand(orderSubtotal(o))}</span>` : ''}
           <b>${fmtRand(orderTotal(o))}</b>
           <button type="button" class="btn small ghost" data-action="sales-send-order" data-id="${ct.id}" data-oid="${o.id}" title="Email or WhatsApp this order to the client">Send</button>
           <button type="button" class="btn small ghost" data-action="sales-edit-order" data-id="${ct.id}" data-oid="${o.id}">Edit</button>
@@ -1726,6 +1735,7 @@ function renderPriceList(){
       <div class="card-box">
         <h4 class="ps-h">Unit price by size</h4>
         ${PS_SIZES.map(sz=>`<div class="mini-row"><span>${esc(sz)}</span><b>${unitPriceFor(sz) ? fmtRand(unitPriceFor(sz)) : '<span style="color:var(--ink-soft); font-weight:400;">Not set</span>'}</b></div>`).join('')}
+        <div class="mini-row"><span>Delivery, per km driven</span><b>${fmtRand(deliveryRateNow())}</b></div>
       </div>
       <div class="card-box">
         <h4 class="ps-h">Quantity discounts</h4>
@@ -1748,6 +1758,8 @@ function orderEmailContent(ct, o, client){
     `Quantity: ${Number(o.qty)||0}`,
     `Unit price: ${fmtRand(o.unitPrice)}`,
     discount > 0 ? `Quantity discount: ${discountLabel(o)}` : null,
+    Number(o.deliveryKm) > 0 ? `Paint: ${fmtRand(paintTotal(o))}` : null,
+    Number(o.deliveryKm) > 0 ? `Delivery: ${fmtRand(deliveryCost(o))} (${Number(o.deliveryKm)} km @ ${fmtRand(o.deliveryRate)}/km)` : null,
     `Total: ${fmtRand(orderTotal(o))}`,
     `Status: ${o.status}`,
     `Date: ${fmtDate(o.date)}`,
@@ -1796,9 +1808,9 @@ function downloadSalesCSVs(ct){
   const clientName = id => (salesClient(ct, id) || {}).name || 'Unknown client';
   downloadCSV(`paint-sales-clients-${slug}.csv`, toCSV(['Name','Phone','Email','Address','Notes','Added'],
     ct.salesClients.map(c=>[c.name, c.phone, c.email, c.address, c.notes, c.createdAt ? fmtDate(c.createdAt) : ''])));
-  downloadCSV(`paint-sales-orders-${slug}.csv`, toCSV(['Date','Client','Paint colour','Swatch hex','Finish','Size','Qty','Unit price (R)','Discount %','Discount qty range','Subtotal (R)','Total (R)','Status','Notes'],
+  downloadCSV(`paint-sales-orders-${slug}.csv`, toCSV(['Date','Client','Paint colour','Swatch hex','Finish','Size','Qty','Unit price (R)','Discount %','Discount qty range','Subtotal (R)','Delivery km','Delivery rate (R/km)','Delivery (R)','Total (R)','Status','Notes'],
     ct.salesOrders.slice().sort(byDateDesc).map(o=>[fmtDate(o.date), clientName(o.clientId), o.colorName || 'Untitled colour', o.color, o.finish, o.size, o.qty,
-      (Number(o.unitPrice)||0).toFixed(2), Number(o.discountPercent)||0, discountRange(o), orderSubtotal(o).toFixed(2), orderTotal(o).toFixed(2), o.status, o.notes])));
+      (Number(o.unitPrice)||0).toFixed(2), Number(o.discountPercent)||0, discountRange(o), orderSubtotal(o).toFixed(2), Number(o.deliveryKm)||0, Number(o.deliveryKm) > 0 ? (Number(o.deliveryRate)||0).toFixed(2) : '', deliveryCost(o).toFixed(2), orderTotal(o).toFixed(2), o.status, o.notes])));
 }
 function exportEmailContent(ct){
   const s = salesStats(ct);
@@ -1864,6 +1876,14 @@ function salesOrderForm(ct, o, presetClientId){
     <div class="mini-row"><span>Unit price</span><b id="psUnitPrice"></b></div>
     <div class="mini-row"><span>Quantity discount</span><b id="psDiscount"></b></div>
     <p class="fin-hint" id="psPriceHint"></p>
+    <label style="display:flex; align-items:center; gap:9px; font-size:13px; font-weight:600; color:var(--ink); margin:4px 0 14px;">
+      <input type="checkbox" name="delivery" value="1" ${Number(o.deliveryKm) > 0 ? 'checked' : ''} style="width:auto;" data-ps-total>
+      Deliver to the client
+    </label>
+    <div id="psDeliveryFields" style="${Number(o.deliveryKm) > 0 ? '' : 'display:none;'}">
+      <label class="field">Delivery distance (km, there and back)<input name="deliveryKm" type="number" min="0" step="0.1" value="${Number(o.deliveryKm) > 0 ? Number(o.deliveryKm) : ''}" placeholder="e.g. 40" data-ps-total></label>
+      <div class="mini-row"><span id="psDeliveryLabel">Delivery</span><b id="psDeliveryCost"></b></div>
+    </div>
     ${fieldRow(
       `<label class="field">Status<select name="status">${options(PS_STATUSES, o.status)}</select></label>`,
       `<label class="field">Date${dateField('date', o.date, { required:true })}</label>`
@@ -1872,17 +1892,24 @@ function salesOrderForm(ct, o, presetClientId){
     <div class="mini-row" style="border-top:1px dashed var(--paper-line); padding-top:10px;"><span>Order total</span><b id="psOrderTotal"></b></div>`;
 }
 const orderQty = form => Math.max(1, Math.floor(Number(form.qty.value)||1));
+const orderDeliveryKm = form => form.delivery.checked ? Math.max(0, round2(Number(form.deliveryKm.value)||0)) : 0;
 function wireSalesOrderForm(form, existing){
   const recalc = ()=>{
     const qty = orderQty(form), size = form.size.value;
-    const p = orderPricing(existing, size, qty), o = { qty, ...p };
+    const p = orderPricing(existing, size, qty), km = orderDeliveryKm(form), rate = orderDeliveryRate(existing);
+    const o = { qty, ...p, deliveryKm:km, deliveryRate:rate };
+    document.getElementById('psDeliveryFields').style.display = form.delivery.checked ? '' : 'none';
+    document.getElementById('psDeliveryLabel').textContent = `Delivery (${km} km × ${fmtRand(rate)}/km)`;
+    document.getElementById('psDeliveryCost').textContent = fmtRand(deliveryCost(o));
     const next = discountTiers().find(t=>t.minQty > qty && t.percent > p.discountPercent);
     document.getElementById('psUnitPrice').textContent = p.unitPrice ? fmtRand(p.unitPrice) : 'Not set yet';
     document.getElementById('psDiscount').textContent = p.discountPercent ? discountLabel(p) : 'None';
     document.getElementById('psPriceHint').textContent = !p.unitPrice
       ? `The OCEANHUB admin hasn't set a price for ${size} yet, so this order can't be saved.`
       : next ? `Order ${next.minQty} or more for ${next.percent}% off.` : 'Prices come from the price list set by the OCEANHUB admin.';
-    document.getElementById('psOrderTotal').textContent = p.discountPercent > 0 ? `${fmtRand(orderSubtotal(o))} − ${p.discountPercent}% = ${fmtRand(orderTotal(o))}` : fmtRand(orderTotal(o));
+    const paint = p.discountPercent > 0 ? `${fmtRand(orderSubtotal(o))} − ${p.discountPercent}%` : fmtRand(paintTotal(o));
+    document.getElementById('psOrderTotal').textContent = km > 0 || p.discountPercent > 0
+      ? `${paint}${km > 0 ? ` + ${fmtRand(deliveryCost(o))} delivery` : ''} = ${fmtRand(orderTotal(o))}` : fmtRand(orderTotal(o));
   };
   form.querySelectorAll('[data-ps-total]').forEach(el=>{ el.addEventListener('input', recalc); el.addEventListener('change', recalc); });
   recalc();
@@ -1909,6 +1936,9 @@ function priceListForm(){
     <p class="section-sub" style="margin-top:-6px;">One price list for every sales/contractor. They see it but can't change it. Saved orders keep their price unless their size or quantity is changed.</p>
     <div class="detail-section" style="margin-top:0;"><h4>Unit price by container size (R)</h4></div>
     ${pairs.join('')}
+    <div class="detail-section"><h4>Delivery</h4></div>
+    <label class="field">Delivery rate (R per km driven)<input name="deliveryRatePerKm" type="number" min="0" step="0.01" value="${deliveryRateNow()}"></label>
+    <p class="fin-hint">Charged on the km driven there and back. R${AA_SUV_RATE_PER_KM.toFixed(2)}/km is used until you set one: roughly an AA running cost for a typical SUV. Check the AA's current rates and adjust. Saved orders keep the rate they were priced at.</p>
     <div class="detail-section"><h4>Quantity discounts</h4></div>
     <p class="fin-hint">Set a quantity range for each discount, e.g. 1–20 at 0%, 21–50 at 5%, 51 and up at 10%. Leave "To" blank for "and more". Ranges can't overlap. Up to ${PS_TIER_ROWS} ranges; leave a row blank to skip it.</p>
     ${rows.map((t, i)=>`<div style="display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:12px;">
@@ -2045,6 +2075,9 @@ async function handleFormSubmit(e){
       const data = { clientId:String(fd.get('clientId')||''), colorName:String(fd.get('colorName')||'').trim(), color:String(fd.get('color')||''),
         finish:String(fd.get('finish')||''), size, qty, ...orderPricing(existing, size, qty),
         status:PS_STATUSES.includes(fd.get('status')) ? fd.get('status') : PS_STATUSES[0], date:fd.get('date'), notes:String(fd.get('notes')||'').trim() };
+      const deliveryKm = orderDeliveryKm(form);
+      if(form.delivery.checked && !deliveryKm){ alert('Enter the delivery distance in km, or untick delivery.'); btn.disabled = false; return; }
+      if(deliveryKm){ data.deliveryKm = deliveryKm; data.deliveryRate = orderDeliveryRate(existing); }
       if(!data.clientId){ alert('Choose a client.'); btn.disabled = false; return; }
       if(!data.unitPrice){ alert(`The OCEANHUB admin hasn't set a price for ${size} yet.`); btn.disabled = false; return; }
       if(!data.date){ alert('Enter the date as dd/mm/yyyy.'); btn.disabled = false; return; }
@@ -2084,10 +2117,12 @@ async function handleFormSubmit(e){
         alert(`The ranges ${rangeLabel(a.minQty, a.maxQty || 0)} and ${rangeLabel(b.minQty, b.maxQty || 0)} overlap. Each quantity can only be in one range.`);
         btn.disabled = false; return;
       }
-      const rec = { unitPrices: Object.keys(unitPrices).length ? unitPrices : null, discounts: discounts.length ? discounts : null };
+      const rate = round2(Number(fd.get('deliveryRatePerKm')));
+      if(!(rate > 0)){ alert('Enter a delivery rate per km above R0.'); btn.disabled = false; return; }
+      const rec = { unitPrices: Object.keys(unitPrices).length ? unitPrices : null, discounts: discounts.length ? discounts : null, deliveryRatePerKm: rate };
       const before = state.salesPricing || {};
       await db.ref().update(withLog({ [PRICING_PATH]: rec },
-        [changeEntry({ key:'salesPricing' }, { unitPrices:before.unitPrices, discounts:before.discounts }, rec)]));
+        [changeEntry({ key:'salesPricing' }, { unitPrices:before.unitPrices, discounts:before.discounts, deliveryRatePerKm:before.deliveryRatePerKm }, rec)]));
     }
     else if(m.type === 'sales-export'){
       const { subject, body } = exportEmailContent(findContractor(m.id));
