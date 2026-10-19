@@ -1637,7 +1637,7 @@ function renderSalesDashboard(ct, s){
 function salesClientRows(ct){
   const q = state.salesSearch.trim().toLowerCase();
   const list = ct.salesClients
-    .filter(c=>[c.name, c.email, c.phone].join(' ').toLowerCase().includes(q))
+    .filter(c=>[c.name, c.company, c.email, c.phone].join(' ').toLowerCase().includes(q))
     .sort((a,b)=>(a.name||'').localeCompare(b.name||''));
   if(!list.length) return `<div class="empty-note">${ct.salesClients.length ? 'No clients match that search.' : 'No clients yet. Add your first client to start tracking their orders.'}</div>`;
   return list.map(c=>{
@@ -1647,6 +1647,7 @@ function salesClientRows(ct){
       <div class="mini-row pay-row">
         <span>
           <button type="button" class="link-btn" data-action="sales-open-client" data-cid="${c.id}">${esc(c.name)}</button>
+          ${c.company ? `<div class="ps-sub">${esc(c.company)}</div>` : ''}
           ${contact ? `<div class="ps-sub">${contact}</div>` : ''}
         </span>
         <span class="pay-actions">
@@ -1661,7 +1662,7 @@ function salesClientRows(ct){
 function renderSalesClients(ct){
   return `
     <div class="toolbar">
-      <input type="search" id="salesSearch" data-id="${ct.id}" value="${esc(state.salesSearch)}" placeholder="Search clients by name, email or phone" style="flex:1 1 240px; min-width:0;">
+      <input type="search" id="salesSearch" data-id="${ct.id}" value="${esc(state.salesSearch)}" placeholder="Search clients by name, company, email or phone" style="flex:1 1 240px; min-width:0;">
       <button type="button" class="btn primary" data-action="sales-add-client" data-id="${ct.id}">+ Add client</button>
     </div>
     <div class="card-box" id="salesClientList">${salesClientRows(ct)}</div>`;
@@ -1676,6 +1677,7 @@ function renderSalesClient(ct, c){
       <div class="toolbar" style="margin-bottom:0; align-items:flex-start;">
         <div>
           <h3 style="font-size:18px; font-weight:800; margin:0 0 6px; color:var(--heading);">${esc(c.name)}</h3>
+          ${c.company ? `<div class="ps-sub">Company: ${esc(c.company)}</div>` : ''}
           ${c.phone ? `<div class="ps-sub">Phone: <a href="tel:${esc(c.phone)}">${esc(c.phone)}</a></div>` : ''}
           ${c.email ? `<div class="ps-sub">Email: <a href="mailto:${esc(c.email)}">${esc(c.email)}</a></div>` : ''}
           ${c.address ? `<div class="ps-sub">Address: ${esc(c.address)}</div>` : ''}
@@ -1791,7 +1793,7 @@ function salesSendForm(ct, m){
   const client = o ? salesClient(ct, o.clientId) : null;
   if(!m.draft){
     const { subject, body } = orderEmailContent(ct, o, client);
-    m.draft = { email:(client && client.email) || '', phone:(client && client.phone) || '', subject, body };
+    m.draft = { email:(client && client.email) || '', phone:(client && client.phone) || '', subject, body, attachPdf:true };
   }
   const d = m.draft;
   return `
@@ -1802,9 +1804,60 @@ function salesSendForm(ct, m){
     )}
     <label class="field">Email subject<input name="subject" value="${esc(d.subject)}"></label>
     <label class="field">Message<textarea name="body" rows="14">${esc(d.body)}</textarea></label>
+    <label style="display:flex; align-items:center; gap:9px; font-size:13px; font-weight:600; color:var(--ink); margin:4px 0 8px;">
+      <input type="checkbox" name="attachPdf" value="1" ${d.attachPdf ? 'checked' : ''} style="width:auto;">
+      Attach the order as a PDF with the OCEANHUB logo
+    </label>
+    <p class="fin-hint">With the PDF attached, most phones open the share menu: pick your email or WhatsApp app, then the client (the address and number above aren't filled in for you). On a computer the PDF downloads and the email or WhatsApp opens as usual — attach the PDF yourself.</p>
     <p class="fin-hint">Leave the WhatsApp number empty to pick the chat in WhatsApp. A number starting with 0 is taken as South African.</p>`;
 }
-function sendDraft(form){ const f = n => String(form[n].value||'').trim(); return { email:f('email'), phone:f('phone'), subject:f('subject'), body:String(form.body.value||'') }; }
+function sendDraft(form){ const f = n => String(form[n].value||'').trim(); return { email:f('email'), phone:f('phone'), subject:f('subject'), body:String(form.body.value||''), attachPdf:form.attachPdf.checked }; }
+
+/* The order as a one-page PDF: the OCEANHUB logo on top, then the message as written. */
+function orderPdf(ct, o, d){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const logo = document.querySelector('.brandmark img');
+  if(logo && logo.src.startsWith('data:image/png')) doc.addImage(logo.src, 'PNG', 14, 12, 30, 30);
+  doc.setFont('helvetica','bold'); doc.setFontSize(16);
+  doc.text('OCEANHUB Paint Sales', 50, 24);
+  doc.setFont('helvetica','normal'); doc.setFontSize(10);
+  doc.text(`Order${o && o.date ? ' — ' + fmtDate(o.date) : ''}`, 50, 31);
+  doc.setDrawColor(200); doc.line(14, 48, 196, 48);
+  doc.setFontSize(11);
+  let y = 58;
+  doc.splitTextToSize(d.body, 182).forEach(line=>{
+    if(y > 282){ doc.addPage(); y = 20; }
+    doc.text(line, 14, y); y += 6;
+  });
+  const fileName = `Order-${String((o && o.colorName) || 'paint').replace(/[^a-z0-9]+/gi,'-')}-${(o && o.date) || localISODate(new Date())}.pdf`;
+  return { doc, fileName };
+}
+/* Sends with the PDF: the share menu where the device supports files, otherwise download it
+   and open the email / WhatsApp draft. Returns false if nothing was sent. */
+async function sendOrderWithPdf(channel, ct, o, d){
+  let doc, fileName, file = null;
+  try{ ({ doc, fileName } = orderPdf(ct, o, d)); }
+  catch(e){ alert('Could not make the PDF. ' + (e && e.message ? e.message : '') + ' Untick “Attach the order as a PDF” to send the message on its own.'); return false; }
+  try{ file = new File([doc.output('blob')], fileName, { type:'application/pdf' }); }catch(e){ file = null; }
+  if(file && navigator.canShare && navigator.canShare({ files:[file] })){
+    try{ await navigator.share({ files:[file], title:d.subject, text:d.body }); return true; }
+    catch(e){ return false; /* cancelled */ }
+  }
+  /* open the WhatsApp tab before saving, so a tab opened by save() can't use up this click's pop-up */
+  let target = channel === 'whatsapp' ? window.open('', '_blank') : null;
+  if(target && target.closed) target = null;
+  try{ doc.save(fileName); }
+  catch(e){ if(target) target.close(); alert('Could not download the PDF. ' + (e && e.message ? e.message : '')); return false; }
+  if(channel === 'whatsapp'){
+    const url = waLink(d.phone, d.body);
+    if(target && !target.closed) target.location = url;
+    else if(!window.open(url, '_blank')){ alert('The PDF downloaded, but your browser blocked the WhatsApp window. Allow pop-ups for this site, or open WhatsApp and attach the PDF.'); return false; }
+  } else {
+    window.location.href = mailtoLink(d.email, '', d.subject, d.body);
+  }
+  return true;
+}
 
 function csvCell(v){ const s = v==null ? '' : String(v); return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }
 function toCSV(headers, rows){ return [headers, ...rows].map(r=>r.map(csvCell).join(',')).join('\r\n'); }
@@ -1818,8 +1871,8 @@ function downloadCSV(fileName, content){
 function downloadSalesCSVs(ct){
   const slug = (ct.name||'rep').replace(/[^a-z0-9]+/gi,'-');
   const clientName = id => (salesClient(ct, id) || {}).name || 'Unknown client';
-  downloadCSV(`paint-sales-clients-${slug}.csv`, toCSV(['Name','Phone','Email','Address','Notes','Added'],
-    ct.salesClients.map(c=>[c.name, c.phone, c.email, c.address, c.notes, c.createdAt ? fmtDate(c.createdAt) : ''])));
+  downloadCSV(`paint-sales-clients-${slug}.csv`, toCSV(['Name','Company','Phone','Email','Address','Notes','Added'],
+    ct.salesClients.map(c=>[c.name, c.company, c.phone, c.email, c.address, c.notes, c.createdAt ? fmtDate(c.createdAt) : ''])));
   downloadCSV(`paint-sales-orders-${slug}.csv`, toCSV(['Date','Client','Paint colour','Swatch hex','Finish','Size','Qty','Unit price (R)','Discount %','Discount qty range','Subtotal (R)','Delivery from','Delivery to','Delivery km','Delivery rate (R/km)','Delivery (R)','Total (R)','Status','Notes'],
     ct.salesOrders.slice().sort(byDateDesc).map(o=>[fmtDate(o.date), clientName(o.clientId), o.colorName || 'Untitled colour', o.color, o.finish, o.size, o.qty,
       (Number(o.unitPrice)||0).toFixed(2), Number(o.discountPercent)||0, discountRange(o), orderSubtotal(o).toFixed(2), o.deliveryFrom || '', o.deliveryTo || '', Number(o.deliveryKm)||0, Number(o.deliveryKm) > 0 ? (Number(o.deliveryRate)||0).toFixed(2) : '', deliveryCost(o).toFixed(2), orderTotal(o).toFixed(2), o.status, o.notes])));
@@ -1854,9 +1907,12 @@ async function copyText(text){
 }
 
 function salesClientForm(c){
-  c = c || { name:'', phone:'', email:'', address:'', notes:'' };
+  c = c || { name:'', company:'', phone:'', email:'', address:'', notes:'' };
   return `
-    <label class="field">Name<input name="name" value="${esc(c.name)}" required></label>
+    ${fieldRow(
+      `<label class="field">Name<input name="name" value="${esc(c.name)}" required></label>`,
+      `<label class="field">Company name<input name="company" value="${esc(c.company||'')}" placeholder="Optional"></label>`
+    )}
     ${fieldRow(
       `<label class="field">Phone<input name="phone" type="tel" value="${esc(c.phone||'')}"></label>`,
       `<label class="field">Email<input name="email" type="email" value="${esc(c.email||'')}" autocapitalize="none" autocorrect="off" spellcheck="false"></label>`
@@ -1874,7 +1930,7 @@ function salesOrderForm(ct, o, presetClientId){
   return `
     <label class="field">Client<select name="clientId" required>
       <option value="">Select…</option>
-      ${clients.map(c=>`<option value="${c.id}" ${c.id===o.clientId?'selected':''}>${esc(c.name)}</option>`).join('')}
+      ${clients.map(c=>`<option value="${c.id}" ${c.id===o.clientId?'selected':''}>${esc(c.name)}${c.company ? ' (' + esc(c.company) + ')' : ''}</option>`).join('')}
     </select></label>
     <div style="display:grid; grid-template-columns:1fr 64px; gap:12px;">
       <label class="field">Paint colour name<input name="colorName" value="${esc(o.colorName||'')}" placeholder="e.g. Weathered Sage"></label>
@@ -2128,7 +2184,7 @@ async function handleFormSubmit(e){
       const text = f => String(fd.get(f)||'').trim();
       if(!text('name')){ alert('Add a name.'); btn.disabled = false; return; }
       const clientId = m.clientId || uid('psc');
-      const rec = clean({ id:clientId, name:text('name'), phone:text('phone'), email:text('email'),
+      const rec = clean({ id:clientId, name:text('name'), company:text('company'), phone:text('phone'), email:text('email'),
         address:text('address'), notes:text('notes'), createdAt:(existing && existing.createdAt) || new Date().toISOString() });
       await db.ref().update(withLog({ [salesPath(m.id) + 'clients/' + clientId]: rec },
         [existing ? changeEntry({ key:'salesClient', cid:m.id, id:clientId }, existing, rec) : { key:'salesClient', cid:m.id, id:clientId, action:'added' }]));
@@ -2198,7 +2254,11 @@ async function handleFormSubmit(e){
     else if(m.type === 'sales-send'){
       const d = sendDraft(form);
       if(!d.body.trim()){ alert('The message is empty.'); btn.disabled = false; return; }
-      window.location.href = mailtoLink(d.email, '', d.subject, d.body);
+      if(d.attachPdf){
+        const ct = findContractor(m.id);
+        if(!await sendOrderWithPdf('email', ct, ct && ct.salesOrders.find(x=>x.id===m.orderId), d)){ btn.disabled = false; return; }
+      }
+      else window.location.href = mailtoLink(d.email, '', d.subject, d.body);
     }
   }catch(err){
     alert("Couldn't save: " + (err && err.message ? err.message : err));
@@ -2256,7 +2316,11 @@ async function handleAction(el){
       const d = sendDraft(form);
       if(!d.body.trim()){ alert('The message is empty.'); return; }
       if(d.phone && waNumber(d.phone).length < 8){ alert('That WhatsApp number looks too short. Use the full number, e.g. 082 123 4567 or +27 82 123 4567.'); return; }
-      if(!window.open(waLink(d.phone, d.body), '_blank')){ alert('Your browser blocked the WhatsApp window. Allow pop-ups for this site, or use Copy and paste the message into WhatsApp.'); return; }
+      if(d.attachPdf){
+        const ct = findContractor(state.modal.id);
+        if(!await sendOrderWithPdf('whatsapp', ct, ct && ct.salesOrders.find(x=>x.id===state.modal.orderId), d)) return;
+      }
+      else if(!window.open(waLink(d.phone, d.body), '_blank')){ alert('Your browser blocked the WhatsApp window. Allow pop-ups for this site, or use Copy and paste the message into WhatsApp.'); return; }
       closeModal();
       break;
     }
