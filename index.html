@@ -466,6 +466,11 @@
     body.print-checklist{background:#fff; color:#000;}
     body.print-checklist .cl-card{border:none; padding:0;}
   }
+  /* "New version" banner: sits above everything, including open forms */
+  .update-banner{position:fixed; left:16px; right:16px; margin:0 auto; width:fit-content; bottom:calc(16px + env(safe-area-inset-bottom)); z-index:400;
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:center;
+    background:var(--white-card); color:var(--ink); border:1px solid var(--border); border-radius:12px;
+    padding:10px 12px 10px 16px; box-shadow:0 6px 24px rgba(0,0,0,0.25); font-size:13.5px; font-weight:600;}
 </style>
 </head>
 <body>
@@ -5839,9 +5844,33 @@ wireDateFields();
 bootstrap();
 
 if ('serviceWorker' in navigator) {
+  /* Every release bumps the cache name in sw.js, so a new service worker taking over means a new version is live.
+     An open app checks every 10 minutes and whenever it comes back on screen, then offers a refresh rather than
+     reloading by itself, so nothing half-typed is lost. The very first install also takes over, so it's skipped. */
+  let hasController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hasController) showUpdateBanner(); hasController = true; });
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(err => console.warn('Service worker registration failed', err));
+    navigator.serviceWorker.register('sw.js').then(reg => {
+      const check = () => reg.update().catch(() => {});
+      setInterval(check, 10 * 60 * 1000);
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
+    }).catch(err => console.warn('Service worker registration failed', err));
   });
+}
+function showUpdateBanner(){
+  if (document.getElementById('updateBanner')) return;
+  const bar = document.createElement('div');
+  bar.id = 'updateBanner'; bar.className = 'update-banner'; bar.setAttribute('role', 'status');
+  bar.innerHTML = '<span>New version available.</span>'
+    + '<button type="button" class="btn small primary">Refresh</button>'
+    + '<button type="button" class="btn small ghost">Later</button>';
+  const [refresh, later] = bar.querySelectorAll('button');
+  refresh.addEventListener('click', () => {
+    if (document.querySelector('.modal form') && !confirm('Refreshing closes the form you have open, and anything not saved is lost. Refresh now?')) return;
+    location.reload();
+  });
+  later.addEventListener('click', () => bar.remove());
+  document.body.appendChild(bar);
 }
 </script>
 </body>
