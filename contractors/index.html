@@ -1509,7 +1509,7 @@ async function sendStatement(id, channel){
    everyone at oceanhub/salesPricing: a unit price per container size, and discounts that start at a
    quantity. Sales/contractors can read the price list but not change it; each order is priced from it. */
 const PS_FINISHES = ['Matte','Eggshell','Satin','Limewash','Chalk'];
-const PS_SIZES = ['1 Litre','5 Litre'];
+const PS_SIZES = ['Sample (100ml)','1 Litre','5 Litre','20 Litre'];
 const PS_STATUSES = ['Quoted','Ordered','Fulfilled','Paid'];
 const PS_TIER_ROWS = 5; /* most discount tiers allowed — the database rules check an order against each one by position */
 const PRICING_PATH = 'oceanhub/salesPricing';
@@ -1855,7 +1855,7 @@ function salesClientForm(c){
 }
 
 function salesOrderForm(ct, o, presetClientId){
-  o = o || { clientId: presetClientId || '', colorName:'', color:'#B9812E', finish:PS_FINISHES[0], size:PS_SIZES[0], qty:1,
+  o = o || { clientId: presetClientId || '', colorName:'', color:'#B9812E', finish:PS_FINISHES[0], size:'1 Litre', qty:1,
     status:PS_STATUSES[0], date:localISODate(new Date()), notes:'' };
   const options = (list, current) => list.map(v=>`<option value="${esc(v)}" ${v===current?'selected':''}>${esc(v)}</option>`).join('');
   const clients = ct.salesClients.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||''));
