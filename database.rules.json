@@ -48,6 +48,9 @@
               ".write": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'contractor' && root.child('oceanhub/users/' + auth.uid + '/contractorId').val() === $cid && (!data.exists() || data.child('status').val() !== 'paid') && (!newData.exists() || newData.child('status').val() !== 'paid')"
             }
           },
+          "documents": {
+            ".read": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'contractor' && root.child('oceanhub/users/' + auth.uid + '/contractorId').val() === $cid"
+          },
           "salesSettings": {
             ".read": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'contractor' && root.child('oceanhub/users/' + auth.uid + '/contractorId').val() === $cid"
           },
@@ -60,6 +63,18 @@
               }
             }
           }
+        }
+      },
+      "sharedDocs": {
+        ".read": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin'",
+        ".write": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin'"
+      },
+      "sharedDocFiles": {
+        ".read": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin'",
+        ".write": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin'",
+        "$docId": {
+          ".read": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'contractor' && root.child('oceanhub/contractors/' + root.child('oceanhub/users/' + auth.uid + '/contractorId').val() + '/documents/' + $docId).exists()",
+          ".validate": "newData.child('dataUrl').isString() && newData.child('dataUrl').val().beginsWith('data:application/pdf')"
         }
       },
       "salesOrderSeq": {

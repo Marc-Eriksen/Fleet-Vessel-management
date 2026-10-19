@@ -545,7 +545,7 @@ const MIGRATED_FLAG = 'oceanhub/meta/contractorsMigrated';
 /* ============================= STATE ============================= */
 /* session: null | { role:'admin', uid, email } | { role:'contractor', uid, email, contractorId } */
 let session = null;
-let state = { contractors: [], salesPricing: {}, viewId: null, modal: null,
+let state = { contractors: [], salesPricing: {}, sharedDocs: [], viewId: null, modal: null,
   section: 'payments', salesTab: 'dashboard', salesClientId: null, salesSearch: '', salesFilter: 'All' };
 let listeners = []; /* [{ ref, fn }] */
 let firstLoadDone = false;
@@ -785,7 +785,8 @@ function toContractor(id, raw){
   const sales = raw.sales || {};
   return { id, ...(raw.details || {}), notes: admin.notes || '', loginEmail: admin.loginEmail || '', loginUid: admin.loginUid || '',
     payments: asArray(raw.payments).map(p=>({ ...p, expenses: asArray(p.expenses) })),
-    salesSettings: raw.salesSettings || {}, salesClients: asArray(sales.clients), salesOrders: asArray(sales.orders) };
+    salesSettings: raw.salesSettings || {}, salesClients: asArray(sales.clients), salesOrders: asArray(sales.orders),
+    documents: asArray(raw.documents) };
 }
 function findContractor(id){ return state.contractors.find(c=>c.id===id) || null; }
 function outstandingTotal(ct){ return (ct.payments||[]).filter(p=>p.status!=='paid').reduce((s,p)=>s+(Number(p.amount)||0),0); }
@@ -820,6 +821,7 @@ function detach(){
   listeners = [];
   firstLoadDone = false;
   state.contractors = [];
+  state.sharedDocs = [];
 }
 function listen(path, fn, onFirstError){
   const ref = firebase.database().ref(path);
@@ -845,12 +847,18 @@ function loadData(){
       state.contractors = Object.keys(val).map(id=>toContractor(id, val[id])).sort((a,b)=>(a.name||'').localeCompare(b.name||''));
       afterData();
     }, onErr);
+    /* The document library only loads once the latest database rules are published — until then it's empty. */
+    listen(SHARED_DOCS_PATH, snap=>{
+      state.sharedDocs = asArray(snap.val()).sort((a,b)=>(b.uploadedAt||'').localeCompare(a.uploadedAt||''));
+      if(!firstLoadDone) return;
+      if(!state.modal) render(); else if(state.modal.type === 'documents') renderModal();
+    }, ()=>{ state.sharedDocs = []; });
     migrateLegacyContractors();
   } else {
     const id = session.contractorId, raw = {};
-    const parts = ['details','payments','salesSettings','sales'];
-    /* Paint sales parts are only readable once the latest database rules are published — until then they load as empty. */
-    const optional = { salesSettings:true, sales:true };
+    const parts = ['details','payments','salesSettings','sales','documents'];
+    /* Paint sales and document parts are only readable once the latest database rules are published — until then they load as empty. */
+    const optional = { salesSettings:true, sales:true, documents:true };
     const arrived = new Set();
     const update = (part, val)=>{
       raw[part] = val;
@@ -1013,6 +1021,7 @@ function renderContractorList(){
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
         <button class="btn primary" data-action="add-contractor">+ Add sales/contractor</button>
         <button type="button" class="btn ghost" data-action="price-list">Paint price list</button>
+        <button type="button" class="btn ghost" data-action="documents">Documents${state.sharedDocs.length ? ` (${state.sharedDocs.length})` : ''}</button>
         <button type="button" class="btn ghost" data-privacy>Privacy</button>
         <button class="btn ghost" data-action="logout">Sign out</button>
       </div>
@@ -1082,7 +1091,10 @@ function renderContractorPage(id){
   const paidTotal = payments.filter(p=>p.status==='paid').reduce((s,p)=>s+(Number(p.amount)||0),0);
   const total = outstandingTotal(ct);
   const sales = salesEnabled(ct);
-  const section = sales ? state.section : 'payments';
+  /* Documents shows for the admin always, and for a sales/contractor once something is shared with them. */
+  const sections = [['payments','Payments'], ...(sales ? [['sales','Paint sales']] : []),
+    ...(admin || ct.documents.length ? [['documents', `Documents${ct.documents.length ? ` (${ct.documents.length})` : ''}`]] : [])];
+  const section = sections.some(s=>s[0]===state.section) ? state.section : 'payments';
   const head = `
     <div class="toolbar">
       <div>
@@ -1095,11 +1107,11 @@ function renderContractorPage(id){
         ${admin ? '' : '<button type="button" class="btn ghost" data-privacy>Privacy</button><button class="btn ghost" data-action="logout">Sign out</button>'}
       </div>
     </div>
-    ${sales ? `<div class="subtabs">
-      <button type="button" class="subtab ${section==='payments'?'active':''}" data-action="section" data-section="payments">Payments</button>
-      <button type="button" class="subtab ${section==='sales'?'active':''}" data-action="section" data-section="sales">Paint sales</button>
+    ${sections.length > 1 ? `<div class="subtabs">
+      ${sections.map(([k, label])=>`<button type="button" class="subtab ${section===k?'active':''}" data-action="section" data-section="${k}">${label}</button>`).join('')}
     </div>` : ''}`;
   if(section === 'sales') return head + renderSales(ct);
+  if(section === 'documents') return head + renderContractorDocs(ct);
   return head + `
     <div class="cost-total-bar">
       <div class="ctb-item"><div class="label">Outstanding</div><div class="value">${fmtCurrency(total)}</div></div>
@@ -2095,6 +2107,126 @@ function salesExportForm(ct){
     <label class="field">Recipient email<input name="to" type="email" placeholder="someone@example.com" autocapitalize="none" autocorrect="off" spellcheck="false"></label>`;
 }
 
+/* ============================= DOCUMENTS ============================= */
+/* The admin uploads PDFs (method statements, data sheets) to a library and picks which
+   sales/contractors get each one. Stored as:
+     oceanhub/sharedDocs/<docId>        { id, name, fileName, size, uploadedAt, sharedWith:{ <cid>:true } }  admin only
+     oceanhub/sharedDocFiles/<docId>    { dataUrl }  the file, kept apart so lists don't download it
+     oceanhub/contractors/<cid>/documents/<docId>  { id, name, fileName, size, sharedAt }  what that sales/contractor sees
+   The database rules only let a sales/contractor open a file listed under their own documents. */
+const SHARED_DOCS_PATH = 'oceanhub/sharedDocs';
+const SHARED_DOC_FILES_PATH = 'oceanhub/sharedDocFiles/';
+const DOC_MAX_BYTES = 7 * 1024 * 1024; /* stays under the database's 10 MB limit once encoded */
+function fmtSize(n){ n = Number(n)||0; return n >= 1048576 ? (n/1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n/1024)) + ' KB'; }
+function findSharedDoc(docId){ return state.sharedDocs.find(d=>d.id===docId) || null; }
+/* sales/contractors that still exist and have this document */
+function docRecipients(doc){ return state.contractors.filter(ct=>ct.documents.some(d=>d.id===doc.id)); }
+function docEntry(doc, sharedAt){ return { id:doc.id, name:doc.name, fileName:doc.fileName, size:doc.size, sharedAt }; }
+
+function documentsForm(){
+  const docs = state.sharedDocs, total = state.contractors.length;
+  return `
+    <p class="section-sub" style="margin-top:-6px;">Upload a PDF, such as a method statement or data sheet, then choose which sales/contractors get it. They find it under Documents when they sign in, and can open it or share it with their clients.</p>
+    <div class="detail-section" style="margin-top:0;"><h4>Upload a PDF</h4></div>
+    <label class="field">PDF file<input name="file" type="file" accept="application/pdf,.pdf"></label>
+    <label class="field">Title<input name="name" placeholder="Taken from the file name if left blank"></label>
+    <label style="display:flex; align-items:center; gap:9px; font-size:13px; font-weight:600; color:var(--ink); margin:4px 0 8px;">
+      <input type="checkbox" name="shareAll" value="1" ${total ? 'checked' : 'disabled'} style="width:auto;">
+      Share with all ${total} sales/contractor${total===1?'':'s'} straight away
+    </label>
+    <div class="detail-section"><h4>Library</h4></div>
+    ${docs.length === 0 ? '<div class="empty-note">No documents yet.</div>' : docs.map(d=>{
+      const n = docRecipients(d).length;
+      return `<div class="mini-row" style="align-items:flex-start; gap:8px 10px; padding:8px 0; flex-wrap:wrap;">
+        <span style="flex:1 1 200px; min-width:0;"><b style="color:var(--ink);">${esc(d.name)}</b><br>
+          <span style="font-size:11.5px;">${d.uploadedAt ? fmtDate(d.uploadedAt.slice(0,10)) + ' · ' : ''}${fmtSize(d.size)} · ${n ? `Shared with ${n} of ${total}` : 'Not shared yet'}</span></span>
+        <span style="display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end;">
+          <button type="button" class="btn small ghost" data-action="doc-open" data-doc="${d.id}">Open</button>
+          <button type="button" class="btn small primary" data-action="doc-share" data-doc="${d.id}">Send to…</button>
+          <button type="button" class="btn small danger" data-action="doc-delete" data-doc="${d.id}">Delete</button>
+        </span>
+      </div>`;
+    }).join('')}`;
+}
+
+function docShareForm(doc){
+  const has = new Set(docRecipients(doc).map(c=>c.id));
+  return `
+    <p class="section-sub" style="margin-top:-6px;"><b>${esc(doc.name)}</b> — tick who should have it. Unticking someone removes it from their Documents.</p>
+    <div style="display:flex; gap:8px; margin-bottom:8px;">
+      <button type="button" class="btn small ghost" data-action="doc-tick" data-on="1">Tick all</button>
+      <button type="button" class="btn small ghost" data-action="doc-tick" data-on="">Clear</button>
+    </div>
+    ${state.contractors.length === 0 ? '<div class="empty-note">No sales/contractors yet.</div>' : state.contractors.map(ct=>`
+      <label style="display:flex; align-items:center; gap:9px; font-size:13px; color:var(--ink); padding:6px 0; border-bottom:1px solid var(--paper-line);">
+        <input type="checkbox" name="cid" value="${ct.id}" ${has.has(ct.id) ? 'checked' : ''} style="width:auto;">
+        <span><b>${esc(ct.name || 'Unnamed')}</b>${ct.company ? ' · ' + esc(ct.company) : ''}${ct.loginEmail ? '' : ' <span style="color:var(--ink-muted); font-size:11.5px;">(no login yet — they see it once they have one)</span>'}</span>
+      </label>`).join('')}`;
+}
+
+/* a sales/contractor's Documents section; the admin sees the same list on their record */
+function renderContractorDocs(ct){
+  const docs = ct.documents.slice().sort((a,b)=>(b.sharedAt||'').localeCompare(a.sharedAt||''));
+  const canShare = !!(navigator.share && navigator.canShare);
+  return `
+    <div class="card-box">
+      <div class="modal-header-row" style="margin-bottom:6px;"><h4 style="margin:0; font-size:11.5px; font-weight:800; text-transform:uppercase; letter-spacing:0.5px; color:var(--ink-muted);">Documents from OCEANHUB</h4>
+        ${isAdmin() ? '<button type="button" class="btn small primary" data-action="documents">Manage documents</button>' : ''}</div>
+      ${docs.length === 0 ? `<div class="empty-note">${isAdmin() ? `Nothing shared with ${esc(ct.name)} yet. Use Manage documents to send one.` : 'Nothing shared with you yet.'}</div>`
+        : docs.map(d=>`<div class="mini-row" style="align-items:center; gap:8px 10px; padding:8px 0; flex-wrap:wrap;">
+          <span style="flex:1 1 200px; min-width:0;"><b style="color:var(--ink);">${esc(d.name)}</b><br><span style="font-size:11.5px;">PDF · ${fmtSize(d.size)}${d.sharedAt ? ' · shared ' + fmtDate(d.sharedAt.slice(0,10)) : ''}</span></span>
+          <span style="display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end;">
+            <button type="button" class="btn small" data-action="doc-open" data-doc="${d.id}">Open</button>
+            <button type="button" class="btn small ghost" data-action="doc-download" data-doc="${d.id}">Download</button>
+            ${canShare ? `<button type="button" class="btn small ghost" data-action="doc-send" data-doc="${d.id}">Share</button>` : ''}
+          </span>
+        </div>`).join('')}
+    </div>`;
+}
+
+async function loadDocFile(docId){
+  const rec = (await firebase.database().ref(SHARED_DOC_FILES_PATH + docId).once('value')).val();
+  if(!rec || !rec.dataUrl) throw new Error('That document has no file.');
+  return (await fetch(rec.dataUrl)).blob();
+}
+function docMeta(docId){
+  for(const ct of state.contractors){ const d = ct.documents.find(x=>x.id===docId); if(d) return d; }
+  return findSharedDoc(docId);
+}
+/* open: a new tab in the browser; the installed app downloads instead, since it has no tabs */
+async function openDoc(docId, mode){
+  const meta = docMeta(docId) || { name:'Document', fileName:'document.pdf' };
+  const fileName = meta.fileName || (String(meta.name).replace(/[^a-z0-9]+/gi,'-') + '.pdf');
+  /* open the tab now, while the click still counts, then point it at the file */
+  let tab = mode === 'open' && !isStandalone() ? window.open('', '_blank') : null;
+  let blob;
+  try{ blob = await loadDocFile(docId); }
+  catch(e){ if(tab) tab.close(); alert("Couldn't load that document — check your connection and try again."); return; }
+  blob = new Blob([blob], { type:'application/pdf' });
+  if(mode === 'share'){
+    const file = new File([blob], fileName, { type:'application/pdf' });
+    if(navigator.canShare && navigator.canShare({ files:[file] })){
+      try{ await navigator.share({ files:[file], title:meta.name }); }catch(e){ /* cancelled */ }
+      return;
+    }
+  }
+  const url = URL.createObjectURL(blob);
+  setTimeout(()=>URL.revokeObjectURL(url), 60000);
+  if(tab && !tab.closed){ tab.location = url; return; }
+  const a = document.createElement('a');
+  a.href = url; a.download = fileName;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+function readAsDataUrl(file){
+  return new Promise((resolve, reject)=>{
+    const r = new FileReader();
+    r.onload = ()=>resolve(r.result);
+    r.onerror = ()=>reject(r.error || new Error('Could not read the file'));
+    r.readAsDataURL(file);
+  });
+}
+
 /* ============================= MODAL ============================= */
 function renderModal(){
   const root = document.getElementById('modalRoot');
@@ -2113,6 +2245,12 @@ function renderModal(){
     title = 'Create sales/contractor login'; body = loginForm(ct); submit = 'Create login';
   }
   else if(m.type === 'price-list'){ title = 'Paint price list'; body = priceListForm(); submit = 'Save price list'; }
+  else if(m.type === 'documents'){ title = 'Documents'; body = documentsForm(); submit = 'Upload'; }
+  else if(m.type === 'doc-share'){
+    const doc = findSharedDoc(m.docId);
+    if(!doc){ state.modal = { type:'documents' }; renderModal(); return; }
+    title = 'Send document'; body = docShareForm(doc); submit = 'Save';
+  }
   else if(m.type.startsWith('sales-')){
     if(!ct){ state.modal = null; root.innerHTML = ''; return; }
     if(m.type === 'sales-client'){ const c = m.clientId ? salesClient(ct, m.clientId) : null; title = c ? 'Edit client' : 'Add client'; body = salesClientForm(c); submit = 'Save client'; }
@@ -2270,6 +2408,41 @@ async function handleFormSubmit(e){
       await db.ref().update(withLog({ [PRICING_PATH]: rec },
         [changeEntry({ key:'salesPricing' }, { unitPrices:before.unitPrices, discounts:before.discounts, deliveryRatePerKm:before.deliveryRatePerKm }, rec)]));
     }
+    else if(m.type === 'documents'){
+      const file = form.file.files[0];
+      if(!file){ alert('Choose a PDF to upload.'); btn.disabled = false; return; }
+      if(!(file.type === 'application/pdf' || /\.pdf$/i.test(file.name))){ alert('Only PDF files can be uploaded.'); btn.disabled = false; return; }
+      if(file.size > DOC_MAX_BYTES){ alert(`That PDF is ${fmtSize(file.size)}. The most is ${fmtSize(DOC_MAX_BYTES)} — try a compressed copy.`); btn.disabled = false; return; }
+      btn.textContent = 'Uploading…';
+      const dataUrl = String(await readAsDataUrl(file)).replace(/^data:[^;,]*/, 'data:application/pdf');
+      const docId = uid('doc'), now = new Date().toISOString();
+      const doc = { id:docId, name:String(fd.get('name')||'').trim() || file.name.replace(/\.pdf$/i, ''), fileName:file.name, size:file.size, uploadedAt:now };
+      const updates = { [SHARED_DOC_FILES_PATH + docId]: { dataUrl } };
+      const to = fd.get('shareAll') === '1' ? state.contractors : [];
+      to.forEach(ct=>{ updates[ROOT + ct.id + '/documents/' + docId] = docEntry(doc, now); });
+      updates[SHARED_DOCS_PATH + '/' + docId] = doc;
+      try{ await db.ref().update(withLog(updates, [{ key:'sharedDoc', id:docId, action:'added' }, to.length ? { key:'sharedDoc', id:docId, action:'shared', count:to.length } : null])); }
+      catch(err){ btn.textContent = 'Upload'; throw err; }
+      state.modal = { type:'documents' }; renderModal(); /* stay in the library */
+      return;
+    }
+    else if(m.type === 'doc-share'){
+      const doc = findSharedDoc(m.docId);
+      if(!doc){ btn.disabled = false; return; }
+      const want = new Set(fd.getAll('cid').map(String)), now = new Date().toISOString();
+      const updates = {};
+      let added = 0, removed = 0;
+      state.contractors.forEach(ct=>{
+        const has = ct.documents.some(d=>d.id===doc.id);
+        if(want.has(ct.id) && !has){ updates[ROOT + ct.id + '/documents/' + doc.id] = docEntry(doc, now); added++; }
+        if(!want.has(ct.id) && has){ updates[ROOT + ct.id + '/documents/' + doc.id] = null; removed++; }
+      });
+      if(added || removed) await db.ref().update(withLog(updates, [
+        added ? { key:'sharedDoc', id:doc.id, action:'shared', count:added } : null,
+        removed ? { key:'sharedDoc', id:doc.id, action:'unshared', count:removed } : null]));
+      state.modal = { type:'documents' }; renderModal();
+      return;
+    }
     else if(m.type === 'sales-export'){
       const { subject, body } = exportEmailContent(findContractor(m.id));
       window.location.href = mailtoLink(String(fd.get('to')||'').trim(), '', subject, body);
@@ -2310,6 +2483,24 @@ async function handleAction(el){
     case 'sales-back-clients': state.salesClientId = null; render(); break;
     case 'sales-settings': state.modal = { type:'sales-settings', id }; renderModal(); break;
     case 'price-list': state.modal = { type:'price-list' }; renderModal(); break;
+    case 'documents': state.modal = { type:'documents' }; renderModal(); break;
+    case 'doc-share': state.modal = { type:'doc-share', docId:el.dataset.doc }; renderModal(); break;
+    case 'doc-tick': document.querySelectorAll('#modalForm input[name="cid"]').forEach(b=>{ b.checked = !!el.dataset.on; }); break;
+    case 'doc-open': openDoc(el.dataset.doc, 'open'); break;
+    case 'doc-download': openDoc(el.dataset.doc, 'download'); break;
+    case 'doc-send': openDoc(el.dataset.doc, 'share'); break;
+    case 'doc-delete': {
+      const doc = findSharedDoc(el.dataset.doc);
+      if(!doc) return;
+      const who = docRecipients(doc);
+      if(!confirm(`Delete “${doc.name}”?${who.length ? ` It's removed from ${who.length} sales/contractor${who.length===1?'':'s'} too.` : ''} This can't be undone.`)) return;
+      const updates = { [SHARED_DOCS_PATH + '/' + doc.id]: null, [SHARED_DOC_FILES_PATH + doc.id]: null };
+      who.forEach(ct=>{ updates[ROOT + ct.id + '/documents/' + doc.id] = null; });
+      try{ await db.ref().update(withLog(updates, [{ key:'sharedDoc', id:doc.id, action:'deleted' }])); }
+      catch(err){ alert("Couldn't delete: " + err.message); }
+      if(state.modal && state.modal.type === 'documents') renderModal();
+      break;
+    }
     case 'sales-export': state.modal = { type:'sales-export', id }; renderModal(); break;
     case 'sales-download': if(ct) downloadSalesCSVs(ct); break;
     case 'sales-add-client': state.modal = { type:'sales-client', id }; renderModal(); break;
