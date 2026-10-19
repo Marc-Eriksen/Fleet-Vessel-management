@@ -610,7 +610,14 @@ function mailtoLink(to, cc, subject, body){
   params.push('body=' + encodeURIComponent(body));
   return `mailto:${encodeURIComponent(to||'')}?${params.join('&')}`;
 }
-function waLink(phone, text){ return `https://wa.me/${(phone||'').replace(/[^\d]/g,'')}?text=${encodeURIComponent(text)}`; }
+/* wa.me needs the number in international form without "+": 082 123 4567 → 27821234567, 0044… → 44… */
+function waNumber(phone){
+  let d = String(phone||'').replace(/[^\d]/g,'');
+  if(d.startsWith('00')) d = d.slice(2);
+  else if(d.length === 10 && d.startsWith('0')) d = '27' + d.slice(1);
+  return d;
+}
+function waLink(phone, text){ return `https://wa.me/${waNumber(phone)}?text=${encodeURIComponent(text)}`; }
 function resizeImageFile(file, maxDim, quality){
   return new Promise((resolve, reject)=>{
     const reader = new FileReader();
@@ -1686,8 +1693,7 @@ function salesOrderItem(ct, o, showClient){
           <span class="stamp ps-${status.toLowerCase()}">${status}</span>
           ${discount > 0 ? `<span class="stamp ps-fulfilled" title="Quantity discount from the price list">−${esc(discountLabel(o))}</span><span style="font-size:12px; color:var(--ink-soft); text-decoration:line-through;">${fmtRand(orderSubtotal(o))}</span>` : ''}
           <b>${fmtRand(orderTotal(o))}</b>
-          ${client && client.email ? `<a class="btn small ghost" href="${orderMailto(ct, o, client)}" title="Email this order to ${esc(client.email)}">Email</a>` : ''}
-          <button type="button" class="btn small ghost" data-action="sales-copy-order" data-id="${ct.id}" data-oid="${o.id}" title="Copy this order as email text">Copy</button>
+          <button type="button" class="btn small ghost" data-action="sales-send-order" data-id="${ct.id}" data-oid="${o.id}" title="Email or WhatsApp this order to the client">Send</button>
           <button type="button" class="btn small ghost" data-action="sales-edit-order" data-id="${ct.id}" data-oid="${o.id}">Edit</button>
           <button type="button" class="btn small danger" data-action="sales-delete-order" data-id="${ct.id}" data-oid="${o.id}">Delete</button>
         </div>
@@ -1754,10 +1760,27 @@ function orderEmailContent(ct, o, client){
   ].filter(l=>l!==null);
   return { subject, body: lines.join('\n') };
 }
-function orderMailto(ct, o, client){
-  const { subject, body } = orderEmailContent(ct, o, client);
-  return esc(mailtoLink(client.email, '', subject, body));
+/* Send an order: the message starts from orderEmailContent and can be edited before it goes out.
+   The draft lives on state.modal so a live data update redrawing the window keeps what was typed. */
+function salesSendForm(ct, m){
+  const o = ct.salesOrders.find(x=>x.id===m.orderId);
+  const client = o ? salesClient(ct, o.clientId) : null;
+  if(!m.draft){
+    const { subject, body } = orderEmailContent(ct, o, client);
+    m.draft = { email:(client && client.email) || '', phone:(client && client.phone) || '', subject, body };
+  }
+  const d = m.draft;
+  return `
+    <p class="section-sub" style="margin-top:-6px;">Check or change the message, then send it from your email or WhatsApp. Nothing here changes the saved order.</p>
+    ${fieldRow(
+      `<label class="field">Email to<input name="email" type="email" value="${esc(d.email)}" placeholder="client@example.com" autocapitalize="none" autocorrect="off" spellcheck="false"></label>`,
+      `<label class="field">WhatsApp number<input name="phone" type="tel" value="${esc(d.phone)}" placeholder="e.g. 082 123 4567"></label>`
+    )}
+    <label class="field">Email subject<input name="subject" value="${esc(d.subject)}"></label>
+    <label class="field">Message<textarea name="body" rows="14">${esc(d.body)}</textarea></label>
+    <p class="fin-hint">Leave the WhatsApp number empty to pick the chat in WhatsApp. A number starting with 0 is taken as South African.</p>`;
 }
+function sendDraft(form){ const f = n => String(form[n].value||'').trim(); return { email:f('email'), phone:f('phone'), subject:f('subject'), body:String(form.body.value||'') }; }
 
 function csvCell(v){ const s = v==null ? '' : String(v); return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }
 function toCSV(headers, rows){ return [headers, ...rows].map(r=>r.map(csvCell).join(',')).join('\r\n'); }
@@ -1910,7 +1933,7 @@ function renderModal(){
   const m = state.modal;
   if(!m){ root.innerHTML = ''; return; }
   const ct = m.id ? findContractor(m.id) : null;
-  let title = '', body = '', submit = 'Save';
+  let title = '', body = '', submit = 'Save', extra = '';
   if(m.type === 'details'){ title = ct ? 'Edit details' : 'Add sales/contractor'; body = detailsForm(ct); }
   else if(m.type === 'payment'){
     if(!ct){ state.modal = null; root.innerHTML = ''; return; }
@@ -1928,6 +1951,11 @@ function renderModal(){
     else if(m.type === 'sales-order'){ const o = m.orderId ? ct.salesOrders.find(x=>x.id===m.orderId) : null; title = o ? 'Edit order' : 'New order'; body = salesOrderForm(ct, o, m.presetClientId); submit = 'Save order'; }
     else if(m.type === 'sales-settings'){ title = 'Paint sales settings'; body = salesSettingsForm(ct); }
     else if(m.type === 'sales-export'){ title = 'Export & email paint sales'; body = salesExportForm(ct); submit = 'Open email draft'; }
+    else if(m.type === 'sales-send'){
+      if(!ct.salesOrders.some(x=>x.id===m.orderId)){ state.modal = null; root.innerHTML = ''; return; }
+      title = 'Send order'; body = salesSendForm(ct, m); submit = 'Send by email';
+      extra = `<button type="button" class="btn ghost" data-action="sales-send-copy">Copy</button><button type="button" class="btn" data-action="sales-send-whatsapp">Send by WhatsApp</button>`;
+    }
   }
   root.innerHTML = `
     <div class="modal-overlay" data-overlay>
@@ -1935,7 +1963,7 @@ function renderModal(){
         <form id="modalForm">
           <h3>${title}</h3>
           ${body}
-          <div class="modal-actions"><button type="button" class="btn ghost" data-action="close-modal">Cancel</button><button type="submit" class="btn primary">${submit}</button></div>
+          <div class="modal-actions"><button type="button" class="btn ghost" data-action="close-modal">Cancel</button>${extra}<button type="submit" class="btn primary">${submit}</button></div>
         </form>
       </div>
     </div>`;
@@ -1943,6 +1971,7 @@ function renderModal(){
   form.addEventListener('submit', handleFormSubmit);
   if(m.type === 'payment') wirePaymentForm(form);
   if(m.type === 'sales-order') wireSalesOrderForm(form, m.orderId && ct ? ct.salesOrders.find(x=>x.id===m.orderId) : null);
+  if(m.type === 'sales-send') form.addEventListener('input', ()=>{ m.draft = sendDraft(form); });
 }
 function closeModal(){ state.modal = null; render(); }
 
@@ -2064,6 +2093,11 @@ async function handleFormSubmit(e){
       const { subject, body } = exportEmailContent(findContractor(m.id));
       window.location.href = mailtoLink(String(fd.get('to')||'').trim(), '', subject, body);
     }
+    else if(m.type === 'sales-send'){
+      const d = sendDraft(form);
+      if(!d.body.trim()){ alert('The message is empty.'); btn.disabled = false; return; }
+      window.location.href = mailtoLink(d.email, '', d.subject, d.body);
+    }
   }catch(err){
     alert("Couldn't save: " + (err && err.message ? err.message : err));
     btn.disabled = false;
@@ -2113,11 +2147,21 @@ async function handleAction(el){
       try{ await db.ref().update(withLog({ [salesPath(id) + 'orders/' + el.dataset.oid]: null }, [{ key:'salesOrder', cid:id, id:el.dataset.oid, action:'deleted' }])); }
       catch(err){ alert("Couldn't delete: " + err.message); }
       break;
-    case 'sales-copy-order': {
-      const o = ct && ct.salesOrders.find(x=>x.id===el.dataset.oid);
-      if(!o) return;
-      const { subject, body } = orderEmailContent(ct, o, salesClient(ct, o.clientId));
-      const ok = await copyText(`Subject: ${subject}\n\n${body}`);
+    case 'sales-send-order': state.modal = { type:'sales-send', id, orderId:el.dataset.oid }; renderModal(); break;
+    case 'sales-send-whatsapp': {
+      const form = document.getElementById('modalForm');
+      if(!form) return;
+      const d = sendDraft(form);
+      if(!d.body.trim()){ alert('The message is empty.'); return; }
+      if(d.phone && waNumber(d.phone).length < 8){ alert('That WhatsApp number looks too short. Use the full number, e.g. 082 123 4567 or +27 82 123 4567.'); return; }
+      if(!window.open(waLink(d.phone, d.body), '_blank')){ alert('Your browser blocked the WhatsApp window. Allow pop-ups for this site, or use Copy and paste the message into WhatsApp.'); return; }
+      closeModal();
+      break;
+    }
+    case 'sales-send-copy': {
+      const form = document.getElementById('modalForm');
+      if(!form) return;
+      const ok = await copyText(form.body.value);
       el.textContent = ok ? 'Copied' : 'Copy failed';
       setTimeout(()=>{ el.textContent = 'Copy'; }, 1500);
       break;
