@@ -208,14 +208,6 @@
   label.field{display:flex; flex-direction:column; gap:4px; font-size:12.5px; font-weight:600; color:var(--ink-soft); margin-bottom:12px;}
   .field-row{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
 
-  /* ===== Timeline (dashboard) ===== */
-  .timeline{background:var(--white-card); border:1px solid var(--border); border-radius:12px; padding:4px 0;}
-  .tl-item{display:flex; align-items:center; gap:14px; padding:11px 16px; border-bottom:1px solid var(--paper-line);}
-  .tl-item:last-child{border-bottom:none;}
-  .tl-date{font-size:12px; font-weight:600; color:var(--navy); width:86px; flex-shrink:0; font-variant-numeric:tabular-nums;}
-  .tl-body{flex:1; min-width:0;}
-  .tl-title{font-size:13.5px; font-weight:700; color:var(--ink);}
-  .tl-sub{font-size:12px; color:var(--ink-soft); margin-top:1px;}
   .empty-note{padding:22px; text-align:center; color:var(--ink-muted); font-size:13px;}
 
   /* ===== Crew ===== */
@@ -460,8 +452,6 @@
     thead th, tbody td{padding:9px 10px;}
     .table-wrap{-webkit-overflow-scrolling:touch;}
 
-    .tl-item{padding:11px 14px; gap:10px;}
-    .tl-date{width:66px; font-size:11px;}
   }
   /* Printing a checklist: only the checklist card goes to paper. */
   @media print{
@@ -1695,24 +1685,10 @@ function renderDashboard(){
   const qualsRedAlert = activeCrew().flatMap(c=>c.quals).filter(q=>qualStatus(q.expiry)==='red-alert').length;
   const qualsAdvisory = activeCrew().flatMap(c=>c.quals).filter(q=>qualStatus(q.expiry)==='advisory').length;
 
-  const events = [];
-  allTasks.filter(m=>m.status!=='completed').forEach(m=>{
-    const vesselLabel = m._source==='tender' ? `${vesselName(m.vesselId)} — ${m._tenderName} (tender)` : vesselName(m.vesselId);
-    events.push({ date:m.dueDate, kind:'Maintenance', title:m.title, sub:`${vesselLabel} · ${m.category==='scheduled'?'Scheduled':m.category==='daily'?'Daily':'Unscheduled'}`, status:maintStatus(m) });
-  });
-  activeCrew().forEach(c=>c.quals.forEach(q=>{
-    events.push({ date:q.expiry, kind:'Crew doc', title:q.name, sub:`${c.name} (${c.role})`, status:qualStatus(q.expiry) });
-  }));
   const clOutstanding = checklistAssignments().filter(a=>!a.run || a.run.status!=='completed').length;
   const lowStock = stockRows().filter(r=>r.low).length;
   const svcAlerts = serviceAlerts();
   const docAlerts = docExpiryAlerts();
-  docAlerts.forEach(a=> events.push({ date:a.doc.expiry, kind:'Document', title:a.doc.name,
-    sub: a.vessel.name + (a.tender ? ` — ${a.tender.name || 'tender'} (tender)` : ''), status:a.status, label: a.status==='expired' ? 'Expired' : 'Expiring' }));
-  svcAlerts.forEach(a=> events.push({ date:a.d.dateDue && a.d.status!=='critical' ? a.d.dateDue : localISODate(new Date()), kind:'Service',
-    title:`${a.task.name}`, sub:`${a.vessel.name} — ${svcCap(a.meter.label)} · ${a.d.reason}`, status:SVC_STAMP[a.d.status], label:SVC_LABEL[a.d.status] }));
-  events.sort((a,b)=> new Date(a.date) - new Date(b.date));
-  const upcoming = events.slice(0,10);
 
   return `
     <div class="toolbar" style="margin-bottom:4px;">
@@ -1736,20 +1712,6 @@ function renderDashboard(){
       <div class="kpi ${lowStock>0?'alert':''}"><div class="label">Low stock items</div><div class="value">${lowStock}</div></div>
       <div class="kpi ${svcAlerts.some(a=>a.d.status==='critical')?'alert':svcAlerts.length?'warn':''}"><div class="label">Manufacturer services due</div><div class="value">${svcAlerts.length}</div></div>
       <div class="kpi ${docAlerts.length?'alert':''}"><div class="label">Vessel docs expiring (≤${DOC_EXPIRY_WARN_DAYS} days)</div><div class="value">${docAlerts.length}</div></div>
-    </div>
-    <h2 class="section-title" style="font-size:18px;">Upcoming events</h2>
-    <p class="section-sub">Merged view of maintenance due dates, engine and equipment services, vessel document and certificate expiries.</p>
-    <div class="timeline">
-      ${upcoming.length===0 ? '<div class="empty-note">Nothing on the horizon.</div>' : upcoming.map(e=>`
-        <div class="tl-item">
-          <div class="tl-date">${fmtDate(e.date)}</div>
-          <div class="tl-body">
-            <div class="tl-title">${esc(e.title)}</div>
-            <div class="tl-sub">${e.kind} · ${esc(e.sub)}</div>
-          </div>
-          <span class="stamp ${e.status}">${e.label || stampLabel(e.status)}</span>
-        </div>
-      `).join('')}
     </div>
   `;
 }
