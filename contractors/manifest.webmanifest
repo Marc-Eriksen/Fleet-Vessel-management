@@ -1,7 +1,7 @@
 {
-  "name": "OCEANHUB — Contractors",
-  "short_name": "Contractors",
-  "description": "Contractor details, payments and statements for OCEANHUB.",
+  "name": "OCEANHUB — Sales Contractors",
+  "short_name": "Sales Contractors",
+  "description": "Sales contractor details, payments, statements and paint sales for OCEANHUB.",
   "id": "/Fleet-Vessel-management/contractors/",
   "start_url": "./",
   "scope": "./",

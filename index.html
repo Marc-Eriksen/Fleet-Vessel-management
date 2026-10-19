@@ -613,7 +613,7 @@ function seedData(){
    Every account needs a record at oceanhub/users/<uid> ({ role:'admin' } or
    { role:'owner', companyId }) to get in. Admin creates owner logins from the
    Companies tab; an account without a record has no access to any data.
-   Contractors are managed in the separate contractors app (contractors/index.html). */
+   Sales contractors are managed in the separate sales contractors app (contractors/index.html). */
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyA5XbMVrsxvjAPNLJRycum5U5htjw9gSy0",
   authDomain: "ocean-hub-vessel-managem-cdca8.firebaseapp.com",
@@ -668,7 +668,7 @@ async function handleAuthChange(user){
   }catch(e){ rec = null; }
   if(!rec || (rec.role !== 'admin' && rec.role !== 'owner')){
     authNotice = rec && rec.role === 'contractor'
-      ? 'Contractor accounts sign in to the contractors app (this address with /contractors/ on the end).'
+      ? 'Sales contractor accounts sign in to the sales contractors app (this address with /contractors/ on the end).'
       : 'This account has not been given access yet — ask the OCEANHUB admin.';
     firebase.auth().signOut();
     return;
@@ -4461,10 +4461,10 @@ async function loadLog(older){
 const LOG_KINDS = {
   vessels:'Vessel', maintenance:'Maintenance task', crew:'Crew member', checklists:'Checklist', checklistRuns:'Checklist entry',
   hourReadings:'Hour reading', serviceLog:'Service record', financeItems:'Cost', companies:'Company',
-  contractor:'Contractor', details:'Contractor details', payment:'Contractor payment', login:'Contractor login',
-  salesClient:'Paint customer', salesOrder:'Paint order', salesSettings:'Paint sales settings', retention:'Old contractor records'
+  contractor:'Sales contractor', details:'Sales contractor details', payment:'Sales contractor payment', login:'Sales contractor login',
+  salesClient:'Paint customer', salesOrder:'Paint order', salesSettings:'Paint sales settings', salesPricing:'Paint price list', retention:'Old sales contractor records'
 };
-const LOG_PLURALS = { retention:'old contractor records', financeItems:'costs', crew:'crew members', maintenance:'maintenance tasks', checklistRuns:'checklist entries', hourReadings:'hour readings', serviceLog:'service records' };
+const LOG_PLURALS = { retention:'old sales contractor records', financeItems:'costs', crew:'crew members', maintenance:'maintenance tasks', checklistRuns:'checklist entries', hourReadings:'hour readings', serviceLog:'service records' };
 function fieldLabel(k){ return k === 'vesselId' ? 'vessel' : k.replace(/Id$/, '').replace(/([A-Z])/g, ' $1').toLowerCase(); }
 function fmtDateTime(ms){
   const d = new Date(ms);
@@ -4504,7 +4504,7 @@ function renderChangeLog(){
   const shown = logView.entries.filter(e =>
     (logView.who === 'all' || (e.email || e.uid) === logView.who) &&
     (logView.kind === 'all' || (logView.kind === 'signins' ? e.action === 'signed in' : e.action !== 'signed in')));
-  const roleLabel = r => r === 'admin' ? 'admin' : r === 'owner' ? 'owner' : r === 'contractor' ? 'contractor' : '';
+  const roleLabel = r => r === 'admin' ? 'admin' : r === 'owner' ? 'owner' : r === 'contractor' ? 'sales contractor' : '';
   return `
     <div class="toolbar">
       <div>
@@ -4528,7 +4528,7 @@ function renderChangeLog(){
           : shown.length === 0 ? `<tr><td colspan="4"><div class="empty-note">Nothing logged yet.</div></td></tr>`
           : shown.map(e=>`<tr>
             <td style="white-space:nowrap;">${fmtDateTime(e.at)}</td>
-            <td>${esc(e.email || e.uid || '')}<div style="color:var(--ink-soft); font-size:11.5px;">${[roleLabel(e.role), e.app === 'contractors' ? 'contractors app' : '', e.auto ? 'automatic' : ''].filter(Boolean).join(' · ')}</div></td>
+            <td>${esc(e.email || e.uid || '')}<div style="color:var(--ink-soft); font-size:11.5px;">${[roleLabel(e.role), e.app === 'contractors' ? 'sales contractors app' : '', e.auto ? 'automatic' : ''].filter(Boolean).join(' · ')}</div></td>
             <td>${(subj => esc(subj.label) + (subj.vessel ? ` <span style="color:var(--ink-soft);">· ${esc(subj.vessel)}</span>` : ''))(logSubject(e))}</td>
             <td>${esc(logActionText(e))}</td>
           </tr>`).join('')}

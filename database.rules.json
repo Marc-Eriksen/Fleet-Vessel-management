@@ -57,6 +57,10 @@
           }
         }
       },
+      "salesPricing": {
+        ".read": "auth != null && (root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin' || root.child('oceanhub/users/' + auth.uid + '/role').val() === 'contractor')",
+        ".write": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin'"
+      },
       "meta": {
         ".read": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin'",
         ".write": "auth != null && root.child('oceanhub/users/' + auth.uid + '/role').val() === 'admin'"
