@@ -778,7 +778,7 @@ function asArray(v){
 /* ============================= DATA ============================= */
 /* Stored as oceanhub/contractors/<id>/{ details, payments/<payId>, admin } — admin holds the
    login and private notes, which contractors can't read. Flattened here for display. */
-const DETAIL_FIELDS = ['name','contactName','email','phone','bankName','accountHolder','accountNumber','branchCode','accountType','swift'];
+const DETAIL_FIELDS = ['name','company','contactName','email','phone','bankName','accountHolder','accountNumber','branchCode','accountType','swift'];
 function toContractor(id, raw){
   raw = raw || {};
   const admin = raw.admin || {};
@@ -992,7 +992,7 @@ function renderContractorList(){
     const total = outstandingTotal(ct);
     return `
       <tr>
-        <td><button type="button" class="link-btn" data-action="view-contractor" data-id="${ct.id}">${esc(ct.name || 'Unnamed')}</button>${salesEnabled(ct) ? ' <span class="stamp upcoming">Paint sales</span>' : ''}${ct.notes ? `<div style="color:var(--ink-soft); font-size:11.5px;">${esc(ct.notes)}</div>` : ''}</td>
+        <td><button type="button" class="link-btn" data-action="view-contractor" data-id="${ct.id}">${esc(ct.name || 'Unnamed')}</button>${salesEnabled(ct) ? ' <span class="stamp upcoming">Paint sales</span>' : ''}${ct.company ? `<div style="font-size:12px;">${esc(ct.company)}</div>` : ''}${ct.notes ? `<div style="color:var(--ink-soft); font-size:11.5px;">${esc(ct.notes)}</div>` : ''}</td>
         <td>${esc(ct.contactName || '—')}${ct.email ? `<div style="color:var(--ink-soft); font-size:11.5px;">${esc(ct.email)}</div>` : ''}${ct.phone ? `<div style="color:var(--ink-soft); font-size:11.5px;">${esc(ct.phone)}</div>` : ''}</td>
         <td>${esc(ct.bankName || '—')}${ct.accountNumber ? `<div style="color:var(--ink-soft); font-size:11.5px;">Acc <span class="pw-mask" data-pw="${esc(ct.accountNumber)}">••••${esc(String(ct.accountNumber).slice(-4))}</span> <button type="button" class="btn small ghost" data-action="reveal">Show</button></div>` : ''}</td>
         <td>${ct.loginEmail ? esc(ct.loginEmail) : '<span style="color:var(--ink-soft);">No login</span>'}</td>
@@ -1088,7 +1088,7 @@ function renderContractorPage(id){
       <div>
         ${admin ? '<button type="button" class="btn small ghost" data-action="back" style="margin-bottom:10px;">← All sales/contractors</button>' : ''}
         <h2 class="section-title">${esc(ct.name)}</h2>
-        <p class="section-sub" style="margin-bottom:0;">${admin ? 'Sales/contractor record' : 'Your details and payments with OCEANHUB'}</p>
+        <p class="section-sub" style="margin-bottom:0;">${ct.company ? esc(ct.company) + ' · ' : ''}${admin ? 'Sales/contractor record' : 'Your details and payments with OCEANHUB'}</p>
       </div>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
         <button type="button" class="btn ghost" data-action="edit-details" data-id="${ct.id}">Edit details</button>
@@ -1109,6 +1109,7 @@ function renderContractorPage(id){
       <div class="card-box">
         <div class="detail-section" style="margin-top:0;">
           <h4>Contact</h4>
+          <div class="mini-row"><span>Company</span><b>${esc(ct.company || '—')}</b></div>
           <div class="mini-row"><span>Contact person</span><b>${esc(ct.contactName || '—')}</b></div>
           <div class="mini-row"><span>Email</span><b>${esc(ct.email || '—')}</b></div>
           <div class="mini-row"><span>Phone</span><b>${esc(ct.phone || '—')}</b></div>
@@ -1198,9 +1199,12 @@ function renderPaymentRow(ct, p){
 /* ============================= FORMS ============================= */
 function detailsForm(c){
   const admin = isAdmin();
-  c = c || { name:'', contactName:'', email:'', phone:'', bankName:'', accountHolder:'', accountNumber:'', branchCode:'', accountType:'', swift:'', notes:'' };
+  c = c || { name:'', company:'', contactName:'', email:'', phone:'', bankName:'', accountHolder:'', accountNumber:'', branchCode:'', accountType:'', swift:'', notes:'' };
   return `
-    <label class="field">Sales/contractor / company name<input name="name" value="${esc(c.name)}" required></label>
+    ${fieldRow(
+      `<label class="field">Sales/contractor name<input name="name" value="${esc(c.name)}" required></label>`,
+      `<label class="field">Company name<input name="company" value="${esc(c.company||'')}" placeholder="Optional"></label>`
+    )}
     ${fieldRow(
       `<label class="field">Contact person<input name="contactName" value="${esc(c.contactName||'')}"></label>`,
       `<label class="field">Phone<input name="phone" type="tel" value="${esc(c.phone||'')}"></label>`
@@ -1439,6 +1443,7 @@ async function sendStatement(id, channel){
     doc.text(ct.name || 'Sales/contractor', 14, 42);
     doc.setFont('helvetica','normal'); doc.setFontSize(10);
     let y = 49;
+    if(ct.company){ doc.text(ct.company, 14, y); y += 6; }
     if(ct.contactName){ doc.text(`Attn: ${ct.contactName}`, 14, y); y += 6; }
     if(ct.email){ doc.text(`Email: ${ct.email}`, 14, y); y += 6; }
     if(ct.phone){ doc.text(`Phone: ${ct.phone}`, 14, y); y += 6; }
@@ -1774,6 +1779,7 @@ function orderEmailContent(ct, o, client){
     'Thank you for your business!',
     '',
     `${ct.contactName || ct.name}`,
+    ct.company || null,
     'OCEANHUB Sales/Contractor'
   ].filter(l=>l!==null);
   return { subject, body: lines.join('\n') };
