@@ -1509,7 +1509,7 @@ async function sendStatement(id, channel){
    everyone at oceanhub/salesPricing: a unit price per container size, and discounts that start at a
    quantity. Sales/contractors can read the price list but not change it; each order is priced from it. */
 const PS_FINISHES = ['Matte','Eggshell','Satin','Limewash','Chalk'];
-const PS_SIZES = ['1 Litre','5 Litre','20 Litre'];
+const PS_SIZES = ['1 Litre','5 Litre'];
 const PS_STATUSES = ['Quoted','Ordered','Fulfilled','Paid'];
 const PS_TIER_ROWS = 5; /* most discount tiers allowed — the database rules check an order against each one by position */
 const PRICING_PATH = 'oceanhub/salesPricing';
@@ -1760,6 +1760,7 @@ function orderEmailContent(ct, o, client){
     discount > 0 ? `Quantity discount: ${discountLabel(o)}` : null,
     Number(o.deliveryKm) > 0 ? `Paint: ${fmtRand(paintTotal(o))}` : null,
     Number(o.deliveryKm) > 0 ? `Delivery: ${fmtRand(deliveryCost(o))} (${Number(o.deliveryKm)} km @ ${fmtRand(o.deliveryRate)}/km)` : null,
+    Number(o.deliveryKm) > 0 && o.deliveryTo ? `Delivery to: ${o.deliveryTo}` : null,
     `Total: ${fmtRand(orderTotal(o))}`,
     `Status: ${o.status}`,
     `Date: ${fmtDate(o.date)}`,
@@ -1808,9 +1809,9 @@ function downloadSalesCSVs(ct){
   const clientName = id => (salesClient(ct, id) || {}).name || 'Unknown client';
   downloadCSV(`paint-sales-clients-${slug}.csv`, toCSV(['Name','Phone','Email','Address','Notes','Added'],
     ct.salesClients.map(c=>[c.name, c.phone, c.email, c.address, c.notes, c.createdAt ? fmtDate(c.createdAt) : ''])));
-  downloadCSV(`paint-sales-orders-${slug}.csv`, toCSV(['Date','Client','Paint colour','Swatch hex','Finish','Size','Qty','Unit price (R)','Discount %','Discount qty range','Subtotal (R)','Delivery km','Delivery rate (R/km)','Delivery (R)','Total (R)','Status','Notes'],
+  downloadCSV(`paint-sales-orders-${slug}.csv`, toCSV(['Date','Client','Paint colour','Swatch hex','Finish','Size','Qty','Unit price (R)','Discount %','Discount qty range','Subtotal (R)','Delivery from','Delivery to','Delivery km','Delivery rate (R/km)','Delivery (R)','Total (R)','Status','Notes'],
     ct.salesOrders.slice().sort(byDateDesc).map(o=>[fmtDate(o.date), clientName(o.clientId), o.colorName || 'Untitled colour', o.color, o.finish, o.size, o.qty,
-      (Number(o.unitPrice)||0).toFixed(2), Number(o.discountPercent)||0, discountRange(o), orderSubtotal(o).toFixed(2), Number(o.deliveryKm)||0, Number(o.deliveryKm) > 0 ? (Number(o.deliveryRate)||0).toFixed(2) : '', deliveryCost(o).toFixed(2), orderTotal(o).toFixed(2), o.status, o.notes])));
+      (Number(o.unitPrice)||0).toFixed(2), Number(o.discountPercent)||0, discountRange(o), orderSubtotal(o).toFixed(2), o.deliveryFrom || '', o.deliveryTo || '', Number(o.deliveryKm)||0, Number(o.deliveryKm) > 0 ? (Number(o.deliveryRate)||0).toFixed(2) : '', deliveryCost(o).toFixed(2), orderTotal(o).toFixed(2), o.status, o.notes])));
 }
 function exportEmailContent(ct){
   const s = salesStats(ct);
@@ -1881,6 +1882,10 @@ function salesOrderForm(ct, o, presetClientId){
       Deliver to the client
     </label>
     <div id="psDeliveryFields" style="${Number(o.deliveryKm) > 0 ? '' : 'display:none;'}">
+      <label class="field">From<input name="deliveryFrom" value="${esc(o.deliveryFrom || lastDeliveryFrom(ct))}" placeholder="Where the paint is collected, e.g. 12 Main Rd, Paarl"></label>
+      <label class="field">To<input name="deliveryTo" value="${esc(o.deliveryTo || '')}" placeholder="Delivery address — the client's address is filled in"></label>
+      <button type="button" class="btn small ghost" id="psRouteBtn" style="margin:-4px 0 6px;">Calculate distance</button>
+      <p class="fin-hint" id="psRouteHint">Works out the road distance there and back. You can also type the km yourself.</p>
       <label class="field">Delivery distance (km, there and back)<input name="deliveryKm" type="number" min="0" step="0.1" value="${Number(o.deliveryKm) > 0 ? Number(o.deliveryKm) : ''}" placeholder="e.g. 40" data-ps-total></label>
       <div class="mini-row"><span id="psDeliveryLabel">Delivery</span><b id="psDeliveryCost"></b></div>
     </div>
@@ -1891,9 +1896,38 @@ function salesOrderForm(ct, o, presetClientId){
     <label class="field">Notes<textarea name="notes" rows="2" placeholder="Mixing notes, delivery instructions, etc.">${esc(o.notes||'')}</textarea></label>
     <div class="mini-row" style="border-top:1px dashed var(--paper-line); padding-top:10px;"><span>Order total</span><b id="psOrderTotal"></b></div>`;
 }
+/* The start address of this sales/contractor's latest delivery, so they don't retype it every order. */
+function lastDeliveryFrom(ct){
+  const o = ct.salesOrders.filter(x=>x.deliveryFrom).sort(byDateDesc)[0];
+  return o ? o.deliveryFrom : '';
+}
+/* Delivery distance from OpenStreetMap: Nominatim finds the two addresses, OSRM the road route between them.
+   Both are free public services with fair-use limits (Nominatim: one lookup a second), fine for a tap per order. */
+const pause = ms => new Promise(r=>setTimeout(r, ms));
+async function findPlace(address){
+  for(const only of ['&countrycodes=za', '']){
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=en${only}&q=${encodeURIComponent(address)}`);
+    if(!res.ok) throw new Error('The address lookup is busy. Try again in a minute.');
+    const hit = (await res.json())[0];
+    if(hit) return { lat:Number(hit.lat), lon:Number(hit.lon) };
+    await pause(1100);
+  }
+  return null;
+}
+async function roadKmEachWay(from, to){
+  const a = await findPlace(from);
+  if(!a) throw new Error(`Couldn't find "${from}". Add the suburb or town.`);
+  await pause(1100);
+  const b = await findPlace(to);
+  if(!b) throw new Error(`Couldn't find "${to}". Add the suburb or town.`);
+  const res = await fetch(`https://router.project-osrm.org/route/v1/driving/${a.lon},${a.lat};${b.lon},${b.lat}?overview=false`);
+  const j = res.ok ? await res.json() : null;
+  if(!j || j.code !== 'Ok' || !j.routes || !j.routes[0]) throw new Error("Couldn't find a road route between those addresses.");
+  return j.routes[0].distance / 1000;
+}
 const orderQty = form => Math.max(1, Math.floor(Number(form.qty.value)||1));
 const orderDeliveryKm = form => form.delivery.checked ? Math.max(0, round2(Number(form.deliveryKm.value)||0)) : 0;
-function wireSalesOrderForm(form, existing){
+function wireSalesOrderForm(form, ct, existing){
   const recalc = ()=>{
     const qty = orderQty(form), size = form.size.value;
     const p = orderPricing(existing, size, qty), km = orderDeliveryKm(form), rate = orderDeliveryRate(existing);
@@ -1913,6 +1947,25 @@ function wireSalesOrderForm(form, existing){
   };
   form.querySelectorAll('[data-ps-total]').forEach(el=>{ el.addEventListener('input', recalc); el.addEventListener('change', recalc); });
   recalc();
+  /* "To" follows the chosen client's address until it's typed in by hand */
+  const clientAddress = ()=>{ const c = salesClient(ct, form.clientId.value); return (c && c.address) || ''; };
+  let toTyped = !!(existing && existing.deliveryTo);
+  if(!toTyped) form.deliveryTo.value = clientAddress();
+  form.deliveryTo.addEventListener('input', ()=>{ toTyped = true; });
+  form.clientId.addEventListener('change', ()=>{ if(!toTyped) form.deliveryTo.value = clientAddress(); });
+  const btn = document.getElementById('psRouteBtn'), hint = document.getElementById('psRouteHint');
+  btn.addEventListener('click', async ()=>{
+    const from = form.deliveryFrom.value.trim(), to = form.deliveryTo.value.trim();
+    if(!from || !to){ hint.textContent = 'Fill in both From and To first.'; return; }
+    btn.disabled = true; btn.textContent = 'Calculating…'; hint.textContent = 'Looking up the route…';
+    try{
+      const each = await roadKmEachWay(from, to);
+      form.deliveryKm.value = round2(Math.round(each * 2 * 10) / 10);
+      hint.textContent = `Road distance ${each.toFixed(1)} km each way, so ${form.deliveryKm.value} km there and back (OpenStreetMap). Change it if the route differs.`;
+      recalc();
+    }catch(err){ hint.textContent = err && err.message && !/fetch/i.test(err.message) ? err.message : "Couldn't reach the map service. Check the connection, or type the km yourself."; }
+    btn.disabled = false; btn.textContent = 'Calculate distance';
+  });
 }
 
 function salesSettingsForm(ct){
@@ -2000,7 +2053,7 @@ function renderModal(){
   const form = document.getElementById('modalForm');
   form.addEventListener('submit', handleFormSubmit);
   if(m.type === 'payment') wirePaymentForm(form);
-  if(m.type === 'sales-order') wireSalesOrderForm(form, m.orderId && ct ? ct.salesOrders.find(x=>x.id===m.orderId) : null);
+  if(m.type === 'sales-order') wireSalesOrderForm(form, ct, m.orderId ? ct.salesOrders.find(x=>x.id===m.orderId) : null);
   if(m.type === 'sales-send') form.addEventListener('input', ()=>{ m.draft = sendDraft(form); });
 }
 function closeModal(){ state.modal = null; render(); }
@@ -2077,7 +2130,10 @@ async function handleFormSubmit(e){
         status:PS_STATUSES.includes(fd.get('status')) ? fd.get('status') : PS_STATUSES[0], date:fd.get('date'), notes:String(fd.get('notes')||'').trim() };
       const deliveryKm = orderDeliveryKm(form);
       if(form.delivery.checked && !deliveryKm){ alert('Enter the delivery distance in km, or untick delivery.'); btn.disabled = false; return; }
-      if(deliveryKm){ data.deliveryKm = deliveryKm; data.deliveryRate = orderDeliveryRate(existing); }
+      if(deliveryKm){
+        Object.assign(data, { deliveryKm, deliveryRate:orderDeliveryRate(existing),
+          deliveryFrom:String(fd.get('deliveryFrom')||'').trim(), deliveryTo:String(fd.get('deliveryTo')||'').trim() });
+      }
       if(!data.clientId){ alert('Choose a client.'); btn.disabled = false; return; }
       if(!data.unitPrice){ alert(`The OCEANHUB admin hasn't set a price for ${size} yet.`); btn.disabled = false; return; }
       if(!data.date){ alert('Enter the date as dd/mm/yyyy.'); btn.disabled = false; return; }
