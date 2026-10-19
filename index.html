@@ -147,6 +147,12 @@
   .kpi.alert .value{color:var(--signal-red);}
   .kpi.warn .value{color:var(--brass);}
   .kpi.good .value{color:var(--seafoam);}
+  .kpi-btn{font:inherit; text-align:left; width:100%; cursor:pointer; color:inherit; transition:border-color .15s, box-shadow .15s, transform .15s;}
+  .kpi-btn:hover{border-color:var(--ink-muted); transform:translateY(-1px);}
+  .kpi-btn:focus-visible{outline:2px solid var(--brass); outline-offset:2px;}
+  .kpi-btn.selected{border-color:var(--heading); box-shadow:inset 0 0 0 1px var(--heading);}
+  .kpi-grid.has-detail{margin-bottom:16px;}
+  .dash-detail{margin-bottom:26px;}
 
   .card-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(270px,1fr)); gap:14px;}
   .card{
@@ -495,6 +501,7 @@
 <script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-app-check-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-functions-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
@@ -517,6 +524,7 @@ let state = {
   serviceLog: [],
   allServiceLog: [],
   maintView: 'tasks',
+  dashView: null,
   svcVesselId: null,
   svcMeterId: null,
   hoursSaved: false,
@@ -613,6 +621,16 @@ const FIREBASE_CONFIG = {
   projectId: "ocean-hub-vessel-managem-cdca8",
   appId: "1:50009827319:web:3a38149f69813bdacf70f2", /* needed by Firebase AI Logic (invoice reading) */
 };
+/* App Check: proves each request comes from this app on its real website, so a stolen password
+   alone isn't enough to reach the database from some other script. Paste the reCAPTCHA Enterprise
+   key ID from the Firebase console (App Check > Apps) here to switch it on; while it's blank the
+   app works exactly as before. Same key in both apps. */
+const APP_CHECK_SITE_KEY = '';
+function startAppCheck(){
+  if(!APP_CHECK_SITE_KEY || !firebase.appCheck) return;
+  try{ firebase.appCheck().activate(new firebase.appCheck.ReCaptchaEnterpriseProvider(APP_CHECK_SITE_KEY), true); }
+  catch(e){ console.warn('App Check could not start', e); }
+}
 const ADMIN_EMAIL = ""; /* e.g. "ops@oceanhub.co.za" — leave blank to hide admin notify buttons */
 const ADMIN_PHONE = ""; /* e.g. "+27820000000" — used for WhatsApp links, digits/plus only */
 let fbInitialized = false;
@@ -626,6 +644,7 @@ function bootstrap(){
   document.getElementById('tabNav').innerHTML = '';
   if(!isFirebaseConfigured()){ renderSetupNotice(); return; }
   try{ firebase.initializeApp(FIREBASE_CONFIG); }catch(e){ /* already initialized */ }
+  startAppCheck();
   fbInitialized = true;
   document.getElementById('mainContent').innerHTML = '<div class="empty-note" style="margin-top:60px;">Loading…</div>';
   /* Never remember a sign-in: every time the app opens, the email and password must be entered.
@@ -1677,43 +1696,115 @@ function renderNav(){
 }
 
 /* ============================= DASHBOARD ============================= */
+/* Each tile is a button: clicking one lists the items behind its number underneath the
+   tiles (click it again, or Close, to hide the list). state.dashView remembers which. */
+function dashCrewQuals(status){
+  return activeCrew().flatMap(c=> (c.quals||[]).filter(q=>qualStatus(q.expiry)===status).map(q=>({ c, q })))
+    .sort((a,b)=> String(a.q.expiry).localeCompare(String(b.q.expiry)));
+}
+function dashTaskVessel(m){
+  return esc(vesselName(m.vesselId)) + (m._source==='tender' ? ` <span style="color:var(--ink-soft); font-size:11px;">— ${esc(m._tenderName)} (tender)</span>` : '');
+}
+function dashTaskDue(m){
+  const hl = maintHoursLeft(m);
+  const hrs = hl===null ? '' : hl <= 0 ? `${Math.abs(hl).toLocaleString()} hrs over` : `${hl.toLocaleString()} hrs left`;
+  return [m.dueDate ? fmtDate(m.dueDate) : '', hrs].filter(Boolean).join(' · ') || '—';
+}
+function dashTable(head, rows, empty){
+  if(!rows.length) return `<div class="empty-note">${empty}</div>`;
+  return `<div class="table-wrap"><table>
+    <thead><tr>${head.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody>
+  </table></div>`;
+}
+function dashTiles(){
+  const tasks = getAllMaintenanceTasks();
+  const svc = serviceAlerts();
+  const docs = docExpiryAlerts();
+  const byDue = (a,b)=> String(a.dueDate||'9').localeCompare(String(b.dueDate||'9'));
+  const taskRows = list => list.sort(byDue).map(m=>[dashTaskVessel(m), esc(m.title), `<span class="stamp ${maintStatus(m)}">${stampLabel(maintStatus(m))}</span>`, dashTaskDue(m), m.priority ? esc(m.priority.charAt(0).toUpperCase()+m.priority.slice(1)) : '—']);
+  const qualRows = list => list.map(({c,q})=>[esc(c.name), esc(c.role||'—'), esc(vesselName(c.vesselId)), esc(q.name), `<span class="stamp ${qualStatus(q.expiry)}">${fmtDate(q.expiry)}</span>`]);
+  const overdue = tasks.filter(m=>maintStatus(m)==='overdue');
+  const dueSoon = tasks.filter(m=>maintStatus(m)==='due-soon');
+  const expired = dashCrewQuals('expired'), red = dashCrewQuals('red-alert'), adv = dashCrewQuals('advisory');
+  const cl = checklistAssignments().filter(a=>!a.run || a.run.status!=='completed');
+  const low = stockRows().filter(r=>r.low);
+  const TASK_HEAD = ['Vessel','Task','Status','Due','Priority'];
+  const QUAL_HEAD = ['Crew member','Role','Vessel','Document','Expiry'];
+  return [
+    { id:'vessels', label:'Vessels on register', count:state.vessels.length, tone:'', go:'vessels',
+      body:()=> dashTable(['Vessel','Type','Status'], state.vessels.map(v=>[esc(v.name), esc(v.type||'—'), v.status ? `<span class="stamp ${esc(v.status)}">${esc(stampLabel(v.status))}</span>` : '—']), 'No vessels on the register.') },
+    { id:'overdue', label:'Overdue tasks', count:overdue.length, tone:overdue.length?'alert':'', go:'maintenance', maintView:'tasks',
+      body:()=> dashTable(TASK_HEAD, taskRows(overdue), 'Nothing overdue.') },
+    { id:'due-soon', label:'Due within 14 days / 75 hrs', count:dueSoon.length, tone:dueSoon.length?'warn':'', go:'maintenance', maintView:'tasks',
+      body:()=> dashTable(TASK_HEAD, taskRows(dueSoon), 'Nothing due in the next 14 days or 75 hours.') },
+    { id:'quals-expired', label:'Crew docs expired', count:expired.length, tone:expired.length?'alert':'', go:'crew',
+      body:()=> dashTable(QUAL_HEAD, qualRows(expired), 'No expired crew documents.') },
+    { id:'quals-red', label:'Crew docs red alert (≤30 days)', count:red.length, tone:red.length?'alert':'', go:'crew',
+      body:()=> dashTable(QUAL_HEAD, qualRows(red), 'No crew documents expiring within 30 days.') },
+    { id:'quals-adv', label:'Crew docs advisory (≤60 days)', count:adv.length, tone:adv.length?'warn':'', go:'crew',
+      body:()=> dashTable(QUAL_HEAD, qualRows(adv), 'No crew documents expiring within 60 days.') },
+    { id:'checklists', label:'Checklists due', count:cl.length, tone:cl.length?'warn':'', go:'checklists',
+      body:()=> dashTable(['Vessel','Checklist','Frequency','Status'], cl.map(a=>{
+        const p = a.run ? runProgress(a.run) : null;
+        return [esc(vesselName(a.vesselId)), esc(a.cl.name), esc((a.cl.frequency||'').charAt(0).toUpperCase()+(a.cl.frequency||'').slice(1)), checklistRunStamp(a.run) + (p && p.total ? ` <span style="color:var(--ink-soft); font-size:11px;">${p.done}/${p.total}</span>` : '')];
+      }), 'All checklists are done for this period.') },
+    { id:'stock', label:'Low stock items', count:low.length, tone:low.length?'alert':'', go:'checklists',
+      body:()=> dashTable(['Vessel','Item','Count','Minimum / par','Last counted'], low.map(r=>[esc(vesselName(r.vesselId)), esc(r.label), `${r.qty}${r.unit ? ' ' + esc(r.unit) : ''}`, `${r.min!=null ? r.min : '—'} / ${r.par!=null ? r.par : '—'}`, fmtDateTime(r.date)]), 'No stock items are low.') },
+    { id:'service', label:'Manufacturer services due', count:svc.length, tone:svc.some(a=>a.d.status==='critical')?'alert':svc.length?'warn':'', go:'maintenance', maintView:'service',
+      body:()=> dashTable(['Vessel','Unit','Service','Status','Detail'], svc.map(a=>[esc(a.vessel.name), esc(svcCap(a.meter.label)), esc(a.task.name), serviceStamp(a.d.status), serviceDueText(a.d)]), 'All manufacturer services are on track.') },
+    { id:'docs', label:`Vessel docs expiring (≤${DOC_EXPIRY_WARN_DAYS} days)`, count:docs.length, tone:docs.length?'alert':'', go:'vessels',
+      body:()=> dashTable(['Vessel','Document','Expiry'], docs.map(a=>[esc(a.vessel.name) + (a.tender ? ` <span style="color:var(--ink-soft); font-size:11px;">— ${esc(a.tender.name)} (tender)</span>` : ''), esc(a.doc.name), docExpiryCell(a.doc)]), 'No vessel documents expiring soon.') },
+  ];
+}
 function renderDashboard(){
-  const allTasks = getAllMaintenanceTasks();
-  const overdue = allTasks.filter(m=>maintStatus(m)==='overdue').length;
-  const dueSoon = allTasks.filter(m=>maintStatus(m)==='due-soon').length;
-  const qualsExpired = activeCrew().flatMap(c=>c.quals).filter(q=>qualStatus(q.expiry)==='expired').length;
-  const qualsRedAlert = activeCrew().flatMap(c=>c.quals).filter(q=>qualStatus(q.expiry)==='red-alert').length;
-  const qualsAdvisory = activeCrew().flatMap(c=>c.quals).filter(q=>qualStatus(q.expiry)==='advisory').length;
-
-  const clOutstanding = checklistAssignments().filter(a=>!a.run || a.run.status!=='completed').length;
-  const lowStock = stockRows().filter(r=>r.low).length;
-  const svcAlerts = serviceAlerts();
-  const docAlerts = docExpiryAlerts();
+  const tiles = dashTiles();
+  const open = tiles.find(t=>t.id===state.dashView);
+  if(!open) state.dashView = null;
+  const goLabel = t => t.maintView==='service' ? 'service schedules' : (navTabs().find(x=>x.id===t.go)||{label:''}).label.toLowerCase();
 
   return `
     <div class="toolbar" style="margin-bottom:4px;">
       <div>
         <h2 class="section-title">Fleet dashboard</h2>
-        <p class="section-sub" style="margin-bottom:0;">Overview across the register — maintenance and crew certification.</p>
+        <p class="section-sub" style="margin-bottom:0;">Overview across the register — click a tile to see the items behind it.</p>
       </div>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
         <button type="button" class="btn ghost" data-privacy>Privacy</button>
         <button class="btn ghost" data-action="logout">Sign out</button>
       </div>
     </div>
-    <div class="kpi-grid">
-      <div class="kpi"><div class="label">Vessels on register</div><div class="value">${state.vessels.length}</div></div>
-      <div class="kpi ${overdue>0?'alert':''}"><div class="label">Overdue tasks</div><div class="value">${overdue}</div></div>
-      <div class="kpi ${dueSoon>0?'warn':''}"><div class="label">Due within 14 days / 75 hrs</div><div class="value">${dueSoon}</div></div>
-      <div class="kpi ${qualsExpired>0?'alert':''}"><div class="label">Crew docs expired</div><div class="value">${qualsExpired}</div></div>
-      <div class="kpi ${qualsRedAlert>0?'alert':''}"><div class="label">Crew docs red alert (≤30 days)</div><div class="value">${qualsRedAlert}</div></div>
-      <div class="kpi ${qualsAdvisory>0?'warn':''}"><div class="label">Crew docs advisory (≤60 days)</div><div class="value">${qualsAdvisory}</div></div>
-      <div class="kpi ${clOutstanding>0?'warn':''}"><div class="label">Checklists due</div><div class="value">${clOutstanding}</div></div>
-      <div class="kpi ${lowStock>0?'alert':''}"><div class="label">Low stock items</div><div class="value">${lowStock}</div></div>
-      <div class="kpi ${svcAlerts.some(a=>a.d.status==='critical')?'alert':svcAlerts.length?'warn':''}"><div class="label">Manufacturer services due</div><div class="value">${svcAlerts.length}</div></div>
-      <div class="kpi ${docAlerts.length?'alert':''}"><div class="label">Vessel docs expiring (≤${DOC_EXPIRY_WARN_DAYS} days)</div><div class="value">${docAlerts.length}</div></div>
+    <div class="kpi-grid${open ? ' has-detail' : ''}">
+      ${tiles.map(t=>`<button type="button" class="kpi kpi-btn ${t.tone}${open===t ? ' selected' : ''}" data-dash="${t.id}" aria-expanded="${open===t}"><div class="label">${t.label}</div><div class="value">${t.count}</div></button>`).join('')}
     </div>
+    ${open ? `
+    <div class="dash-detail">
+      <div class="toolbar" style="margin-bottom:10px;">
+        <h3 class="hrs-title" style="margin:0;">${open.label} <span style="color:var(--ink-soft); font-weight:600;">(${open.count})</span></h3>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button type="button" class="btn ghost" data-dash-go="${open.id}">Open ${esc(goLabel(open))}</button>
+          <button type="button" class="btn ghost" data-dash="${open.id}">Close</button>
+        </div>
+      </div>
+      ${open.body()}
+    </div>` : ''}
   `;
+}
+function attachDashboardEvents(){
+  document.querySelectorAll('[data-dash]').forEach(b=>b.addEventListener('click', ()=>{
+    state.dashView = state.dashView===b.dataset.dash ? null : b.dataset.dash;
+    render();
+    const d = document.querySelector('.dash-detail');
+    if(d && d.getBoundingClientRect().top > window.innerHeight - 80) d.scrollIntoView({ behavior:'smooth', block:'start' });
+  }));
+  document.querySelectorAll('[data-dash-go]').forEach(b=>b.addEventListener('click', ()=>{
+    const t = dashTiles().find(x=>x.id===b.dataset.dashGo);
+    if(!t) return;
+    if(t.maintView) state.maintView = t.maintView;
+    state.activeTab = t.go;
+    render();
+    window.scrollTo(0, 0);
+  }));
 }
 
 /* Standard OCEANHUB lists, taken from the single-vessel Vessel Manager app (Riva 58 Capri).
@@ -3505,7 +3596,17 @@ function invoiceModel(name){
     invoiceModelPromises[name] = (async ()=>{
       const appMod = await import('https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js');
       const ai = await import('https://www.gstatic.com/firebasejs/12.19.0/firebase-ai.js');
-      const app = appMod.getApps().find(a=>a.name==='invoice-reader') || appMod.initializeApp(FIREBASE_CONFIG, 'invoice-reader');
+      let app = appMod.getApps().find(a=>a.name==='invoice-reader');
+      if(!app){
+        app = appMod.initializeApp(FIREBASE_CONFIG, 'invoice-reader');
+        /* the invoice reader is a separate Firebase instance, so it needs App Check of its own */
+        if(APP_CHECK_SITE_KEY){
+          try{
+            const ac = await import('https://www.gstatic.com/firebasejs/12.19.0/firebase-app-check.js');
+            ac.initializeAppCheck(app, { provider: new ac.ReCaptchaEnterpriseProvider(APP_CHECK_SITE_KEY), isTokenAutoRefreshEnabled:true });
+          }catch(e){ console.warn('App Check could not start for the invoice reader', e); }
+        }
+      }
       const S = ai.Schema;
       const schema = S.object({
         properties: {
@@ -5461,6 +5562,7 @@ async function handleFormSubmit(e){
 
 /* ============================= GLOBAL ACTIONS ============================= */
 function attachContentEvents(){
+  attachDashboardEvents();
   document.querySelectorAll('[data-action]').forEach(el=>{
     const action = el.dataset.action;
     if(['close-modal','overlay-close','edit-vessel','delete-vessel'].includes(action)) return;
