@@ -1504,35 +1504,40 @@ async function sendStatement(id, channel){
 const PS_FINISHES = ['Matte','Eggshell','Satin','Limewash','Chalk'];
 const PS_SIZES = ['1 Litre','5 Litre'];
 const PS_STATUSES = ['Quoted','Ordered','Fulfilled','Paid'];
-const PS_TIER_ROWS = 5; /* blank discount rows shown in the price list form */
+const PS_TIER_ROWS = 5; /* most discount tiers allowed — the database rules check an order against each one by position */
 const PRICING_PATH = 'oceanhub/salesPricing';
 
 function salesEnabled(ct){ return !!(ct && ct.salesSettings && ct.salesSettings.enabled); }
 function salesPath(id){ return ROOT + id + '/sales/'; }
 function sizeKey(size){ return String(size||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,''); }
 function unitPriceFor(size){ const p = Number(((state.salesPricing||{}).unitPrices||{})[sizeKey(size)]); return p > 0 ? p : 0; }
+/* Quantity discounts are ranges, e.g. 1–20 at 0%, 21–50 at 5%, 51+ at 10%. maxQty 0 means "and more". Ranges don't overlap. */
 function discountTiers(){
-  return asArray((state.salesPricing||{}).discounts).map(t=>({ minQty:Number(t.minQty)||0, percent:Number(t.percent)||0 }))
-    .filter(t=>t.minQty > 0 && t.percent > 0).sort((a,b)=>a.minQty-b.minQty);
+  return asArray((state.salesPricing||{}).discounts).map(t=>({ minQty:Number(t.minQty)||0, maxQty:Number(t.maxQty)||0, percent:Number(t.percent)||0 }))
+    .filter(t=>t.minQty > 0).sort((a,b)=>a.minQty-b.minQty);
 }
-/* the discount of the highest tier the quantity reaches */
-function tierFor(qty){ let tier = null; discountTiers().forEach(t=>{ if(qty >= t.minQty) tier = t; }); return tier; }
+const inRange = (t, qty) => qty >= t.minQty && (!t.maxQty || qty <= t.maxQty);
+function rangeLabel(min, max){ return max ? (max === min ? `${min}` : `${min}–${max}`) : `${min}+`; }
+function tierFor(qty){ return discountTiers().find(t=>inRange(t, qty)) || null; }
 /* An order keeps the price it was saved with until its size or quantity changes; then it's priced from the current list. */
 function orderPricing(existing, size, qty){
   if(existing && existing.size === size && Number(existing.qty) === qty && Number(existing.unitPrice) > 0)
-    return { unitPrice:Number(existing.unitPrice), discountPercent:Number(existing.discountPercent)||0, discountMinQty:Number(existing.discountMinQty)||0 };
+    return { unitPrice:Number(existing.unitPrice), discountPercent:Number(existing.discountPercent)||0,
+      discountMinQty:Number(existing.discountMinQty)||0, discountMaxQty:Number(existing.discountMaxQty)||0 };
   const tier = tierFor(qty);
-  return { unitPrice:unitPriceFor(size), discountPercent:tier ? Math.min(100, tier.percent) : 0, discountMinQty:tier ? tier.minQty : 0 };
+  return { unitPrice:unitPriceFor(size), discountPercent:tier ? Math.min(100, tier.percent) : 0,
+    discountMinQty:tier ? tier.minQty : 0, discountMaxQty:tier ? tier.maxQty : 0 };
 }
 function resetSalesView(){ Object.assign(state, { section:'payments', salesTab:'dashboard', salesClientId:null, salesSearch:'', salesFilter:'All' }); }
 function fmtRand(n){ return 'R' + (Number(n)||0).toLocaleString('en-ZA', { minimumFractionDigits:2, maximumFractionDigits:2 }); }
 function swatchColor(c){ return /^#[0-9a-f]{6}$/i.test(c||'') ? c : 'var(--paper-line)'; }
 const orderSubtotal = o => (Number(o.qty)||0) * (Number(o.unitPrice)||0);
 const orderTotal = o => orderSubtotal(o) * (1 - (Number(o.discountPercent)||0) / 100);
-/* the admin's quantity discount the order got, e.g. "5% (10+ units)"; orders priced before tiers were recorded show just the % */
+/* the admin's quantity discount the order got, e.g. "5% (21–50 units)"; orders priced before ranges were recorded show just the % */
+function discountRange(o){ const q = Number(o.discountMinQty)||0; return q ? rangeLabel(q, Number(o.discountMaxQty)||0) : ''; }
 function discountLabel(o){
-  const d = Number(o.discountPercent)||0, q = Number(o.discountMinQty)||0;
-  return d > 0 ? `${d}%` + (q ? ` (${q}+ units)` : '') : '';
+  const d = Number(o.discountPercent)||0, r = discountRange(o);
+  return d > 0 ? `${d}%` + (r ? ` (${r} units)` : '') : '';
 }
 const byDateDesc = (a,b) => (b.date||'').localeCompare(a.date||'');
 function salesClient(ct, clientId){ return ct.salesClients.find(c=>c.id===clientId) || null; }
@@ -1718,7 +1723,7 @@ function renderPriceList(){
       </div>
       <div class="card-box">
         <h4 class="ps-h">Quantity discounts</h4>
-        ${tiers.length ? tiers.map(t=>`<div class="mini-row"><span>${t.minQty} or more</span><b>${t.percent}% off</b></div>`).join('')
+        ${tiers.length ? tiers.map(t=>`<div class="mini-row"><span>${rangeLabel(t.minQty, t.maxQty)} units</span><b>${t.percent ? `${t.percent}% off` : 'No discount'}</b></div>`).join('')
           : '<div class="empty-note">No quantity discounts.</div>'}
       </div>
     </div>`;
@@ -1768,9 +1773,9 @@ function downloadSalesCSVs(ct){
   const clientName = id => (salesClient(ct, id) || {}).name || 'Unknown client';
   downloadCSV(`paint-sales-clients-${slug}.csv`, toCSV(['Name','Phone','Email','Address','Notes','Added'],
     ct.salesClients.map(c=>[c.name, c.phone, c.email, c.address, c.notes, c.createdAt ? fmtDate(c.createdAt) : ''])));
-  downloadCSV(`paint-sales-orders-${slug}.csv`, toCSV(['Date','Client','Paint colour','Swatch hex','Finish','Size','Qty','Unit price (R)','Discount %','Discount from qty','Subtotal (R)','Total (R)','Status','Notes'],
+  downloadCSV(`paint-sales-orders-${slug}.csv`, toCSV(['Date','Client','Paint colour','Swatch hex','Finish','Size','Qty','Unit price (R)','Discount %','Discount qty range','Subtotal (R)','Total (R)','Status','Notes'],
     ct.salesOrders.slice().sort(byDateDesc).map(o=>[fmtDate(o.date), clientName(o.clientId), o.colorName || 'Untitled colour', o.color, o.finish, o.size, o.qty,
-      (Number(o.unitPrice)||0).toFixed(2), Number(o.discountPercent)||0, Number(o.discountMinQty)||'', orderSubtotal(o).toFixed(2), orderTotal(o).toFixed(2), o.status, o.notes])));
+      (Number(o.unitPrice)||0).toFixed(2), Number(o.discountPercent)||0, discountRange(o), orderSubtotal(o).toFixed(2), orderTotal(o).toFixed(2), o.status, o.notes])));
 }
 function exportEmailContent(ct){
   const s = salesStats(ct);
@@ -1873,7 +1878,7 @@ function salesSettingsForm(ct){
 function priceListForm(){
   const prices = (state.salesPricing || {}).unitPrices || {};
   const tiers = discountTiers();
-  const rows = Array.from({ length: Math.max(PS_TIER_ROWS, tiers.length + 1) }, (_, i)=>tiers[i] || { minQty:'', percent:'' });
+  const rows = Array.from({ length: PS_TIER_ROWS }, (_, i)=>tiers[i] || { minQty:'', maxQty:'', percent:'' });
   const priceField = sz => `<label class="field">${esc(sz)}<input name="price-${sizeKey(sz)}" type="number" min="0" step="0.01" value="${Number(prices[sizeKey(sz)]) > 0 ? Number(prices[sizeKey(sz)]) : ''}"></label>`;
   const pairs = [];
   for(let i=0; i<PS_SIZES.length; i+=2) pairs.push(fieldRow(priceField(PS_SIZES[i]), PS_SIZES[i+1] ? priceField(PS_SIZES[i+1]) : '<span></span>'));
@@ -1882,11 +1887,12 @@ function priceListForm(){
     <div class="detail-section" style="margin-top:0;"><h4>Unit price by container size (R)</h4></div>
     ${pairs.join('')}
     <div class="detail-section"><h4>Quantity discounts</h4></div>
-    <p class="fin-hint">An order of at least this many units gets this discount; the highest tier it reaches applies. Leave a row blank to skip it.</p>
-    ${rows.map((t, i)=>fieldRow(
-      `<label class="field">From quantity<input name="tierQty${i}" type="number" min="1" step="1" value="${t.minQty}"></label>`,
-      `<label class="field">Discount %<input name="tierPct${i}" type="number" min="0" max="100" step="0.5" value="${t.percent}"></label>`
-    )).join('')}`;
+    <p class="fin-hint">Set a quantity range for each discount, e.g. 1–20 at 0%, 21–50 at 5%, 51 and up at 10%. Leave "To" blank for "and more". Ranges can't overlap. Up to ${PS_TIER_ROWS} ranges; leave a row blank to skip it.</p>
+    ${rows.map((t, i)=>`<div style="display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:12px;">
+      <label class="field">From qty<input name="tierMin${i}" type="number" min="1" step="1" value="${t.minQty}"></label>
+      <label class="field">To qty<input name="tierMax${i}" type="number" min="1" step="1" value="${t.maxQty || ''}" placeholder="and more"></label>
+      <label class="field">Discount %<input name="tierPct${i}" type="number" min="0" max="100" step="0.5" value="${t.minQty ? t.percent : ''}"></label>
+    </div>`).join('')}`;
 }
 
 function salesExportForm(ct){
@@ -2015,8 +2021,13 @@ async function handleFormSubmit(e){
       if(!data.date){ alert('Enter the date as dd/mm/yyyy.'); btn.disabled = false; return; }
       const orderId = m.orderId || uid('pso');
       const rec = clean({ id:orderId, ...data });
-      await db.ref().update(withLog({ [salesPath(m.id) + 'orders/' + orderId]: rec },
-        [existing ? changeEntry({ key:'salesOrder', cid:m.id, id:orderId }, existing, rec) : { key:'salesOrder', cid:m.id, id:orderId, action:'added' }]));
+      try{ await db.ref().update(withLog({ [salesPath(m.id) + 'orders/' + orderId]: rec },
+        [existing ? changeEntry({ key:'salesOrder', cid:m.id, id:orderId }, existing, rec) : { key:'salesOrder', cid:m.id, id:orderId, action:'added' }])); }
+      catch(err){
+        if(!/permission/i.test(String(err && (err.code || err.message)))) throw err;
+        alert('The price list was just changed, so this order no longer matches it. Close the order and open it again to get the current price.');
+        btn.disabled = false; return;
+      }
     }
     else if(m.type === 'sales-settings'){
       const rec = { enabled: fd.get('enabled') === '1' };
@@ -2026,12 +2037,24 @@ async function handleFormSubmit(e){
     else if(m.type === 'price-list'){
       const unitPrices = {};
       PS_SIZES.forEach(sz=>{ const v = Number(fd.get('price-' + sizeKey(sz))); if(v > 0) unitPrices[sizeKey(sz)] = Math.round(v * 100) / 100; });
-      const byQty = {};
-      for(let i=0; fd.has('tierQty' + i); i++){
-        const q = Math.floor(Number(fd.get('tierQty' + i))), p = Math.min(100, Number(fd.get('tierPct' + i)));
-        if(q >= 1 && p > 0) byQty[q] = p;
+      const discounts = [];
+      for(let i=0; fd.has('tierMin' + i); i++){
+        const raw = f => String(fd.get(f + i)||'').trim();
+        if(!raw('tierMin') && !raw('tierMax') && !raw('tierPct')) continue;
+        const min = Math.floor(Number(raw('tierMin'))), max = raw('tierMax') ? Math.floor(Number(raw('tierMax'))) : 0, pct = Number(raw('tierPct'));
+        const err = !(min >= 1) ? `Row ${i+1}: enter a "From" quantity of 1 or more.`
+          : max && max < min ? `Row ${i+1}: "To" must be at least ${min}.`
+          : !raw('tierPct') || !(pct >= 0 && pct <= 100) ? `Row ${i+1}: enter a discount between 0 and 100%.` : '';
+        if(err){ alert(err); btn.disabled = false; return; }
+        discounts.push(clean({ minQty:min, maxQty:max || undefined, percent:pct }));
       }
-      const discounts = Object.keys(byQty).map(Number).sort((a,b)=>a-b).map(q=>({ minQty:q, percent:byQty[q] }));
+      discounts.sort((a,b)=>a.minQty-b.minQty);
+      const overlap = discounts.findIndex((t, i)=>i > 0 && (!discounts[i-1].maxQty || discounts[i-1].maxQty >= t.minQty));
+      if(overlap > 0){
+        const a = discounts[overlap-1], b = discounts[overlap];
+        alert(`The ranges ${rangeLabel(a.minQty, a.maxQty || 0)} and ${rangeLabel(b.minQty, b.maxQty || 0)} overlap. Each quantity can only be in one range.`);
+        btn.disabled = false; return;
+      }
       const rec = { unitPrices: Object.keys(unitPrices).length ? unitPrices : null, discounts: discounts.length ? discounts : null };
       const before = state.salesPricing || {};
       await db.ref().update(withLog({ [PRICING_PATH]: rec },
