@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<!-- Report-only for now: logs violations to the console without blocking. Switch to Content-Security-Policy to enforce once the console is clean during normal use. -->
+<meta http-equiv="Content-Security-Policy-Report-Only" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://www.gstatic.com https://cdnjs.cloudflare.com https://www.google.com https://www.recaptcha.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: blob: https:; connect-src 'self' https://*.googleapis.com https://ocean-hub-vessel-managem-cdca8-default-rtdb.firebaseio.com wss://ocean-hub-vessel-managem-cdca8-default-rtdb.firebaseio.com https://*.firebaseio.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com; frame-src https://www.google.com https://www.recaptcha.net; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>OCEANHUB — Sales/Contractors</title>
 <meta name="theme-color" content="#026b71">
@@ -1253,7 +1255,7 @@ function renderExpenseRows(expenses){
   return expenses.map(x=>`
     <div class="mini-row" style="align-items:center;">
       <span style="display:flex; align-items:center; gap:8px;">
-        ${x.photo ? `<img src="${x.photo}" style="width:34px; height:34px; object-fit:cover; border-radius:5px; flex-shrink:0;">` : ''}
+        ${x.photo ? `<img src="${esc(x.photo)}" style="width:34px; height:34px; object-fit:cover; border-radius:5px; flex-shrink:0;">` : ''}
         ${esc(x.description||'Expense')}
       </span>
       <span style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
@@ -1302,10 +1304,10 @@ function paymentForm(p, defaults){
       <div class="mini-row" style="padding:2px 0 12px;"><span>Travel cost (distance × rate)</span><b id="odoCalcAmount">${fmtCurrency(travelAmount)}</b></div>
       <label class="field">Odometer photo — before<input type="file" id="odoPhotoBeforeInput" accept="image/*"></label>
       <input type="hidden" name="photoBefore" id="odoPhotoBeforeHidden" value="${esc(p.photoBefore||'')}">
-      <div id="odoPhotoBeforePreview" style="margin:-4px 0 12px;">${p.photoBefore ? `<img src="${p.photoBefore}" style="max-width:160px; max-height:120px; border-radius:6px; display:block;">` : ''}</div>
+      <div id="odoPhotoBeforePreview" style="margin:-4px 0 12px;">${p.photoBefore ? `<img src="${esc(p.photoBefore)}" style="max-width:160px; max-height:120px; border-radius:6px; display:block;">` : ''}</div>
       <label class="field">Odometer photo — after<input type="file" id="odoPhotoAfterInput" accept="image/*"></label>
       <input type="hidden" name="photoAfter" id="odoPhotoAfterHidden" value="${esc(p.photoAfter||'')}">
-      <div id="odoPhotoAfterPreview" style="margin:-4px 0 12px;">${p.photoAfter ? `<img src="${p.photoAfter}" style="max-width:160px; max-height:120px; border-radius:6px; display:block;">` : ''}</div>
+      <div id="odoPhotoAfterPreview" style="margin:-4px 0 12px;">${p.photoAfter ? `<img src="${esc(p.photoAfter)}" style="max-width:160px; max-height:120px; border-radius:6px; display:block;">` : ''}</div>
     </div>
 
     <div class="detail-section" style="margin:14px 0 6px;"><h4 style="margin-bottom:0;">Miscellaneous expenses</h4></div>

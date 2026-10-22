@@ -2,6 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<!-- Report-only for now: logs violations to the console without blocking. Switch to Content-Security-Policy to enforce once the console is clean during normal use. -->
+<meta http-equiv="Content-Security-Policy-Report-Only" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://www.gstatic.com https://cdnjs.cloudflare.com https://www.google.com https://www.recaptcha.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: blob: https:; connect-src 'self' https://*.googleapis.com https://ocean-hub-vessel-managem-cdca8-default-rtdb.firebaseio.com wss://ocean-hub-vessel-managem-cdca8-default-rtdb.firebaseio.com https://*.firebaseio.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com; frame-src https://www.google.com https://www.recaptcha.net; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>OCEANHUB — Vessel Manager</title>
 <meta name="theme-color" content="#026b71">
@@ -2580,7 +2582,7 @@ function renderVessels(){
         return `
         <div class="card" data-action="view-vessel" data-id="${v.id}">
           ${v.photo
-            ? `<img src="${v.photo}" alt="" style="width:100%; height:110px; object-fit:cover; border-radius:6px; margin-bottom:10px;">`
+            ? `<img src="${esc(v.photo)}" alt="" style="width:100%; height:110px; object-fit:cover; border-radius:6px; margin-bottom:10px;">`
             : `<div style="width:100%; height:110px; border-radius:6px; margin-bottom:10px; background:var(--paper-2); display:flex; align-items:center; justify-content:center; color:var(--paper-line);"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 17l1.5-6h15L21 17"/><path d="M6 11V6h8l3 5"/></svg></div>`}
           <div class="card-top">
             <div>
@@ -2605,7 +2607,7 @@ function renderVesselDetail(id){
   if(!v) return '';
   const crew = crewForVessel(id);
   return `
-    ${v.photo ? `<img src="${v.photo}" alt="" style="width:100%; max-height:220px; object-fit:cover; border-radius:6px; margin-bottom:16px;">` : ''}
+    ${v.photo ? `<img src="${esc(v.photo)}" alt="" style="width:100%; max-height:220px; object-fit:cover; border-radius:6px; margin-bottom:16px;">` : ''}
     <div class="modal-header-row">
       <h3>${esc(v.name)}</h3>
       <div style="display:flex; gap:8px;">
@@ -4660,7 +4662,7 @@ function vesselForm(v){
     </label>
     <input type="hidden" name="photo" id="vesselPhotoHidden" value="${esc(v.photo||'')}">
     <div id="vesselPhotoPreview" style="margin:-4px 0 12px;">
-      ${v.photo ? `<img src="${v.photo}" style="max-width:200px; max-height:140px; border-radius:6px; display:block;">` : ''}
+      ${v.photo ? `<img src="${esc(v.photo)}" style="max-width:200px; max-height:140px; border-radius:6px; display:block;">` : ''}
     </div>
     ${v.photo ? `<button type="button" class="btn small ghost" id="removeVesselPhoto" style="margin:-8px 0 12px;">Remove photo</button>` : ''}
     <label class="field">Vessel name<input name="name" value="${esc(v.name)}" required></label>
