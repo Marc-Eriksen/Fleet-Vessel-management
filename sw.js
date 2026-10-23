@@ -1,6 +1,6 @@
 // OCEANHUB service worker: makes the app installable and lets the shell
 // open offline. Data still comes live from Firebase, which is never cached.
-const CACHE = 'ocean-hub-v21';
+const CACHE = 'ocean-hub-v22';
 const NETWORK_WAIT_MS = 3000;
 const SHELL = [
   './',
