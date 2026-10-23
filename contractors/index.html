@@ -512,7 +512,6 @@
 <script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-app-check-compat.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
 /* ============================= CONFIG ============================= */
 /* Same Firebase project as the vessel manager. Who sees what is decided by the
@@ -1434,6 +1433,27 @@ function paymentFromForm(fd, existing){
     odometerStart:null, odometerEnd:null, distanceKm:null, ratePerKm:null, travelAmount:null, photoBefore:'', photoAfter:'' };
 }
 
+/* jsPDF isn't needed to open the app, so it isn't in the page's script tags: it loads in the
+   background once the page has finished loading (while the sign-in screen is up). The PDF code
+   stays synchronous, so sharing still counts as part of the click; if someone gets there first,
+   they're asked to try again in a moment. */
+const JSPDF_URL = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+let jsPdfLoading = false;
+function preloadJsPdf(){
+  if(window.jspdf || jsPdfLoading) return;
+  jsPdfLoading = true;
+  const s = document.createElement('script');
+  s.src = JSPDF_URL;
+  s.onerror = ()=>{ jsPdfLoading = false; s.remove(); };
+  document.head.appendChild(s);
+}
+function getJsPdf(){
+  if(window.jspdf) return window.jspdf.jsPDF;
+  preloadJsPdf();
+  throw new Error('The PDF tool is still loading — try again in a few seconds.');
+}
+window.addEventListener('load', ()=> setTimeout(preloadJsPdf, 500));
+
 /* ============================= STATEMENT PDF ============================= */
 /* On most phones the PDF goes to the share sheet already attached; on a computer it
    downloads and WhatsApp / email opens with the message, so it's attached there. */
@@ -1446,7 +1466,7 @@ async function sendStatement(id, channel){
   const todayStr = fmtDate(localISODate(new Date()));
   let doc;
   try{
-    const { jsPDF } = window.jspdf;
+    const jsPDF = getJsPdf();
     doc = new jsPDF();
     doc.setFont('helvetica','bold'); doc.setFontSize(16);
     doc.text('OCEANHUB — Sales/Contractors', 14, 18);
@@ -1846,7 +1866,7 @@ function sendDraft(form){ const f = n => String(form[n].value||'').trim(); retur
 
 /* The order as a one-page PDF: the OCEANHUB logo on top, then the message as written. */
 function orderPdf(ct, o, d){
-  const { jsPDF } = window.jspdf;
+  const jsPDF = getJsPdf();
   const doc = new jsPDF();
   const logo = document.querySelector('.brandmark img');
   if(logo && logo.src.startsWith('data:image/png')) doc.addImage(logo.src, 'PNG', 14, 12, 30, 30);

@@ -510,7 +510,6 @@
 <script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-database-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-app-check-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/12.19.0/firebase-functions-compat.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script>
 /* ============================= STATE ============================= */
 let state = {
@@ -1372,6 +1371,27 @@ const PDFJS_WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174
 const DV_ZOOMS = [1, 1.5, 2, 3]; /* 1 = page fits the screen width */
 let pdfjsPromise = null;
 let docViewer = null; /* { token, el, blobUrl, pdf, image, zoom, fromHistory } */
+
+/* jsPDF isn't needed to open the app, so it isn't in the page's script tags: it loads in the
+   background once the page has finished loading (while the sign-in screen is up). The PDF code
+   stays synchronous, so sharing still counts as part of the click; if someone gets there first,
+   they're asked to try again in a moment. */
+const JSPDF_URL = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+let jsPdfLoading = false;
+function preloadJsPdf(){
+  if(window.jspdf || jsPdfLoading) return;
+  jsPdfLoading = true;
+  const s = document.createElement('script');
+  s.src = JSPDF_URL;
+  s.onerror = ()=>{ jsPdfLoading = false; s.remove(); };
+  document.head.appendChild(s);
+}
+function getJsPdf(){
+  if(window.jspdf) return window.jspdf.jsPDF;
+  preloadJsPdf();
+  throw new Error('The PDF tool is still loading — try again in a few seconds.');
+}
+window.addEventListener('load', ()=> setTimeout(preloadJsPdf, 500));
 
 function loadPdfJs(){
   if(!pdfjsPromise){
@@ -4147,7 +4167,7 @@ function generateCostReport(){
 
 /* ---------- PDF / CSV builders ---------- */
 function newPdf(title, lines){
-  const { jsPDF } = window.jspdf;
+  const jsPDF = getJsPdf();
   const doc = new jsPDF();
   doc.setFont('helvetica','bold'); doc.setFontSize(16);
   doc.text('OCEANHUB — Vessel Manager', 14, 18);
